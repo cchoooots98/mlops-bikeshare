@@ -1,36 +1,23 @@
-# ---- Terraform ----
+# Terraform
 **/.terraform/
 *.tfstate
 *.tfstate.*
-crash.log
-crash.*.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraformrc
-terraform.rc
-# Keep the lock file tracked (do NOT ignore):
-# .terraform.lock.hcl  (keep tracked)
 
-# ---- Python / venv / cache ----
+# Python
 .venv/
 __pycache__/
 *.pyc
-.ipynb_checkpoints/
 .pytest_cache/
 
-# ---- Node / build (if any) ----
-node_modules/
-
-# ---- IDE ----
+# IDE
 .vscode/
 .idea/
 
-# ---- OS ----
+# OS
 .DS_Store
 Thumbs.db
 
-# ---- Secrets (if any) ----
+# GitHub specific ignores (from remote)
+node_modules/
 .env
 *.pem
