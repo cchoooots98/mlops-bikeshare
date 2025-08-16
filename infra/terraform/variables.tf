@@ -6,11 +6,13 @@ variable "aws_region" {
 variable "github_owner" {
   type        = string
   description = "GitHub org/user that owns the repo"
+  default     = "cchoooots98"
 }
 
 variable "repo_name" {
   type        = string
   description = "GitHub repository name"
+  default     = "mlops-bikeshare"
 }
 
 variable "role_name" {
