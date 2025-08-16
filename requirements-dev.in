@@ -1,0 +1,6 @@
+pip-tools
+black
+ruff
+pytest
+pytest-cov
+moto[boto3]
