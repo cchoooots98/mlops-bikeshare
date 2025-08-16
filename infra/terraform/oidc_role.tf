@@ -1,23 +1,4 @@
-variable "aws_region" {
-  type    = string
-  default = "ca-central-1"
-}
 
-variable "github_owner" {
-  type = string
-}
-
-variable "repo_name" {
-  type = string
-}
-
-variable "role_name" {
-  type    = string
-  default = "gh-oidc-deployer"
-}
-
-# 获取当前账号信息
-data "aws_caller_identity" "me" {}
 
 # GitHub OIDC provider
 resource "aws_iam_openid_connect_provider" "github" {
@@ -56,31 +37,31 @@ data "aws_iam_policy_document" "assume" {
 
 # IAM Role for GitHub Actions
 resource "aws_iam_role" "gh_deployer" {
-  name               = var.role_name
-  assume_role_policy = data.aws_iam_policy_document.assume.json
+  name                 = var.role_name
+  assume_role_policy   = data.aws_iam_policy_document.assume.json
   max_session_duration = 3600
 }
 
 # 最小权限策略（单独资源，避免 inline_policy 警告）
 data "aws_iam_policy_document" "least_priv" {
   statement {
-    sid     = "STS"
-    effect  = "Allow"
-    actions = ["sts:GetCallerIdentity"]
+    sid       = "STS"
+    effect    = "Allow"
+    actions   = ["sts:GetCallerIdentity"]
     resources = ["*"]
   }
 
   statement {
-    sid     = "LogsCloudWatch"
-    effect  = "Allow"
-    actions = ["logs:*", "events:*", "cloudwatch:*"]
+    sid       = "LogsCloudWatch"
+    effect    = "Allow"
+    actions   = ["logs:*", "events:*", "cloudwatch:*"]
     resources = ["*"]
   }
 
   statement {
-    sid     = "S3Basic"
-    effect  = "Allow"
-    actions = ["s3:*"]
+    sid       = "S3Basic"
+    effect    = "Allow"
+    actions   = ["s3:*"]
     resources = ["*"]
   }
 }
@@ -92,13 +73,6 @@ resource "aws_iam_role_policy" "gh_deployer_least_priv" {
 }
 
 # 输出
-output "account_id" {
-  value = data.aws_caller_identity.me.account_id
-}
-
-output "arn" {
-  value = data.aws_caller_identity.me.arn
-}
 
 output "gh_oidc_role_arn" {
   value = aws_iam_role.gh_deployer.arn
