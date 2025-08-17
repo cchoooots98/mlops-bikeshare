@@ -1,10 +1,8 @@
 provider "aws" {
-  region = var.aws_region
+  region  = var.aws_region
+  profile = var.aws_profile
+
   default_tags {
-    tags = {
-      Project     = var.repo_name
-      Environment = var.env
-      ManagedBy   = "terraform"
-    }
+    tags = local.default_tags
   }
 }

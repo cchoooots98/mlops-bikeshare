@@ -3,6 +3,16 @@ variable "aws_region" {
   default = "ca-central-1"
 }
 
+variable "aws_profile" {
+  type    = string
+  default = "Shirley"
+}
+
+variable "sagemaker_endpoint_name" {
+  type    = string
+  default = "" # keep empty until you actually deploy an endpoint
+}
+
 variable "github_owner" {
   type        = string
   description = "GitHub org/user that owns the repo"
@@ -40,4 +50,23 @@ variable "tf_lock_table" {
 variable "tf_state_key" {
   type    = string
   default = "infra/terraform.tfstate"
+}
+
+
+locals {
+  project    = var.repo_name
+  account_id = data.aws_caller_identity.current.account_id
+  # Data lake bucket: <repo>-<account>-<region>
+  data_bucket_name     = "${var.repo_name}-${local.account_id}-${var.aws_region}"
+  cw_namespace         = "MLOps/Bikeshare"
+  glue_db_name         = replace(var.repo_name, "-", "_")
+  ecr_repo_name        = var.repo_name
+  lambda_function_name = "${var.repo_name}-placeholder"
+  s3_prefixes          = ["raw/", "curated/", "features/", "inference/", "monitoring/"]
+
+  default_tags = {
+    Project     = var.repo_name
+    Environment = var.env
+    ManagedBy   = "terraform"
+  }
 }
