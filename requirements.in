@@ -1,7 +1,3 @@
-pandas
-numpy
-scikit-learn
-mlflow
 boto3
-sagemaker
-pyyaml
+requests
+pydantic>=2,<3

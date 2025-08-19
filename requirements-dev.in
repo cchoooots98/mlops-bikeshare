@@ -1,6 +1,5 @@
-pip-tools
-black
-ruff
+-r requirements.in     
 pytest
-pytest-cov
-moto[boto3]
+black
+moto[s3]>=5
+pip-tools
