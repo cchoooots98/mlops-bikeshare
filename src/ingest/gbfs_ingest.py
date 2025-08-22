@@ -1,7 +1,14 @@
 import os, json, gzip, io, time
 from datetime import datetime, timezone
 import requests, boto3, botocore
-from .validators import StationStatusPayload, StationInfoPayload
+from .validators import validate_station_status, validate_station_info
+
+from datetime import datetime, timezone
+
+def floor_to_5min(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return ts.replace(minute=(ts.minute // 5) * 5)
+
 
 BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "nyc")
@@ -13,10 +20,15 @@ GBFS_ROOT = {
 
 s3 = boto3.client("s3")
 
-def _dt_prefix(epoch_sec:int)->str:
-    # 以源 last_updated 对齐分钟；统一 UTC
+# def _dt_prefix(epoch_sec:int)->str:
+#     # 以源 last_updated 对齐分钟；统一 UTC
+#     dt = datetime.fromtimestamp(epoch_sec, tz=timezone.utc)
+#     return dt.strftime("dt=%Y-%m-%d-%H-%M")
+def _dt_prefix_from_epoch(epoch_sec: int) -> str:
+    # 以源 last_updated 为准并向下取整到 5 分钟，统一 UTC
     dt = datetime.fromtimestamp(epoch_sec, tz=timezone.utc)
-    return dt.strftime("dt=%Y-%m-%d-%H-%M")
+    dt5 = floor_to_5min(dt)
+    return dt5.strftime("dt=%Y-%m-%d-%H-%M")
 
 def _exists(key:str)->bool:
     try:
@@ -49,10 +61,10 @@ def handler(event, context):
     info   = requests.get(info_url, timeout=10).json()
 
     # 校验（失败抛异常 -> 被捕获 -> 写错误日志）
-    sp = StationStatusPayload(**status)
-    ip = StationInfoPayload(**info)
+    validate_station_status(status)
+    validate_station_info(info)
 
-    dt_prefix = _dt_prefix(status["last_updated"])
+    dt_prefix = _dt_prefix_from_epoch(status["last_updated"])
     base = f"raw/city={CITY}/{dt_prefix}/"
     status_key = base + "station_status.json.gz"
     info_key   = base + "station_information.json.gz"

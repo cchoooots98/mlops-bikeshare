@@ -2,7 +2,12 @@ import os, json, gzip, io, time
 from datetime import datetime, timedelta, timezone
 from typing import Tuple
 import requests, boto3
-from .validators import MeteostatPayload  # 保持你的 validators 不变
+from .validators import validate_weather
+
+def floor_to_5min(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return ts.replace(minute=(ts.minute // 5) * 5)
+
 
 BUCKET = os.getenv("BUCKET")
 CITY   = os.getenv("CITY", "nyc")
@@ -49,7 +54,8 @@ def _fetch_meteostat(lat:float, lon:float, start:datetime, end:datetime)->dict:
         raise RuntimeError(f"Meteostat HTTP {r.status_code}: {r.text[:300]}")
     data = r.json()
     # 轻校验
-    MeteostatPayload(**data)
+    # MeteostatPayload(**data)
+    validate_weather(data)
     return data
 
 def _fetch_open_meteo(lat:float, lon:float, start:datetime, end:datetime)->dict:
@@ -86,7 +92,8 @@ def _fetch_open_meteo(lat:float, lon:float, start:datetime, end:datetime)->dict:
         })
     data = {"meta": {"source": "open-meteo"}, "data": rows}
     # 仍然用你的 Pydantic 模型做轻校验
-    MeteostatPayload(**data)
+    #MeteostatPayload(**data)
+    validate_weather(data)
     return data
 
 def handler(event, context):
@@ -107,8 +114,8 @@ def handler(event, context):
         print(f"[weather_ingest] Meteostat failed: {e}. Falling back to Open‑Meteo.")
         payload = _fetch_open_meteo(lat, lon, start, end)
         source = "open-meteo"
-
-    dt_prefix = _utc_floor_minute(now).strftime("dt=%Y-%m-%d-%H-%M")
+    dt5 = floor_to_5min(now)
+    dt_prefix = dt5.strftime("dt=%Y-%m-%d-%H-%M")
     key = f"raw/city={CITY}/{dt_prefix}/weather_point_hourly.json.gz"
     # 附加元数据
     payload["_meta_ingest"] = {"city": CITY, "source": source, "ingested_utc": int(time.time())}

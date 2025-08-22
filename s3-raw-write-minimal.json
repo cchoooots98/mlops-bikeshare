@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListBucketForAllowedPrefixes",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "raw/*",
+            "ingest_errors/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadWriteObjectsUnderAllowedPrefixes",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1/raw/*",
+        "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1/ingest_errors/*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "Id": "t1",
+    "Arn": "arn:aws:lambda:ca-central-1:387706002632:function:mlops-bikeshare-gbfs-ingest"
+  },
+  {
+    "Id": "t2",
+    "Arn": "arn:aws:lambda:ca-central-1:387706002632:function:mlops-bikeshare-weather-ingest"
+  }
+]
