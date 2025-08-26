@@ -49,17 +49,24 @@ def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     """
     return query_df(cnx, sql)
 
-def load_latest_info(cnx, city,db) -> pd.DataFrame:
+def load_latest_info(cnx, city, db) -> pd.DataFrame:
+    # Read from the UNNESTed view. This view already explodes $.data.stations.
+    # We take the latest dt for the given city and return one row per station.
     sql = f"""
-    WITH t AS (SELECT city, dt, json_row FROM {db}.station_information_raw WHERE city='{city}'),
-         m AS (SELECT max(dt) AS mdt FROM t)
-    SELECT
-      json_extract_scalar(json_row,'$.station_id') AS station_id,
-      json_extract_scalar(json_row,'$.name')       AS name,
-      CAST(json_extract_scalar(json_row,'$.capacity') AS integer) AS capacity,
-      CAST(json_extract_scalar(json_row,'$.lat') AS double)  AS lat,
-      CAST(json_extract_scalar(json_row,'$.lon') AS double)  AS lon
-    FROM t, m WHERE t.dt = m.mdt
+    WITH latest AS (
+      SELECT max(dt) AS mdt
+      FROM {db}.v_station_information
+      WHERE city = '{city}'
+    )
+    SELECT i.city,
+           i.station_id,
+           i.name,
+           CAST(i.capacity AS integer) AS capacity,
+           CAST(i.lat AS double)       AS lat,
+           CAST(i.lon AS double)       AS lon
+    FROM {db}.v_station_information i, latest l
+    WHERE i.city = '{city}'
+      AND i.dt = l.mdt
     """
     return query_df(cnx, sql)
 
@@ -69,6 +76,7 @@ def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     sql = f"""
     SELECT city,
            dt,
+           ts,
            temp_c,
            prcp_mm AS precip_mm,
            wind_kph,
@@ -88,64 +96,126 @@ def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
 
 def to_rad(x): return np.deg2rad(x)
 
-def build_neighbors(info_df, k=5, max_radius_km=0.8) -> pd.DataFrame:
-    coords = np.vstack([to_rad(info_df["lat"].values), to_rad(info_df["lon"].values)]).T
+def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.8) -> pd.DataFrame:
+    """
+    Build a neighbor table using haversine distance (via BallTree).
+    Protect against None/NaN coords and very small networks.
+    """
+    if info_df is None or info_df.empty:
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+
+    # Coerce to numeric and drop invalid coords
+    info = info_df.copy()
+    for col in ("lat", "lon"):
+        info[col] = pd.to_numeric(info[col], errors="coerce")
+    info = info.dropna(subset=["lat", "lon"])
+    info = info[np.isfinite(info["lat"]) & np.isfinite(info["lon"])]
+
+    # If we have < 2 stations after cleaning, return empty
+    if len(info) < 2:
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+
+    # Degrees -> radians with guaranteed float dtype to avoid NoneType errors
+    lat_rad = np.deg2rad(np.asarray(info["lat"].values, dtype="float64"))
+    lon_rad = np.deg2rad(np.asarray(info["lon"].values, dtype="float64"))
+    coords = np.vstack([lat_rad, lon_rad]).T
+
+    # Build BallTree with haversine metric (expects radians)
     tree = BallTree(coords, metric="haversine")
-    dist, idx = tree.query(coords, k=k+1)  # 包含自身
+
+    # Query k+1 (self + k neighbors)
+    k_eff = int(min(k, max(1, len(info) - 1)))
+    dist, idx = tree.query(coords, k=k_eff + 1)  # includes self at column 0
     dist_km = dist * EARTH_RADIUS_KM
-    pairs = []
-    for i, (di, ii) in enumerate(zip(dist_km, idx)):
-        for d, j in zip(di[1:], ii[1:]):  # 去自身
-            if d <= max_radius_km:
-                pairs.append((info_df.iloc[i]["station_id"], info_df.iloc[j]["station_id"], d))
-    if not pairs:
-        # 回退：没命中半径，用最近 k 个
-        for i, (di, ii) in enumerate(zip(dist_km, idx)):
-            for d, j in zip(di[1:k+1], ii[1:k+1]):
-                pairs.append((info_df.iloc[i]["station_id"], info_df.iloc[j]["station_id"], d))
-    nbr = pd.DataFrame(pairs, columns=["src_id","nbr_id","dist_km"])
-    nbr["w"] = 1.0 / (nbr["dist_km"] + 1e-6)
+
+    rows = []
+    station_ids = info["station_id"].values
+    for i in range(len(info)):
+        # skip self at j=0
+        for d, j in zip(dist_km[i, 1:], idx[i, 1:]):
+            # respect radius if provided
+            if max_radius_km and d > max_radius_km:
+                continue
+            rows.append((station_ids[i], station_ids[j], float(d)))
+
+        # fallback: if nothing within radius, take closest k_eff
+        if not any(r[0] == station_ids[i] for r in rows):
+            for d, j in zip(dist_km[i, 1:], idx[i, 1:]):
+                rows.append((station_ids[i], station_ids[j], float(d)))
+
+    if not rows:
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+
+    nbr = pd.DataFrame(rows, columns=["src_id", "nbr_id", "dist_km"])
+
+    # inverse-distance weights with row normalization
+    eps = 1e-6
+    nbr["w"] = 1.0 / (nbr["dist_km"] + eps)
     nbr["w"] = nbr["w"] / nbr.groupby("src_id")["w"].transform("sum")
     return nbr
 
-def align_weather_5min(weather_df, start_ts, end_ts) -> pd.DataFrame:
-    # Align hourly weather to 5-minute grid by forward-fill.
-    if weather_df.empty:
-        idx5 = pd.date_range(start=start_ts, end=end_ts, freq="5min", tz="UTC")
-        # Build an empty skeleton for all weather columns we expect downstream
-        return pd.DataFrame({
-            "dt": idx5.strftime("%Y-%m-%d-%H-%M"),
-            "temp_c": np.nan,
-            "precip_mm": np.nan,
-            "wind_kph": np.nan,
-            "rhum_pct": np.nan,
-            "pres_hpa": np.nan,
-            "wind_dir_deg": np.nan,
-            "wind_gust_kph": np.nan,
-            "snow_mm": np.nan,
-            "weather_code": np.nan,
-        })
+def _city_timezone(city: str) -> str:
+    city = (city or "").lower()
+    if city in ("nyc", "new_york", "new-york", "new york", "newyork"):
+        return "America/New_York"
+    # add more cities here if you expand the project
+    return "UTC"
 
-    w = weather_df.copy()
-    # Input dt is partition string 'YYYY-MM-DD-HH-MM'; we re-create a timestamp index
-    w["ts"] = pd.to_datetime(w["dt"], format="%Y-%m-%d-%H-%M", utc=True)
-
-    # Reindex only the columns we want to propagate; forward fill to 5-minute grid
+def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame:
+    """
+    将逐小时的 weather（本地时区）对齐到 UTC 5分钟网格，使用 merge_asof 向后填充，避免 resample+reindex 带来的对齐空洞。
+    """
+    # 5分钟 UTC 目标网格
+    idx5 = pd.date_range(start=start_ts, end=end_ts, freq="5min", tz="UTC")
     cols = [
         "temp_c", "precip_mm", "wind_kph",
         "rhum_pct", "pres_hpa", "wind_dir_deg",
-        "wind_gust_kph", "snow_mm", "weather_code"
+        "wind_gust_kph", "snow_mm", "weather_code",
     ]
-    w = (
-        w.set_index("ts")
-         .sort_index()
-         .reindex(columns=cols)
-         .resample("5min").ffill()
-         .reset_index()
-    )
-    w["dt"] = w["ts"].dt.strftime("%Y-%m-%d-%H-%M")
-    return w.drop(columns=["ts"])
 
+    if weather_df.empty:
+        return pd.DataFrame({"dt": idx5.strftime("%Y-%m-%d-%H-%M"), **{c: np.nan for c in cols}})
+
+    w = weather_df.copy()
+
+    # 1) 解析 ts 并本地化到城市时区 → 转换到 UTC
+    tz = _city_timezone(city)
+    w["ts"] = pd.to_datetime(w["ts"], errors="coerce")
+    w = w.dropna(subset=["ts"])
+    # 注意：meteostat 的 ts 是“本地小时”，这里先本地化再转 UTC
+    w["ts_utc"] = (
+        w["ts"]
+        .dt.tz_localize(tz, nonexistent="shift_forward", ambiguous="infer")
+        .dt.tz_convert("UTC")
+    )
+
+    # 2) 只保留所需列并去重（若同一小时多条，保留最后一条）
+    w = (
+        w[["ts_utc"] + cols]
+        .sort_values("ts_utc")
+        .drop_duplicates(subset=["ts_utc"], keep="last")
+    )
+
+    # 3) 与 5min 网格做 asof 向后填充（backward），得到逐 5 分钟值
+    grid = pd.DataFrame({"ts": idx5})
+    joined = pd.merge_asof(
+        left=grid.sort_values("ts"),
+        right=w.sort_values("ts_utc"),
+        left_on="ts",
+        right_on="ts_utc",
+        direction="backward",
+        tolerance=pd.Timedelta("6h"),  # 最多向后接受 6 小时（常见逐小时数据很安全）
+    )
+
+    # 4) 生成 dt 分区键
+    joined["dt"] = joined["ts"].dt.strftime("%Y-%m-%d-%H-%M")
+    out = joined[["dt"] + cols].copy()
+
+    # 5) 诊断打印（可留可去）
+    nn = {c: int(out[c].notna().sum()) for c in cols}
+    print(f"[DEBUG] weather5 asof non-null counts: {nn}")
+
+    return out
 
 def add_time_features(df: pd.DataFrame, city: str) -> pd.DataFrame:
     ts = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", utc=True)
@@ -157,10 +227,15 @@ def add_time_features(df: pd.DataFrame, city: str) -> pd.DataFrame:
     df["is_holiday"] = ts.dt.date.map(lambda d: float(d in holiday))
     return df
 
-def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2) -> pd.DataFrame:
+def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc") -> pd.DataFrame:
     df = status.merge(info, on="station_id", how="left")
+    if "city" not in df.columns:
+        df["city"] = city
+
     df["util_bikes"] = (df["bikes"] / df["capacity"].replace(0, np.nan)).clip(0,1).fillna(0.0)
     df["util_docks"] = (df["docks"] / df["capacity"].replace(0, np.nan)).clip(0,1).fillna(0.0)
+    df[["util_bikes","util_docks"]] = df[["util_bikes","util_docks"]].astype("float64")
+
     df = add_time_features(df, df["city"].iloc[0])
 
     df = df.sort_values(["station_id","dt"])
@@ -173,7 +248,15 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2) -> pd.Dat
             g[f"roll{name}_bikes_mean"] = g["bikes"].rolling(win, min_periods=1).mean()
             g[f"roll{name}_docks_mean"] = g["docks"].rolling(win, min_periods=1).mean()
         return g
-    df = df.groupby("station_id", group_keys=False).apply(_rolling)
+    
+    df = (
+        df.groupby("station_id", group_keys=False)
+        .apply(_rolling)
+        .reset_index(drop=False)
+    )
+    if "station_id" not in df.columns and "station_id" in (df.index.names or []):
+        df = df.reset_index()
+    
 
     # 邻域聚合（按时间对齐）
     neigh = df[["station_id","dt","bikes","docks"]]\
@@ -189,8 +272,35 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2) -> pd.Dat
     df["nbr_docks_weighted"] = df["wd"].fillna(0.0)
     df = df.drop(columns=["wb","wd"])
 
-    # 天气（5min 对齐）
-    df = df.merge(weather5, on="dt", how="left")
+    # --- Join weather by time using merge_asof (robust to timezone and 5-min edge) ---
+    # 1) Parse status dt -> naive datetime, assume it represents *UTC* wall clock in your lake
+    ts_status = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
+    df = df.assign(ts_utc=ts_status).sort_values("ts_utc")
+
+    # 2) Weather grid: convert its dt to UTC timestamp as well
+    w = weather5.copy()
+    w["ts_utc"] = pd.to_datetime(w["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
+    w = w.sort_values("ts_utc")
+
+    # 3) As-of backward join: for each status ts, take the latest weather at or before it
+    #    Tolerance 15 minutes to be safe when status is not perfectly on the 5-min grid
+    tol = pd.Timedelta("15min")
+    joined = pd.merge_asof(
+        left=df,
+        right=w.drop(columns=["dt"]),  # avoid duplicate dt after join
+        on="ts_utc",
+        direction="backward",
+        tolerance=tol,
+    )
+
+    # 4) Quick diagnostics
+    weather_cols = ["temp_c","precip_mm","wind_kph","rhum_pct","pres_hpa","wind_dir_deg","wind_gust_kph","snow_mm","weather_code"]
+    hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
+    print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; "
+          f"non-null counts: {{c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}}")
+
+    # 5) Drop helper column
+    df = joined.drop(columns=["ts_utc"])
 
     # 生成 t+30 标签与回归目标（严格只 shift 目标，避免时间泄漏）
     steps = horizon_min // 5
@@ -200,7 +310,11 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2) -> pd.Dat
         g["y_stockout_bikes_30"] = (g["target_bikes_t30"] <= threshold).astype(float)
         g["y_stockout_docks_30"] = (g["target_docks_t30"] <= threshold).astype(float)
         return g
-    df = df.groupby("station_id", group_keys=False).apply(_future)
+    df = (
+        df.groupby("station_id", group_keys=False)
+        .apply(_future)
+        .reset_index(drop=False)
+    )
     return df
 
 def write_parquet_partitioned(df: pd.DataFrame, bucket: str):
@@ -306,11 +420,26 @@ def main():
     if status.empty:
         raise RuntimeError("no status rows in the chosen window")
     info = load_latest_info(cnx, args.city,db)
+
     weather = load_weather(cnx, args.city, start_ts, end_ts,db)
-    weather5 = align_weather_5min(weather, start_ts, end_ts)
+    weather5 = align_weather_5min(weather, start_ts, end_ts,args.city)
+
+    print(f"[DEBUG] weather rows: {len(weather)}; weather5 rows: {len(weather5)}; "
+      f"non-null temp_c in weather5: {weather5['temp_c'].notna().sum()}; "
+      f"non-null temp_c in weather: {weather['temp_c'].notna().sum()}")
+    
+
+    bad = info[info["lat"].isna() | info["lon"].isna()]
+    if not bad.empty:
+        print(f"[WARN] Dropping {len(bad)} stations with missing lat/lon before neighbor build.")
+
     nbr = build_neighbors(info, args.neighbors, args.max_radius_km)
 
-    df = engineer(status, info, weather5, nbr, args.horizon, args.threshold)
+    df = engineer(status, info, weather5, nbr, args.horizon, args.threshold, args.city)
+
+    tmp = df["temp_c"].notna().mean() if "temp_c" in df.columns else 0.0
+    print(f"[DEBUG] after merge, temp_c non-null ratio: {tmp:.1%}")
+
 
     keep_cols = (["city","dt","station_id","name","capacity","lat","lon","bikes","docks"]
                  + FEATURE_COLUMNS + LABEL_COLUMNS)

@@ -38,13 +38,24 @@ def validate_feature_df(df: pd.DataFrame, missing_rate_threshold: float = 0.01):
     if (df["capacity"] < 0).any():
         raise ValueError(f"capacity must be >=0")
     
-    # Utilization range
-    for c in ["util_bikes","util_docks"]:
-        if not (df[c] >= 0).fillna(True) & (df[c] <= 1).fillna(True).all():
-            raise ValueError(f"{c} must be in [0,1]")
-    
-    # 3. The overall feature missing rate is < 1%
-    feat = df[FEATURE_COLUMNS]
+     # utilization must be in [0,1] (ignore NaNs)
+    for c in ["util_bikes", "util_docks"]:
+        s = pd.to_numeric(df[c], errors="coerce")
+        mask = s.isna() | ((s >= 0) & (s <= 1))
+        if not mask.all():
+            bad = int((~mask).sum())
+            raise ValueError(f"{c} must be in [0,1]; {bad} values out of range")
+        
+
+ 
+    # --- NEW STEP: drop all-NaN feature columns ---
+    feat = df[FEATURE_COLUMNS].copy()
+    all_nan_cols = [c for c in feat.columns if feat[c].isna().all()]
+    if all_nan_cols:
+        print(f"[INFO] Dropping {len(all_nan_cols)} all-NaN feature columns: {all_nan_cols}")
+        feat = feat.drop(columns=all_nan_cols)
+
+    # 3. The overall feature missing rate is < threshold
     miss = feat.isna().mean().mean()
     if miss > missing_rate_threshold:
         raise ValueError(f"feature missing rate {miss:.2%} > {missing_rate_threshold:.2%}")
