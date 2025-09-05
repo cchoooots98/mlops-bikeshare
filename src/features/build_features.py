@@ -228,97 +228,115 @@ def add_time_features(df: pd.DataFrame, city: str) -> pd.DataFrame:
     return df
 
 def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc") -> pd.DataFrame:
+    # --- base join ---
     df = status.merge(info, on="station_id", how="left")
     if "city" not in df.columns:
         df["city"] = city
 
-    df["util_bikes"] = (df["bikes"] / df["capacity"].replace(0, np.nan)).clip(0,1).fillna(0.0)
-    df["util_docks"] = (df["docks"] / df["capacity"].replace(0, np.nan)).clip(0,1).fillna(0.0)
-    df[["util_bikes","util_docks"]] = df[["util_bikes","util_docks"]].astype("float64")
+    # keep a consistent ordering and a compact dtype early
+    df = df.sort_values(["station_id", "dt"]).reset_index(drop=True)
+    cap = pd.to_numeric(df["capacity"], errors="coerce").replace(0, np.nan)
 
+    df["util_bikes"] = ((df["bikes"] / cap).clip(0, 1).fillna(0.0)).astype("float32")
+    df["util_docks"] = ((df["docks"] / cap).clip(0, 1).fillna(0.0)).astype("float32")
+
+    # --- time features ---
     df = add_time_features(df, df["city"].iloc[0])
 
-    df = df.sort_values(["station_id","dt"])
+    # --- rolling features (no groupby.apply) ---
+    gb = df.groupby("station_id", sort=False, observed=True)
+    df["delta_bikes_5m"] = gb["bikes"].diff().fillna(0).astype("float32")
+    df["delta_docks_5m"] = gb["docks"].diff().fillna(0).astype("float32")
 
-    def _rolling(g: pd.DataFrame) -> pd.DataFrame:
-        g["delta_bikes_5m"] = g["bikes"].diff().fillna(0)
-        g["delta_docks_5m"] = g["docks"].diff().fillna(0)
-        for win, name in [(3,"15"),(6,"30"),(12,"60")]:
-            g[f"roll{name}_net_bikes"] = g["delta_bikes_5m"].rolling(win, min_periods=1).sum()
-            g[f"roll{name}_bikes_mean"] = g["bikes"].rolling(win, min_periods=1).mean()
-            g[f"roll{name}_docks_mean"] = g["docks"].rolling(win, min_periods=1).mean()
-        return g
-    
-    df = (
-        df.groupby("station_id", group_keys=False)
-        .apply(_rolling)
-        .reset_index(drop=False)
-    )
-    if "station_id" not in df.columns and "station_id" in (df.index.names or []):
-        df = df.reset_index()
-    
+    for win, name in [(3, "15"), (6, "30"), (12, "60")]:
+        df[f"roll{name}_net_bikes"] = (
+            gb["delta_bikes_5m"].rolling(win, min_periods=1).sum()
+              .reset_index(level=0, drop=True).astype("float32")
+        )
+        df[f"roll{name}_bikes_mean"] = (
+            gb["bikes"].rolling(win, min_periods=1).mean()
+              .reset_index(level=0, drop=True).astype("float32")
+        )
+        df[f"roll{name}_docks_mean"] = (
+            gb["docks"].rolling(win, min_periods=1).mean()
+              .reset_index(level=0, drop=True).astype("float32")
+        )
 
-    # 邻域聚合（按时间对齐）
-    neigh = df[["station_id","dt","bikes","docks"]]\
-            .rename(columns={"station_id":"nbr_id","bikes":"nbr_bikes","docks":"nbr_docks"})
-    nbr_full = (df[["station_id","dt"]].rename(columns={"station_id":"src_id"})
-                .merge(nbr.merge(neigh, on="nbr_id", how="left"), on=["src_id","dt"], how="left"))
-    agg = (nbr_full
-           .assign(wb=lambda x: x["w"]*x["nbr_bikes"], wd=lambda x: x["w"]*x["nbr_docks"])
-           .groupby(["src_id","dt"], as_index=False)[["wb","wd"]].sum()
-           .rename(columns={"src_id":"station_id"}))
-    df = df.merge(agg, on=["station_id","dt"], how="left")
-    df["nbr_bikes_weighted"] = df["wb"].fillna(0.0)
-    df["nbr_docks_weighted"] = df["wd"].fillna(0.0)
-    df = df.drop(columns=["wb","wd"])
+    # --- neighbor aggregation (skip if no neighbors) ---
+    if nbr is not None and not nbr.empty:
+        neigh = (
+            df[["station_id", "dt", "bikes", "docks"]]
+            .rename(columns={"station_id": "nbr_id", "bikes": "nbr_bikes", "docks": "nbr_docks"})
+        )
+        nbr_full = (
+            df[["station_id", "dt"]].rename(columns={"station_id": "src_id"})
+            .merge(nbr, on="src_id", how="left")
+            .merge(neigh, on=["nbr_id", "dt"], how="left")
+        )
+        agg = (nbr_full
+               .assign(wb=lambda x: x["w"] * x["nbr_bikes"], wd=lambda x: x["w"] * x["nbr_docks"])
+               .groupby(["src_id", "dt"], as_index=False)[["wb", "wd"]].sum()
+               .rename(columns={"src_id": "station_id"}))
+        df = df.merge(agg, on=["station_id", "dt"], how="left")
+        df["nbr_bikes_weighted"] = df["wb"].fillna(0.0).astype("float32")
+        df["nbr_docks_weighted"] = df["wd"].fillna(0.0).astype("float32")
+        df = df.drop(columns=["wb", "wd"])
+    else:
+        df["nbr_bikes_weighted"] = np.float32(0.0)
+        df["nbr_docks_weighted"] = np.float32(0.0)
 
-    # --- Join weather by time using merge_asof (robust to timezone and 5-min edge) ---
-    # 1) Parse status dt -> naive datetime, assume it represents *UTC* wall clock in your lake
+    # --- weather join via asof ---
     ts_status = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
     df = df.assign(ts_utc=ts_status).sort_values("ts_utc")
 
-    # 2) Weather grid: convert its dt to UTC timestamp as well
     w = weather5.copy()
     w["ts_utc"] = pd.to_datetime(w["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
     w = w.sort_values("ts_utc")
 
-    # 3) As-of backward join: for each status ts, take the latest weather at or before it
-    #    Tolerance 15 minutes to be safe when status is not perfectly on the 5-min grid
     tol = pd.Timedelta("15min")
     joined = pd.merge_asof(
         left=df,
-        right=w.drop(columns=["dt"]),  # avoid duplicate dt after join
+        right=w.drop(columns=["dt"]),  # avoid duplicate dt col
         on="ts_utc",
         direction="backward",
         tolerance=tol,
     )
 
-    # 4) Quick diagnostics
+    # fixed debug print
     weather_cols = ["temp_c","precip_mm","wind_kph","rhum_pct","pres_hpa","wind_dir_deg","wind_gust_kph","snow_mm","weather_code"]
     hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
-    print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; "
-          f"non-null counts: {{c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}}")
+    counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
+    print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; non-null counts: {counts}")
 
-    # 5) Drop helper column
+    # 🔧 Impute city-level weather gaps (safe because weather is city-level)
+    joined = joined.sort_values("ts_utc")
+    for c in weather_cols:
+        if c in joined.columns:
+            joined[c] = (
+                joined[c]
+                .astype("float32", copy=False)
+                .ffill()
+                .bfill()
+                .fillna(0.0)     # still missing → 0
+                .astype("float32", copy=False)
+            )
+
     df = joined.drop(columns=["ts_utc"])
 
-    # 生成 t+30 标签与回归目标（严格只 shift 目标，避免时间泄漏）
+    # --- future targets (no groupby.apply, no reset_index copy) ---
     steps = horizon_min // 5
-    def _future(g: pd.DataFrame) -> pd.DataFrame:
-        g["target_bikes_t30"] = g["bikes"].shift(-steps)
-        g["target_docks_t30"] = g["docks"].shift(-steps)
-        g["y_stockout_bikes_30"] = (g["target_bikes_t30"] <= threshold).astype(float)
-        g["y_stockout_docks_30"] = (g["target_docks_t30"] <= threshold).astype(float)
-        return g
-    df = (
-        df.groupby("station_id", group_keys=False)
-        .apply(_future)
-        .reset_index(drop=False)
-    )
+    gb2 = df.groupby("station_id", sort=False, observed=True)
+    df["target_bikes_t30"] = gb2["bikes"].shift(-steps)
+    df["target_docks_t30"] = gb2["docks"].shift(-steps)
+    df["y_stockout_bikes_30"] = (df["target_bikes_t30"] <= threshold).astype("float32")
+    df["y_stockout_docks_30"] = (df["target_docks_t30"] <= threshold).astype("float32")
+
     return df
 
 def write_parquet_partitioned(df: pd.DataFrame, bucket: str):
-    # 写本地临时文件再上传 S3（避免小文件过多可先按天/小时分桶，这里按 dt 直接分区）
+    # Write local temporary files and then upload them to S3 
+    # (to avoid too many small files, you can first divide them into buckets by day or hour. 
+    # Here, we directly partition by dt)
     s3 = boto3.client("s3")
     for (city, dt_val), g in df.groupby(["city","dt"]):
         table_path = f"features/city={city}/dt={dt_val}/part-0.parquet"
@@ -417,8 +435,14 @@ def main():
         start_ts = (end_dt - timedelta(days=14)).strftime("%Y-%m-%d %H:%M")
 
     status = load_status(cnx, args.city, start_ts, end_ts,db)
+
     if status.empty:
         raise RuntimeError("no status rows in the chosen window")
+    n_dt = status["dt"].nunique()
+    if n_dt < 100:  # 例如至少要有 ~8 小时
+        raise RuntimeError(f"too few status snapshots in window: dt_nunique={n_dt}. "
+                        f"Check your ingestion or widen --start/--end.")
+
     info = load_latest_info(cnx, args.city,db)
 
     weather = load_weather(cnx, args.city, start_ts, end_ts,db)
@@ -444,6 +468,9 @@ def main():
     keep_cols = (["city","dt","station_id","name","capacity","lat","lon","bikes","docks"]
                  + FEATURE_COLUMNS + LABEL_COLUMNS)
     out = df[keep_cols].copy()
+
+    # Drop rows that can't have labels by definition (tail after shift)
+    out = out.dropna(subset=["target_bikes_t30", "target_docks_t30"])
 
     # 质量校验（延续你 validators 的风格）
     validate_feature_df(out)
