@@ -1,0 +1,15 @@
+artifact_uri: file:///E:/%E7%AE%97%E6%B3%95%E8%87%AA%E5%AD%A6/End2EndProject/mlops-bikeshare/mlruns/682360364488878753/dd6bf2b29dc74ab58495ea59a9f846a9/artifacts
+end_time: 1757054024820
+entry_point_name: ''
+experiment_id: '682360364488878753'
+lifecycle_stage: active
+run_id: dd6bf2b29dc74ab58495ea59a9f846a9
+run_name: xgboost-y_stockout_bikes_30
+run_uuid: dd6bf2b29dc74ab58495ea59a9f846a9
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1757053754006
+status: 3
+tags: []
+user_id: cchoooots

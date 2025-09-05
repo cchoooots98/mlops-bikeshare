@@ -1,0 +1,9 @@
+digest: 2363844d
+name: dataset
+profile: '{"features_shape": [3592644, 25], "features_size": 89816100, "features_nbytes":
+  359264400}'
+schema: '{"mlflow_tensorspec": {"features": "[{\"type\": \"tensor\", \"tensor-spec\":
+  {\"dtype\": \"float32\", \"shape\": [-1, 25]}}]", "targets": null}}'
+source: '{"tags": {"mlflow.user": "cchoooots", "mlflow.source.name": "E:\\\u7b97\u6cd5\u81ea\u5b66\\End2EndProject\\mlops-bikeshare\\src\\training\\train.py",
+  "mlflow.source.type": "LOCAL", "mlflow.source.git.commit": "9dd246a4b7cebbead7a14c9bf4159f6e72cc179f"}}'
+source_type: code

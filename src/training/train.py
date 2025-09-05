@@ -34,7 +34,7 @@ import seaborn as sns
 from pyathena import connect
 
 # Project schema (feature list, labels, validation helper)
-from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
+from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS,REQUIRED_BASE, validate_feature_df
 
 
 # ------------------------
@@ -80,18 +80,61 @@ def athena_conn(region: str, workgroup: str, s3_staging_dir: Optional[str], sche
     return connect(region_name=region, work_group=workgroup, schema_name=schema_name)
 
 
-def load_features_offline(cnx, city: str, start_ts: str, end_ts: str, db: str) -> pd.DataFrame:
+# def load_features_offline(cnx, city: str, start_ts: str, end_ts: str, db: str) -> pd.DataFrame:
+#     """
+#     Read a time window from the Athena external table features_offline (Step 3 output).
+#     """
+#     sql = f"""
+#     SELECT *
+#     FROM {db}.features_offline
+#     WHERE city = '{city}'
+#       AND parse_datetime(dt, 'yyyy-MM-dd-HH-mm')
+#           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
+#     """
+#     return pd.read_sql(sql, cnx)
+
+def list_unique_dt(cnx, db: str, city: str, start_ts: str, end_ts: str) -> list:
     """
-    Read a time window from the Athena external table features_offline (Step 3 output).
+    Fetch only the distinct 'dt' strings in the requested window.
+    This is tiny (minutes) compared to full rows.
     """
     sql = f"""
-    SELECT *
+    SELECT DISTINCT dt
     FROM {db}.features_offline
     WHERE city = '{city}'
       AND parse_datetime(dt, 'yyyy-MM-dd-HH-mm')
           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
+    ORDER BY dt
+    """
+    # This result is small; safe to load
+    s = pd.read_sql(sql, cnx)["dt"].tolist()
+    return s
+
+
+def load_slice(cnx, db: str, city: str, features: list, labels: list, dt_cond_sql: str) -> pd.DataFrame:
+    """
+    Load a train OR valid slice with all schema-required columns:
+    REQUIRED_BASE + features + all labels.
+    We quote & alias every identifier to keep exact column names.
+    """
+    # Build the select list in the schema order
+    select_cols = list(REQUIRED_BASE) + list(features) + list(labels)
+
+    # Deduplicate while preserving order
+    seen = set()
+    select_cols = [c for c in select_cols if not (c in seen or seen.add(c))]
+
+    # Quote and alias each identifier: "col" AS "col"
+    select_list = ", ".join([f'"{c}" AS "{c}"' for c in select_cols])
+
+    sql = f"""
+    SELECT {select_list}
+    FROM {db}.features_offline
+    WHERE "city" = '{city}' AND ({dt_cond_sql})
     """
     return pd.read_sql(sql, cnx)
+
+
 
 
 # ------------------------
@@ -332,21 +375,75 @@ def main():
         s3_staging_dir=dcfg.athena_output,
         schema_name=dcfg.athena_database,
     )
-    raw = load_features_offline(cnx, dcfg.city, dcfg.start, dcfg.end, dcfg.athena_database)
-    if raw.empty:
-        raise RuntimeError("No rows found in the selected window. Expand --start/--end or check partitions.")
 
-    # Quick schema/quality validation (your project helper)
-    validate_feature_df(raw)
+    # Get the distinct dt’s in the window (lightweight)
+    dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)
+    if len(dt_list) < 3:
+        raise RuntimeError("Not enough time points. Widen --start/--end.")
+    
+    # Decide temporal split based on dt_list
+    n = len(dt_list)
+    split_idx = int(np.floor(n * (1.0 - tcfg.valid_ratio)))
+    split_idx = min(max(split_idx, 1), n - 1)
 
-    # Select features + label; drop rows with missing label
+    train_end_dt = dt_list[split_idx - 1]   # inclusive
+    valid_start_dt = dt_list[split_idx]     # boundary before applying gap
+
+    # Apply the anti-leakage gap (5-min grid)
+    ticks = int(np.ceil(tcfg.gap_minutes / 5.0))
+    valid_start_idx = min(split_idx + ticks, n - 1)
+    valid_start_dt = dt_list[valid_start_idx]
+
+
+
+    # raw = load_features_offline(cnx, dcfg.city, dcfg.start, dcfg.end, dcfg.athena_database)
+    # if raw.empty:
+    #     raise RuntimeError("No rows found in the selected window. Expand --start/--end or check partitions.")
+
+    # # Quick schema/quality validation (your project helper)
+    # validate_feature_df(raw)
+
+    # # Select features + label; drop rows with missing label
+    # features = FEATURE_COLUMNS
+    # label = tcfg.label
+    # df = raw[["city", "dt", "station_id"] + features + [label]].copy()
+    # df = df.dropna(subset=[label])
+
+    # # Temporal split
+    # train_df, valid_df = temporal_split(df, tcfg.valid_ratio, tcfg.gap_minutes)
+
     features = FEATURE_COLUMNS
     label = tcfg.label
-    df = raw[["city", "dt", "station_id"] + features + [label]].copy()
-    df = df.dropna(subset=[label])
 
-    # Temporal split
-    train_df, valid_df = temporal_split(df, tcfg.valid_ratio, tcfg.gap_minutes)
+    # TRAIN: dt <= train_end_dt  (and >= requested start)
+    train_where = f"\"dt\" >= '{dcfg.start.replace(' ', '-')}' AND \"dt\" <= '{train_end_dt}'"
+    train_df = load_slice(cnx, dcfg.athena_database, dcfg.city, features, LABEL_COLUMNS, train_where)
+    validate_feature_df(train_df)  # your schema checks
+    train_df = train_df.dropna(subset=[label])
+
+    # --- Debug guard: show missing features early and clearly ---
+    expected = set(REQUIRED_BASE + FEATURE_COLUMNS + LABEL_COLUMNS)
+    actual = set(train_df.columns.tolist())
+    missing = sorted(list(expected - actual))
+    if missing:
+        print("[DEBUG] Train slice is missing columns:", missing)
+        print("[DEBUG] Train slice columns sample:", train_df.columns.tolist()[:30])
+        raise ValueError(f"Train slice missing expected columns: {missing}")
+
+    # VALID: dt >= valid_start_dt (and <= requested end)
+    valid_where = f"\"dt\" >= '{valid_start_dt}' AND \"dt\" <= '{dcfg.end.replace(' ', '-')}'"
+    valid_df = load_slice(cnx, dcfg.athena_database, dcfg.city, features, LABEL_COLUMNS, valid_where)
+    validate_feature_df(valid_df)
+    valid_df = valid_df.dropna(subset=[label])
+
+    # --- Debug guard: show missing features early and clearly ---
+    expected = set(REQUIRED_BASE + FEATURE_COLUMNS + LABEL_COLUMNS)
+    actual = set(valid_df.columns.tolist())
+    missing = sorted(list(expected - actual))
+    if missing:
+        print("[DEBUG] valid slice is missing columns:", missing)
+        print("[DEBUG] valid slice columns sample:", valid_df.columns.tolist()[:30])
+        raise ValueError(f"valid slice missing expected columns: {missing}")
 
     X_train = train_df[features].astype("float32")
     y_train = train_df[label].astype(int).values
