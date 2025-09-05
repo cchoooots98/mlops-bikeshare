@@ -4,7 +4,7 @@ Train a binary classifier (XGBoost or LightGBM) for bike/dock stockout within 30
 using a time-based train/validation split and MLflow autologging.
 Everything is commented in English for clarity.
 """
-
+import os
 import argparse
 import json
 from dataclasses import dataclass
@@ -23,6 +23,8 @@ import lightgbm as lgb
 # Tracking
 import mlflow
 import mlflow.sklearn
+from sklearn.linear_model import LogisticRegression
+
 import mlflow.xgboost
 import mlflow.lightgbm
 
@@ -33,9 +35,22 @@ import seaborn as sns
 # AWS Athena connector
 from pyathena import connect
 
-# Project schema (feature list, labels, validation helper)
-from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS,REQUIRED_BASE, validate_feature_df
+# Project schema (feature list, labels, required base cols, validator)
+from src.features.schema import (
+    FEATURE_COLUMNS,
+    LABEL_COLUMNS,
+    REQUIRED_BASE,
+    validate_feature_df,
+)
 
+# -------------------------------------------------------------------
+# MLflow tracking setup
+# -------------------------------------------------------------------
+# If the environment already defines MLFLOW_TRACKING_URI (e.g., to a local UI server or remote),
+# we respect it. Otherwise, default to a lightweight local SQLite file-store (Windows-friendly).
+if not os.environ.get("MLFLOW_TRACKING_URI"):
+    # Stored in repo working dir; works fine with `mlflow ui` or reading artifacts locally.
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
 # ------------------------
 # Config dataclasses
@@ -134,45 +149,6 @@ def load_slice(cnx, db: str, city: str, features: list, labels: list, dt_cond_sq
     """
     return pd.read_sql(sql, cnx)
 
-
-
-
-# ------------------------
-# Time-based split
-# ------------------------
-def temporal_split(df: pd.DataFrame, valid_ratio: float, gap_minutes: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Split into (train, valid) by time. The latest fraction goes to valid.
-    A gap is held out to reduce temporal leakage.
-    """
-    # Parse dt as timezone-aware timestamps for ordering
-    ts = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", utc=True)
-    df = df.assign(ts=ts).sort_values("ts")
-
-    # Unique time stamps define the split
-    times = df["ts"].unique()
-    n = len(times)
-    if n < 3:
-        raise ValueError("Not enough time points for a temporal split. Expand your time range.")
-
-    split_idx = int(np.floor(n * (1.0 - valid_ratio)))
-    split_idx = min(max(split_idx, 1), n - 1)  # keep inside (0, n)
-
-    train_end_time = times[split_idx - 1]
-    valid_start_time = times[split_idx]
-
-    gap = pd.Timedelta(minutes=gap_minutes)
-    train_mask = df["ts"] <= train_end_time
-    valid_mask = df["ts"] >= (valid_start_time + gap)
-
-    train_df = df.loc[train_mask].copy()
-    valid_df = df.loc[valid_mask].copy()
-
-    # If the gap makes valid empty, relax gap
-    if valid_df.empty:
-        valid_df = df[df["ts"] >= valid_start_time].copy()
-
-    return train_df, valid_df
 
 
 # ------------------------
@@ -395,23 +371,6 @@ def main():
     valid_start_dt = dt_list[valid_start_idx]
 
 
-
-    # raw = load_features_offline(cnx, dcfg.city, dcfg.start, dcfg.end, dcfg.athena_database)
-    # if raw.empty:
-    #     raise RuntimeError("No rows found in the selected window. Expand --start/--end or check partitions.")
-
-    # # Quick schema/quality validation (your project helper)
-    # validate_feature_df(raw)
-
-    # # Select features + label; drop rows with missing label
-    # features = FEATURE_COLUMNS
-    # label = tcfg.label
-    # df = raw[["city", "dt", "station_id"] + features + [label]].copy()
-    # df = df.dropna(subset=[label])
-
-    # # Temporal split
-    # train_df, valid_df = temporal_split(df, tcfg.valid_ratio, tcfg.gap_minutes)
-
     features = FEATURE_COLUMNS
     label = tcfg.label
 
@@ -421,14 +380,6 @@ def main():
     validate_feature_df(train_df)  # your schema checks
     train_df = train_df.dropna(subset=[label])
 
-    # --- Debug guard: show missing features early and clearly ---
-    expected = set(REQUIRED_BASE + FEATURE_COLUMNS + LABEL_COLUMNS)
-    actual = set(train_df.columns.tolist())
-    missing = sorted(list(expected - actual))
-    if missing:
-        print("[DEBUG] Train slice is missing columns:", missing)
-        print("[DEBUG] Train slice columns sample:", train_df.columns.tolist()[:30])
-        raise ValueError(f"Train slice missing expected columns: {missing}")
 
     # VALID: dt >= valid_start_dt (and <= requested end)
     valid_where = f"\"dt\" >= '{valid_start_dt}' AND \"dt\" <= '{dcfg.end.replace(' ', '-')}'"
@@ -436,14 +387,7 @@ def main():
     validate_feature_df(valid_df)
     valid_df = valid_df.dropna(subset=[label])
 
-    # --- Debug guard: show missing features early and clearly ---
-    expected = set(REQUIRED_BASE + FEATURE_COLUMNS + LABEL_COLUMNS)
-    actual = set(valid_df.columns.tolist())
-    missing = sorted(list(expected - actual))
-    if missing:
-        print("[DEBUG] valid slice is missing columns:", missing)
-        print("[DEBUG] valid slice columns sample:", valid_df.columns.tolist()[:30])
-        raise ValueError(f"valid slice missing expected columns: {missing}")
+
 
     X_train = train_df[features].astype("float32")
     y_train = train_df[label].astype(int).values
@@ -455,6 +399,7 @@ def main():
 
     with mlflow.start_run(run_name=f"{tcfg.model_type}-{label}") as run:
         run_id = run.info.run_id
+        print("RUN_ID:", run.info.run_id)
 
         # Autologging for selected model family
         if tcfg.model_type == "xgboost":
