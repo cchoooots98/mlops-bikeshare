@@ -4,7 +4,7 @@
 - **Use case**: Predict short-term (30 min) stockout risk for bikes (stockout) at bikeshare stations.
 - **Business objective**: Enable proactive rebalancing to reduce customer dissatisfaction and lost trips.
 - **Owner**: Yuanyuan Feng
-- **Date**: 2025-09-05 16:59:30Z
+- **Date**: 2025-09-06 15:10:08Z
 
 ## Data
 - **City**: nyc
@@ -19,7 +19,7 @@
 - **Primary metric**: PR-AUC (validation) = **0.934**
 - **Train PR-AUC**: 0.953; **Overfit gap**: 0.019 (target < 0.10)
 - **Threshold (Fβ, β=2.0)**: 0.15
-  - Precision=0.724, Recall=0.958, Fβ=0.900
+  - Precision=0.723, Recall=0.959, Fβ=0.900
 
 ## Assumptions & Limitations
 - Assumes 5-minute gridded station status and hourly weather aligned to UTC.
@@ -43,7 +43,7 @@
 
 ## Reproducibility
 - **MLflow experiment**: bikeshare-step4
-- **Run ID**: 41fab3199d3e40ef9abc8c6091acfd07
+- **Run ID**: 101d0d6b948e41c6875e3cab755ba7e6
 - **Code**: `training/train.py`, `training/eval.py`
 - **Data schema**: `schema.py`
 

@@ -1,0 +1,46 @@
+artifact_path: "file:///E:/\u7B97\u6CD5\u81EA\u5B66/End2EndProject/mlops-bikeshare/mlruns/1/models/m-495d458c9266402ea9506e6af6e063a3/artifacts"
+flavors:
+  python_function:
+    data: model.xgb
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.11.0
+  xgboost:
+    code: null
+    data: model.xgb
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: xgb
+    xgb_version: 3.0.4
+is_signature_from_type_hint: false
+mlflow_version: 3.3.2
+model_id: m-495d458c9266402ea9506e6af6e063a3
+model_size_bytes: 2278855
+model_uuid: m-495d458c9266402ea9506e6af6e063a3
+prompts: null
+run_id: 101d0d6b948e41c6875e3cab755ba7e6
+signature:
+  inputs: '[{"type": "float", "name": "util_bikes", "required": true}, {"type": "float",
+    "name": "util_docks", "required": true}, {"type": "float", "name": "delta_bikes_5m",
+    "required": true}, {"type": "float", "name": "delta_docks_5m", "required": true},
+    {"type": "float", "name": "roll15_net_bikes", "required": true}, {"type": "float",
+    "name": "roll30_net_bikes", "required": true}, {"type": "float", "name": "roll60_net_bikes",
+    "required": true}, {"type": "float", "name": "roll15_bikes_mean", "required":
+    true}, {"type": "float", "name": "roll30_bikes_mean", "required": true}, {"type":
+    "float", "name": "roll60_bikes_mean", "required": true}, {"type": "float", "name":
+    "nbr_bikes_weighted", "required": true}, {"type": "float", "name": "nbr_docks_weighted",
+    "required": true}, {"type": "float", "name": "hour", "required": true}, {"type":
+    "float", "name": "dow", "required": true}, {"type": "float", "name": "is_weekend",
+    "required": true}, {"type": "float", "name": "is_holiday", "required": true},
+    {"type": "float", "name": "temp_c", "required": true}, {"type": "float", "name":
+    "precip_mm", "required": true}, {"type": "float", "name": "wind_kph", "required":
+    true}, {"type": "float", "name": "rhum_pct", "required": true}, {"type": "float",
+    "name": "pres_hpa", "required": true}, {"type": "float", "name": "wind_dir_deg",
+    "required": true}, {"type": "float", "name": "wind_gust_kph", "required": true},
+    {"type": "float", "name": "snow_mm", "required": true}, {"type": "float", "name":
+    "weather_code", "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int32", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2025-09-06 15:04:12.494620'
