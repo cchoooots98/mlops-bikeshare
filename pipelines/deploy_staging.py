@@ -25,22 +25,30 @@ import mlflow
 def main():
     parser = argparse.ArgumentParser(description="Deploy MLflow model to SageMaker endpoint.")
     parser.add_argument("--model-name", required=True, help="MLflow Registry name, e.g., 'bikeshare_risk'.")
-    parser.add_argument("--stage", default=None, help="Stage to deploy from (e.g., 'Staging'). Mutually exclusive with --version.")
-    parser.add_argument("--version", default=None, type=str, help="Specific model version to deploy (mutually exclusive with --stage).")
-    parser.add_argument("--endpoint-name", required=True, help="SageMaker Endpoint name to create/update, e.g., 'bikeshare-staging'.")
+    parser.add_argument(
+        "--stage", default=None, help="Stage to deploy from (e.g., 'Staging'). Mutually exclusive with --version."
+    )
+    parser.add_argument(
+        "--version", default=None, type=str, help="Specific model version to deploy (mutually exclusive with --stage)."
+    )
+    parser.add_argument(
+        "--endpoint-name", required=True, help="SageMaker Endpoint name to create/update, e.g., 'bikeshare-staging'."
+    )
     parser.add_argument("--role-arn", required=True, help="IAM execution role ARN for SageMaker.")
     parser.add_argument("--instance-type", default="ml.m5.large", help="Instance type (cost/perf tradeoff).")
     parser.add_argument("--region", default="ca-central-1", help="AWS region, e.g., 'ca-central-1'.")
     parser.add_argument("--timeout", default=600, type=int, help="Timeout in seconds for deployment.")
-    parser.add_argument("--image-url", default=None,
-                        help="Optional ECR image URI to pin, e.g., "
-                             "'387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2'.")
+    parser.add_argument(
+        "--image-url",
+        default=None,
+        help="Optional ECR image URI to pin, e.g., "
+        "'387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2'.",
+    )
     args = parser.parse_args()
 
     # Ensure a consistent MLflow tracking URI (absolute path recommended on Windows).
     tracking_uri = os.environ.get(
-        "MLFLOW_TRACKING_URI",
-        "sqlite:///E:/算法自学/End2EndProject/mlops-bikeshare/mlflow.db"
+        "MLFLOW_TRACKING_URI", "sqlite:///E:/算法自学/End2EndProject/mlops-bikeshare/mlflow.db"
     )
     mlflow.set_tracking_uri(tracking_uri)
     print("Using MLFLOW_TRACKING_URI:", tracking_uri)
@@ -65,17 +73,18 @@ def main():
     # Call MLflow's SageMaker deploy.
     # If image_url is provided, pass it through so SageMaker uses your known-good Docker v2 image.
     mlflow.sagemaker.deploy(
-        app_name=args.endpoint_name,           # Endpoint name
-        model_uri=model_uri,                   # models:/... URI
-        mode="create",                         # Use "replace" to tear down and recreate
+        app_name=args.endpoint_name,  # Endpoint name
+        model_uri=model_uri,  # models:/... URI
+        mode="create",  # Use "replace" to tear down and recreate
         region_name=args.region,
         execution_role_arn=args.role_arn,
         instance_type=args.instance_type,
         timeout_seconds=args.timeout,
-        image_url=args.image_url               # <-- NEW: optional override
+        image_url=args.image_url,  # <-- NEW: optional override
     )
 
     print(f"Deployed {model_uri} to SageMaker endpoint: {args.endpoint_name}")
+
 
 if __name__ == "__main__":
     main()

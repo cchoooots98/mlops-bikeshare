@@ -63,6 +63,7 @@ MODEL_CARD_TEMPLATE = """# Model Card — {model_name}
 
 """
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--eval-json", default="eval_summary.json", help="Path to eval_summary.json from training run")
@@ -114,6 +115,7 @@ def main():
         f.write(card)
 
     print(f"[OK] Wrote model card to {args.output}")
+
 
 if __name__ == "__main__":
     main()

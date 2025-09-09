@@ -27,8 +27,12 @@ import mlflow
 def main():
     parser = argparse.ArgumentParser(description="Promote MLflow model version or stage.")
     parser.add_argument("--model-name", required=True, help="Registry name, e.g., 'bikeshare_risk'.")
-    parser.add_argument("--version", default=None, help="Model version to promote (mutually exclusive with --from-stage).")
-    parser.add_argument("--from-stage", default=None, help="Stage to promote from (e.g., Staging), if --version not given.")
+    parser.add_argument(
+        "--version", default=None, help="Model version to promote (mutually exclusive with --from-stage)."
+    )
+    parser.add_argument(
+        "--from-stage", default=None, help="Stage to promote from (e.g., Staging), if --version not given."
+    )
     parser.add_argument("--to-stage", required=True, help="Target stage, e.g., Production.")
     args = parser.parse_args()
 
@@ -66,6 +70,7 @@ def main():
     #   instance_type="ml.m5.large",
     #   timeout_seconds=600,
     # )
+
 
 if __name__ == "__main__":
     main()

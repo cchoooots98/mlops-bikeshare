@@ -21,7 +21,9 @@ def main():
     parser = argparse.ArgumentParser(description="Register an MLflow model version from a run.")
     parser.add_argument("--run-id", required=True, help="MLflow run_id that produced the 'model' artifact.")
     parser.add_argument("--model-name", required=True, help="MLflow Model Registry name, e.g., 'bikeshare_risk'.")
-    parser.add_argument("--stage", default=None, help="Optional stage to transition to, e.g., 'Staging' or 'Production'.")
+    parser.add_argument(
+        "--stage", default=None, help="Optional stage to transition to, e.g., 'Staging' or 'Production'."
+    )
     args = parser.parse_args()
 
     # Build the runs:/ URI pointing to the logged model artifact.
@@ -41,6 +43,7 @@ def main():
             archive_existing_versions=False,  # do not auto-archive older versions
         )
         print(f"Transitioned model to stage: {args.stage}")
+
 
 if __name__ == "__main__":
     main()

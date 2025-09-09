@@ -9,11 +9,13 @@ def _as_int(x, default=None):
     except Exception:
         return default
 
+
 def _as_float(x, default=None):
     try:
         return float(x)
     except Exception:
         return default
+
 
 def _parse_utc_hour(s: str):
     s = s.replace("T", " ")
@@ -21,13 +23,12 @@ def _parse_utc_hour(s: str):
         return datetime.strptime(s, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
     except ValueError:
         return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-    
-    
+
+
 # ---------- GBFS: station_status ----------
-def validate_station_status(payload: Dict, *,
-                            min_stations: int = 10,
-                            max_count: int = 2000,
-                            max_report_lag_hours: int = 6) -> None:
+def validate_station_status(
+    payload: Dict, *, min_stations: int = 10, max_count: int = 2000, max_report_lag_hours: int = 6
+) -> None:
     stations = payload.get("data", {}).get("stations", [])
     if not isinstance(stations, list) or len(stations) < min_stations:
         raise ValueError("status.data.stations missing/too few")
@@ -64,9 +65,9 @@ def validate_station_status(payload: Dict, *,
     if bad_lag / max(len(stations), 1) > 0.2:
         raise ValueError("status: too many stale stations (>20%)")
 
+
 # ---------- GBFS: station_information ----------
-def validate_station_info(payload: Dict, *,
-                          min_stations: int = 10) -> None:
+def validate_station_info(payload: Dict, *, min_stations: int = 10) -> None:
     stations = payload.get("data", {}).get("stations", [])
     if not isinstance(stations, list) or len(stations) < min_stations:
         raise ValueError("info.data.stations missing/too few")
@@ -94,12 +95,11 @@ def validate_station_info(payload: Dict, *,
         if cap is not None and cap < 0:
             raise ValueError("info: capacity < 0")
 
+
 # ---------- Weather (Meteostat/Open‑Meteo mapped) ----------
-def validate_weather(payload: Dict, *,
-                     min_rows: int = 1,
-                     temp_range=(-50.0, 60.0),
-                     wind_range=(0.0, 200.0),
-                     prcp_range=(0.0, 500.0)) -> None:
+def validate_weather(
+    payload: Dict, *, min_rows: int = 1, temp_range=(-50.0, 60.0), wind_range=(0.0, 200.0), prcp_range=(0.0, 500.0)
+) -> None:
     rows = payload.get("data", [])
     if not isinstance(rows, list):
         raise ValueError("weather.data must be list")
@@ -123,11 +123,11 @@ def validate_weather(payload: Dict, *,
             ("temp", *temp_range),
             ("wnd", *wind_range),
             ("prcp", *prcp_range),
-            ("rhum", 0.0,   100.0),   # %
+            ("rhum", 0.0, 100.0),  # %
             ("pres", 800.0, 1100.0),  # hPa
-            ("wdir", 0.0,   360.0),   # deg
-            ("wpgt", 0.0,   200.0),   # m/s or km/h，后面视图里统一单位即可
-            ("snow", 0.0,   500.0),
+            ("wdir", 0.0, 360.0),  # deg
+            ("wpgt", 0.0, 200.0),  # m/s or km/h，后面视图里统一单位即可
+            ("snow", 0.0, 500.0),
         ]:
             v = r.get(key, None)
             if v is None:

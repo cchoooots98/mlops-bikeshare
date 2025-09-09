@@ -1,20 +1,17 @@
-﻿[tool.black]
-# English: Keep the same formatting width as local
+[tool.black]
 line-length = 120
 target-version = ["py311"]
-
-# English: Do not format virtualenvs, build outputs, MLflow runs, or vendored libs
-extend-exclude = """
+# English: Exclude virtualenvs, build outputs, MLflow runs, and any vendored libs.
+extend-exclude = '''
 (
-  ^\\.venv
+  ^\.venv
  |^venv
  |^env
  |^build
- |^dist
  |^mlruns
  |^src/package
  |^docker
  |^infra
  |^model_dir
 )
-"""
+'''

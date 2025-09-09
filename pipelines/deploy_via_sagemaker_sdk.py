@@ -40,10 +40,7 @@ def assert_image_region_matches(image_uri: str, region: str):
         return
     image_region = m.group(1)
     if image_region != region:
-        raise ValueError(
-            f"ECR image is in {image_region}, but --region is {region}. "
-            "They must match."
-        )
+        raise ValueError(f"ECR image is in {image_region}, but --region is {region}. " "They must match.")
 
 
 def create_model(sm, model_name: str, image_uri: str, model_data_s3: str, exec_role_arn: str):
@@ -59,7 +56,7 @@ def create_model(sm, model_name: str, image_uri: str, model_data_s3: str, exec_r
                 "Image": image_uri,
                 "ModelDataUrl": model_data_s3,
                 # You can pass environment variables here if your container expects any
-                "Environment": {}
+                "Environment": {},
             },
             ExecutionRoleArn=exec_role_arn,
         )
@@ -84,7 +81,7 @@ def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, insta
                     "InitialInstanceCount": 1,
                     "InstanceType": instance_type,
                     # Increase startup timeout for slower images
-                    "ContainerStartupHealthCheckTimeoutInSeconds": 600
+                    "ContainerStartupHealthCheckTimeoutInSeconds": 600,
                 }
             ],
         )
@@ -102,20 +99,14 @@ def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
         # If describe works, endpoint exists -> update it
         sm.describe_endpoint(EndpointName=endpoint_name)
         print(f"[INFO] Updating Endpoint: {endpoint_name}")
-        sm.update_endpoint(
-            EndpointName=endpoint_name,
-            EndpointConfigName=endpoint_config_name
-        )
+        sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
     except botocore.exceptions.ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
-        msg  = e.response.get("Error", {}).get("Message", "")
+        msg = e.response.get("Error", {}).get("Message", "")
         # Only create if the endpoint truly does not exist
         if code == "ValidationException" and "Could not find endpoint" in msg:
             print(f"[INFO] Creating Endpoint: {endpoint_name}")
-            sm.create_endpoint(
-                EndpointName=endpoint_name,
-                EndpointConfigName=endpoint_config_name
-            )
+            sm.create_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
         else:
             print("[ERROR] update_endpoint failed; not creating because endpoint exists or another error occurred.")
             print(e.response)
@@ -166,23 +157,16 @@ def main():
         model_name=model_name,
         image_uri=args.image_uri,
         model_data_s3=args.model_data,
-        exec_role_arn=args.role_arn
+        exec_role_arn=args.role_arn,
     )
 
     # 2) Create EndpointConfig
     create_endpoint_config(
-        sm=sm,
-        endpoint_config_name=endpoint_config_name,
-        model_name=model_name,
-        instance_type=args.instance_type
+        sm=sm, endpoint_config_name=endpoint_config_name, model_name=model_name, instance_type=args.instance_type
     )
 
     # 3) Update/Create Endpoint and wait
-    upsert_endpoint(
-        sm=sm,
-        endpoint_name=args.endpoint_name,
-        endpoint_config_name=endpoint_config_name
-    )
+    upsert_endpoint(sm=sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
     wait_in_service(sm, args.endpoint_name)
 
 

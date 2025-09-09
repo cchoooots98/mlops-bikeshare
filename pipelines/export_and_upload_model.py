@@ -41,6 +41,7 @@ def file_uri_to_path(uri: str) -> str:
         path = path[1:]
     return path
 
+
 def find_model_dir_from_run_artifacts(artifacts_root: str) -> str:
     """
     Given a run's artifacts root (local path), find a child directory
@@ -65,9 +66,8 @@ def find_model_dir_from_run_artifacts(artifacts_root: str) -> str:
                 if os.path.isdir(sub2) and os.path.isfile(os.path.join(sub2, "MLmodel")):
                     return sub2
 
-    raise FileNotFoundError(
-        f"Could not find a folder containing 'MLmodel' under: {artifacts_root}"
-    )
+    raise FileNotFoundError(f"Could not find a folder containing 'MLmodel' under: {artifacts_root}")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -82,13 +82,16 @@ def main():
     # 1) Look up latest version in desired stage
     conn = sqlite3.connect(args.mlflow_db)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT version, source, run_id
         FROM model_versions
         WHERE name = ? AND current_stage = ?
         ORDER BY CAST(version AS INTEGER) DESC
         LIMIT 1
-    """, (args.model_name, args.stage))
+    """,
+        (args.model_name, args.stage),
+    )
     row = cur.fetchone()
     if not row:
         conn.close()
@@ -170,8 +173,6 @@ def main():
         model_dir = args.model_dir
         print("Using user-provided model_dir:", model_dir)
 
-
-
     # 4) Pack model_dir into model.tar.gz (MLflow expects MLmodel at archive root)
     out_tar = "model.tar.gz"
     if os.path.exists(out_tar):
@@ -203,6 +204,7 @@ def main():
         f.write(f"S3_ARTIFACT={s3_uri}\n")
         f.write(f"STAGE={args.stage}\n")
     print("Wrote export_manifest.txt")
+
 
 if __name__ == "__main__":
     main()

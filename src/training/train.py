@@ -50,6 +50,7 @@ if not os.environ.get("MLFLOW_TRACKING_URI"):
     # Stored in repo working dir; works fine with `mlflow ui` or reading artifacts locally.
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
+
 # ------------------------
 # Config dataclasses
 # ------------------------
@@ -57,7 +58,7 @@ if not os.environ.get("MLFLOW_TRACKING_URI"):
 class DataConfig:
     city: str
     start: str  # 'YYYY-MM-DD HH:MM' UTC
-    end: str    # 'YYYY-MM-DD HH:MM' UTC
+    end: str  # 'YYYY-MM-DD HH:MM' UTC
     athena_database: str
     athena_workgroup: str = "primary"
     athena_output: Optional[str] = None
@@ -66,18 +67,18 @@ class DataConfig:
 
 @dataclass
 class TrainConfig:
-    label: str = "y_stockout_bikes_30"      # or "y_stockout_docks_30"
-    model_type: str = "xgboost"             # "xgboost" or "lightgbm"
-    valid_ratio: float = 0.2                # later time slice used for validation
-    gap_minutes: int = 60                   # anti-leakage time gap between train/valid
+    label: str = "y_stockout_bikes_30"  # or "y_stockout_docks_30"
+    model_type: str = "xgboost"  # "xgboost" or "lightgbm"
+    valid_ratio: float = 0.2  # later time slice used for validation
+    gap_minutes: int = 60  # anti-leakage time gap between train/valid
     random_state: int = 42
-    beta: float = 2.0                       # F-beta (β=2 emphasizes recall)
+    beta: float = 2.0  # F-beta (β=2 emphasizes recall)
     experiment: str = "bikeshare-step4"
     # Keep this name EXACTLY as used below to avoid keyword mismatch
     use_sm_experiments_autolog: bool = False
-    class_weight: Optional[float] = None    # e.g., positive class weight for imbalance
-    xgb_params: dict = None                 # baseline XGBoost params
-    lgb_params: dict = None                 # baseline LightGBM params
+    class_weight: Optional[float] = None  # e.g., positive class weight for imbalance
+    xgb_params: dict = None  # baseline XGBoost params
+    lgb_params: dict = None  # baseline LightGBM params
 
 
 # ------------------------
@@ -105,6 +106,7 @@ def athena_conn(region: str, workgroup: str, s3_staging_dir: Optional[str], sche
 #           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
 #     """
 #     return pd.read_sql(sql, cnx)
+
 
 def list_unique_dt(cnx, db: str, city: str, start_ts: str, end_ts: str) -> list:
     """
@@ -148,7 +150,6 @@ def load_slice(cnx, db: str, city: str, features: list, labels: list, dt_cond_sq
     return pd.read_sql(sql, cnx)
 
 
-
 # ------------------------
 # Evaluation helpers
 # ------------------------
@@ -176,7 +177,7 @@ def pick_threshold_fbeta(y_true: np.ndarray, y_prob: np.ndarray, beta: float):
             fbeta = 0.0
         else:
             b2 = beta * beta
-            denom = (b2 * precision + recall)
+            denom = b2 * precision + recall
             fbeta = (1 + b2) * (precision * recall) / denom if denom > 0 else 0.0
 
         if fbeta > best_score:
@@ -286,8 +287,9 @@ def main():
     parser.add_argument("--region", default="ca-central-1", help="AWS region")
 
     # Training options
-    parser.add_argument("--label", default="y_stockout_bikes_30",
-                        choices=["y_stockout_bikes_30", "y_stockout_docks_30"])
+    parser.add_argument(
+        "--label", default="y_stockout_bikes_30", choices=["y_stockout_bikes_30", "y_stockout_docks_30"]
+    )
     parser.add_argument("--model-type", default="xgboost", choices=["xgboost", "lightgbm"])
     parser.add_argument("--valid-ratio", type=float, default=0.2)
     parser.add_argument("--gap-minutes", type=int, default=60)
@@ -354,20 +356,19 @@ def main():
     dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)
     if len(dt_list) < 3:
         raise RuntimeError("Not enough time points. Widen --start/--end.")
-    
+
     # Decide temporal split based on dt_list
     n = len(dt_list)
     split_idx = int(np.floor(n * (1.0 - tcfg.valid_ratio)))
     split_idx = min(max(split_idx, 1), n - 1)
 
-    train_end_dt = dt_list[split_idx - 1]   # inclusive
-    valid_start_dt = dt_list[split_idx]     # boundary before applying gap
+    train_end_dt = dt_list[split_idx - 1]  # inclusive
+    valid_start_dt = dt_list[split_idx]  # boundary before applying gap
 
     # Apply the anti-leakage gap (5-min grid)
     ticks = int(np.ceil(tcfg.gap_minutes / 5.0))
     valid_start_idx = min(split_idx + ticks, n - 1)
     valid_start_dt = dt_list[valid_start_idx]
-
 
     features = FEATURE_COLUMNS
     label = tcfg.label
@@ -378,14 +379,11 @@ def main():
     validate_feature_df(train_df)  # your schema checks
     train_df = train_df.dropna(subset=[label])
 
-
     # VALID: dt >= valid_start_dt (and <= requested end)
     valid_where = f"\"dt\" >= '{valid_start_dt}' AND \"dt\" <= '{dcfg.end.replace(' ', '-')}'"
     valid_df = load_slice(cnx, dcfg.athena_database, dcfg.city, features, LABEL_COLUMNS, valid_where)
     validate_feature_df(valid_df)
     valid_df = valid_df.dropna(subset=[label])
-
-
 
     X_train = train_df[features].astype("float32")
     y_train = train_df[label].astype(int).values
@@ -423,16 +421,18 @@ def main():
         best_t, best_metrics = pick_threshold_fbeta(y_valid, valid_prob, beta=tcfg.beta)
 
         # Log all metrics at once
-        mlflow.log_metrics({
-            "pr_auc_train": pr_auc_train,
-            "pr_auc_valid": pr_auc_valid,
-            "overfit_gap": gap,
-            "best_precision": best_metrics["precision"],
-            "best_recall": best_metrics["recall"],
-            "best_fbeta": best_metrics["fbeta"],
-            "beta": tcfg.beta,
-            "best_threshold": best_t
-        })
+        mlflow.log_metrics(
+            {
+                "pr_auc_train": pr_auc_train,
+                "pr_auc_valid": pr_auc_valid,
+                "overfit_gap": gap,
+                "best_precision": best_metrics["precision"],
+                "best_recall": best_metrics["recall"],
+                "best_fbeta": best_metrics["fbeta"],
+                "beta": tcfg.beta,
+                "best_threshold": best_t,
+            }
+        )
 
         # Artifacts
         log_curves_and_confusion(y_valid, valid_prob, threshold=best_t, prefix="val")

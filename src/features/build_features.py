@@ -14,8 +14,10 @@ from sklearn.neighbors import BallTree
 
 EARTH_RADIUS_KM = 6371.0088
 
+
 def read_env() -> dict:
     import os
+
     p = os.path.join(os.path.dirname(__file__), "..", "env.json")
     with open(p, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -31,15 +33,23 @@ def read_env() -> dict:
     }
 
 
-def athena_conn(region: str, s3_staging_dir: str | None = None, workgroup: str = "primary",schema_name: str= "mlops_bikeshare"):
+def athena_conn(
+    region: str, s3_staging_dir: str | None = None, workgroup: str = "primary", schema_name: str = "mlops_bikeshare"
+):
     # PyAthena 可以使用 workgroup 默认输出；若你本地需要 staging dir，也支持传入。
     if s3_staging_dir:
-        return connect(region_name=region, s3_staging_dir=s3_staging_dir, work_group=workgroup,schema_name=schema_name,)
+        return connect(
+            region_name=region,
+            s3_staging_dir=s3_staging_dir,
+            work_group=workgroup,
+            schema_name=schema_name,
+        )
     return connect(region_name=region, work_group=workgroup)
 
 
 def query_df(cnx, sql: str) -> pd.DataFrame:
     return pd.read_sql(sql, cnx)
+
 
 def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     sql = f"""
@@ -50,6 +60,7 @@ def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
     """
     return query_df(cnx, sql)
+
 
 def load_latest_info(cnx, city, db) -> pd.DataFrame:
     # Read from the UNNESTed view. This view already explodes $.data.stations.
@@ -71,6 +82,7 @@ def load_latest_info(cnx, city, db) -> pd.DataFrame:
       AND i.dt = l.mdt
     """
     return query_df(cnx, sql)
+
 
 def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     # Read from curated view and select all available weather fields.
@@ -96,7 +108,9 @@ def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     return query_df(cnx, sql)
 
 
-def to_rad(x): return np.deg2rad(x)
+def to_rad(x):
+    return np.deg2rad(x)
+
 
 def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.8) -> pd.DataFrame:
     """
@@ -156,12 +170,14 @@ def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.
     nbr["w"] = nbr["w"] / nbr.groupby("src_id")["w"].transform("sum")
     return nbr
 
+
 def _city_timezone(city: str) -> str:
     city = (city or "").lower()
     if city in ("nyc", "new_york", "new-york", "new york", "newyork"):
         return "America/New_York"
     # add more cities here if you expand the project
     return "UTC"
+
 
 def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame:
     """
@@ -170,9 +186,15 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
     # 5分钟 UTC 目标网格
     idx5 = pd.date_range(start=start_ts, end=end_ts, freq="5min", tz="UTC")
     cols = [
-        "temp_c", "precip_mm", "wind_kph",
-        "rhum_pct", "pres_hpa", "wind_dir_deg",
-        "wind_gust_kph", "snow_mm", "weather_code",
+        "temp_c",
+        "precip_mm",
+        "wind_kph",
+        "rhum_pct",
+        "pres_hpa",
+        "wind_dir_deg",
+        "wind_gust_kph",
+        "snow_mm",
+        "weather_code",
     ]
 
     if weather_df.empty:
@@ -185,18 +207,10 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
     w["ts"] = pd.to_datetime(w["ts"], errors="coerce")
     w = w.dropna(subset=["ts"])
     # 注意：meteostat 的 ts 是“本地小时”，这里先本地化再转 UTC
-    w["ts_utc"] = (
-        w["ts"]
-        .dt.tz_localize(tz, nonexistent="shift_forward", ambiguous="infer")
-        .dt.tz_convert("UTC")
-    )
+    w["ts_utc"] = w["ts"].dt.tz_localize(tz, nonexistent="shift_forward", ambiguous="infer").dt.tz_convert("UTC")
 
     # 2) 只保留所需列并去重（若同一小时多条，保留最后一条）
-    w = (
-        w[["ts_utc"] + cols]
-        .sort_values("ts_utc")
-        .drop_duplicates(subset=["ts_utc"], keep="last")
-    )
+    w = w[["ts_utc"] + cols].sort_values("ts_utc").drop_duplicates(subset=["ts_utc"], keep="last")
 
     # 3) 与 5min 网格做 asof 向后填充（backward），得到逐 5 分钟值
     grid = pd.DataFrame({"ts": idx5})
@@ -219,17 +233,19 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
 
     return out
 
+
 def add_time_features(df: pd.DataFrame, city: str) -> pd.DataFrame:
     ts = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", utc=True)
     df["hour"] = ts.dt.hour.astype(float)
     df["dow"] = ts.dt.dayofweek.astype(float)
     df["is_weekend"] = (df["dow"] >= 5).astype(float)
     years = list(sorted(set(ts.dt.year.tolist())))
-    holiday = US(years=years) if city.lower() in {"nyc","new_york"} else FR(years=years)
+    holiday = US(years=years) if city.lower() in {"nyc", "new_york"} else FR(years=years)
     df["is_holiday"] = ts.dt.date.map(lambda d: float(d in holiday))
     return df
 
-def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc") -> pd.DataFrame:
+
+def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="nyc") -> pd.DataFrame:
     # --- base join ---
     df = status.merge(info, on="station_id", how="left")
     if "city" not in df.columns:
@@ -252,33 +268,32 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc"
 
     for win, name in [(3, "15"), (6, "30"), (12, "60")]:
         df[f"roll{name}_net_bikes"] = (
-            gb["delta_bikes_5m"].rolling(win, min_periods=1).sum()
-              .reset_index(level=0, drop=True).astype("float32")
+            gb["delta_bikes_5m"].rolling(win, min_periods=1).sum().reset_index(level=0, drop=True).astype("float32")
         )
         df[f"roll{name}_bikes_mean"] = (
-            gb["bikes"].rolling(win, min_periods=1).mean()
-              .reset_index(level=0, drop=True).astype("float32")
+            gb["bikes"].rolling(win, min_periods=1).mean().reset_index(level=0, drop=True).astype("float32")
         )
         df[f"roll{name}_docks_mean"] = (
-            gb["docks"].rolling(win, min_periods=1).mean()
-              .reset_index(level=0, drop=True).astype("float32")
+            gb["docks"].rolling(win, min_periods=1).mean().reset_index(level=0, drop=True).astype("float32")
         )
 
     # --- neighbor aggregation (skip if no neighbors) ---
     if nbr is not None and not nbr.empty:
-        neigh = (
-            df[["station_id", "dt", "bikes", "docks"]]
-            .rename(columns={"station_id": "nbr_id", "bikes": "nbr_bikes", "docks": "nbr_docks"})
+        neigh = df[["station_id", "dt", "bikes", "docks"]].rename(
+            columns={"station_id": "nbr_id", "bikes": "nbr_bikes", "docks": "nbr_docks"}
         )
         nbr_full = (
-            df[["station_id", "dt"]].rename(columns={"station_id": "src_id"})
+            df[["station_id", "dt"]]
+            .rename(columns={"station_id": "src_id"})
             .merge(nbr, on="src_id", how="left")
             .merge(neigh, on=["nbr_id", "dt"], how="left")
         )
-        agg = (nbr_full
-               .assign(wb=lambda x: x["w"] * x["nbr_bikes"], wd=lambda x: x["w"] * x["nbr_docks"])
-               .groupby(["src_id", "dt"], as_index=False)[["wb", "wd"]].sum()
-               .rename(columns={"src_id": "station_id"}))
+        agg = (
+            nbr_full.assign(wb=lambda x: x["w"] * x["nbr_bikes"], wd=lambda x: x["w"] * x["nbr_docks"])
+            .groupby(["src_id", "dt"], as_index=False)[["wb", "wd"]]
+            .sum()
+            .rename(columns={"src_id": "station_id"})
+        )
         df = df.merge(agg, on=["station_id", "dt"], how="left")
         df["nbr_bikes_weighted"] = df["wb"].fillna(0.0).astype("float32")
         df["nbr_docks_weighted"] = df["wd"].fillna(0.0).astype("float32")
@@ -305,7 +320,17 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc"
     )
 
     # fixed debug print
-    weather_cols = ["temp_c","precip_mm","wind_kph","rhum_pct","pres_hpa","wind_dir_deg","wind_gust_kph","snow_mm","weather_code"]
+    weather_cols = [
+        "temp_c",
+        "precip_mm",
+        "wind_kph",
+        "rhum_pct",
+        "pres_hpa",
+        "wind_dir_deg",
+        "wind_gust_kph",
+        "snow_mm",
+        "weather_code",
+    ]
     hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
     counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
     print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; non-null counts: {counts}")
@@ -319,7 +344,7 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc"
                 .astype("float32", copy=False)
                 .ffill()
                 .bfill()
-                .fillna(0.0)     # still missing → 0
+                .fillna(0.0)  # still missing → 0
                 .astype("float32", copy=False)
             )
 
@@ -335,18 +360,20 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2,city="nyc"
 
     return df
 
+
 def write_parquet_partitioned(df: pd.DataFrame, bucket: str):
-    # Write local temporary files and then upload them to S3 
-    # (to avoid too many small files, you can first divide them into buckets by day or hour. 
+    # Write local temporary files and then upload them to S3
+    # (to avoid too many small files, you can first divide them into buckets by day or hour.
     # Here, we directly partition by dt)
     s3 = boto3.client("s3")
-    for (city, dt_val), g in df.groupby(["city","dt"]):
+    for (city, dt_val), g in df.groupby(["city", "dt"]):
         table_path = f"features/city={city}/dt={dt_val}/part-0.parquet"
         table_local = f"/tmp/{city}_{dt_val}.parquet"
         table_local_dir = os.path.dirname(table_local)
         os.makedirs(table_local_dir, exist_ok=True)
         pq.write_table(pa.Table.from_pandas(g), table_local)
         s3.upload_file(table_local, bucket, table_path)
+
 
 def create_table_if_not_exists(cnx, bucket: str):
     # Create the external table only once (or when schema changes).
@@ -403,8 +430,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--city", required=True)
     ap.add_argument("--region", default="ca-central-1")
-    ap.add_argument("--bucket", required=False)      # 默认从 env.json 取
-    ap.add_argument("--start", required=False)       # 'YYYY-MM-DD HH:MM' UTC
+    ap.add_argument("--bucket", required=False)  # 默认从 env.json 取
+    ap.add_argument("--start", required=False)  # 'YYYY-MM-DD HH:MM' UTC
     ap.add_argument("--end", required=False)
     ap.add_argument("--neighbors", type=int, default=5)
     ap.add_argument("--max-radius-km", type=float, default=0.8)
@@ -416,7 +443,7 @@ def main():
     cfg = read_env()
     bucket = args.bucket or cfg["bucket"]
     region = args.region or cfg["region"]
-    
+
     cnx = athena_conn(
         region=region,
         s3_staging_dir=cfg["athena_output"],
@@ -426,9 +453,9 @@ def main():
 
     db = cfg["athena_database"]
 
-
     # 默认最近 14 天
     from datetime import datetime, timedelta, timezone
+
     end_ts = args.end or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     if args.start:
         start_ts = args.start
@@ -436,24 +463,26 @@ def main():
         end_dt = datetime.strptime(end_ts, "%Y-%m-%d %H:%M")
         start_ts = (end_dt - timedelta(days=14)).strftime("%Y-%m-%d %H:%M")
 
-    status = load_status(cnx, args.city, start_ts, end_ts,db)
+    status = load_status(cnx, args.city, start_ts, end_ts, db)
 
     if status.empty:
         raise RuntimeError("no status rows in the chosen window")
     n_dt = status["dt"].nunique()
     if n_dt < 100:  # 例如至少要有 ~8 小时
-        raise RuntimeError(f"too few status snapshots in window: dt_nunique={n_dt}. "
-                        f"Check your ingestion or widen --start/--end.")
+        raise RuntimeError(
+            f"too few status snapshots in window: dt_nunique={n_dt}. " f"Check your ingestion or widen --start/--end."
+        )
 
-    info = load_latest_info(cnx, args.city,db)
+    info = load_latest_info(cnx, args.city, db)
 
-    weather = load_weather(cnx, args.city, start_ts, end_ts,db)
-    weather5 = align_weather_5min(weather, start_ts, end_ts,args.city)
+    weather = load_weather(cnx, args.city, start_ts, end_ts, db)
+    weather5 = align_weather_5min(weather, start_ts, end_ts, args.city)
 
-    print(f"[DEBUG] weather rows: {len(weather)}; weather5 rows: {len(weather5)}; "
-      f"non-null temp_c in weather5: {weather5['temp_c'].notna().sum()}; "
-      f"non-null temp_c in weather: {weather['temp_c'].notna().sum()}")
-    
+    print(
+        f"[DEBUG] weather rows: {len(weather)}; weather5 rows: {len(weather5)}; "
+        f"non-null temp_c in weather5: {weather5['temp_c'].notna().sum()}; "
+        f"non-null temp_c in weather: {weather['temp_c'].notna().sum()}"
+    )
 
     bad = info[info["lat"].isna() | info["lon"].isna()]
     if not bad.empty:
@@ -466,9 +495,11 @@ def main():
     tmp = df["temp_c"].notna().mean() if "temp_c" in df.columns else 0.0
     print(f"[DEBUG] after merge, temp_c non-null ratio: {tmp:.1%}")
 
-
-    keep_cols = (["city","dt","station_id","name","capacity","lat","lon","bikes","docks"]
-                 + FEATURE_COLUMNS + LABEL_COLUMNS)
+    keep_cols = (
+        ["city", "dt", "station_id", "name", "capacity", "lat", "lon", "bikes", "docks"]
+        + FEATURE_COLUMNS
+        + LABEL_COLUMNS
+    )
     out = df[keep_cols].copy()
 
     # Drop rows that can't have labels by definition (tail after shift)
@@ -491,12 +522,14 @@ def main():
     if args.eda:
         try:
             from ydata_profiling import ProfileReport
+
             os.makedirs("build/reports", exist_ok=True)
-            sample = out.drop(columns=["city","dt","station_id","name"]).sample(
+            sample = out.drop(columns=["city", "dt", "station_id", "name"]).sample(
                 min(20000, len(out)), random_state=42
             )
             rep = ProfileReport(sample, title=f"Features EDA — {args.city}", minimal=True, explorative=True)
             from datetime import datetime, timezone
+
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             local_path = f"build/reports/{args.city}_{ts}.html"
             rep.to_file(local_path)
@@ -505,6 +538,7 @@ def main():
             print("EDA report uploaded to s3://%s/features/reports/%s/%s/index.html" % (bucket, args.city, ts))
         except Exception as e:
             print("skip EDA:", e)
+
 
 if __name__ == "__main__":
     main()
