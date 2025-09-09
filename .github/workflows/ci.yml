@@ -54,7 +54,8 @@ jobs:
           ruff check src pipelines test --output-format=github
 
       - name: Black (format check)
-        run: black --check --line-length src pipelines test
+        run: |
+          black --check src pipelines test
 
       - name: PyTest 
         env:
