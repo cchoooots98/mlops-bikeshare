@@ -1,0 +1,36 @@
+﻿# ----------------------------
+# Ruff configuration (top-level)
+# ----------------------------
+
+# English: Your project’s Python target version
+target-version = "py311"
+
+# English: Keep lines readable
+line-length = 100
+
+# English: First-party code roots (helps import rules & relative paths)
+src = ["src", "pipelines", "tests", "app"]
+
+# English: Exclude virtual envs, build artifacts, caches, vendor dirs, infra/docker contexts
+extend-exclude = [
+  ".git",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "env",
+  "build",
+  "dist",
+  ".eggs",
+  "*.egg-info",
+  "site-packages",
+  "pip-wheel-metadata",
+  ".tox",
+  ".mypy_cache",
+  ".pytest_cache",
+  "infra",
+  "docker",
+]
+
+# English: Rule sets:
+# E/F: pycodestyle/pyflakes; I: import sorting (isort compatible)
+select = ["E", "F", "I"]
