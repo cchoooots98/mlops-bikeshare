@@ -1,6 +1,7 @@
 # src/ingest/validators.py
-from typing import Dict, List, Any
 from datetime import datetime, timezone
+from typing import Dict
+
 
 def _as_int(x, default=None):
     try:
@@ -73,7 +74,7 @@ def validate_station_info(payload: Dict, *,
     seen = set()
     for s in stations:
         sid = s.get("station_id")
-        name = s.get("name")
+        _ = s.get("name")
         lat = _as_float(s.get("lat"))
         lon = _as_float(s.get("lon"))
         cap = s.get("capacity", None)

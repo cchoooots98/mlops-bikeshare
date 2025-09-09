@@ -16,9 +16,11 @@
 #   - If you pass --image-url, it must point to an ECR image with Docker v2 manifest
 #     (SageMaker does not accept OCI manifest lists).
 
-import os
 import argparse
+import os
+
 import mlflow
+
 
 def main():
     parser = argparse.ArgumentParser(description="Deploy MLflow model to SageMaker endpoint.")

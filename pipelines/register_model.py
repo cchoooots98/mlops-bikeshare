@@ -13,7 +13,9 @@
 # - "model-name" becomes the registry name (shared across all versions).
 
 import argparse
+
 import mlflow
+
 
 def main():
     parser = argparse.ArgumentParser(description="Register an MLflow model version from a run.")

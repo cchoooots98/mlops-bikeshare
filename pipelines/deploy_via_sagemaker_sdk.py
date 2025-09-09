@@ -4,10 +4,10 @@
 # All steps are commented in English.
 
 import argparse
-import sys
-import time
-import re
 import datetime as dt
+import re
+import sys
+
 import boto3
 import botocore
 
@@ -131,7 +131,7 @@ def wait_in_service(sm, endpoint_name: str):
     try:
         waiter.wait(EndpointName=endpoint_name)
         print("[OK] Endpoint InService")
-    except botocore.exceptions.WaiterError as we:
+    except botocore.exceptions.WaiterError:
         # When the waiter fails, we try to print the FailureReason
         print("[ERROR] WaiterError: endpoint did not become InService.")
         try:

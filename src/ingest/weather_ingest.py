@@ -1,8 +1,15 @@
-import os, json, gzip, io, time
+import gzip
+import io
+import json
+import os
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Tuple
-import requests, boto3
+
+import boto3
+import requests
+
 from .validators import validate_weather
+
 
 def floor_to_5min(ts: datetime) -> datetime:
     ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)

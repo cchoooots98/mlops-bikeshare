@@ -21,12 +21,14 @@
 #     --s3-uri s3://mlflow-sagemaker-ca-central-1-387706002632/export/bikeshare_risk/model.tar.gz `
 #     --region ca-central-1
 
-import os
 import argparse
+import os
 import sqlite3
 import tarfile
 from urllib.parse import urlparse
+
 import boto3
+
 
 def file_uri_to_path(uri: str) -> str:
     """Convert file:///E:/path/to/dir to a Windows path E:\\path\\to\\dir."""

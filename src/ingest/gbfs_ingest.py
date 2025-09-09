@@ -1,9 +1,16 @@
-import os, json, gzip, io, time
+import gzip
+import io
+import json
+import os
+import time
 from datetime import datetime, timezone
-import requests, boto3, botocore
-from .validators import validate_station_status, validate_station_info
 
-from datetime import datetime, timezone
+import boto3
+import botocore
+import requests
+
+from .validators import validate_station_info, validate_station_status
+
 
 def floor_to_5min(ts: datetime) -> datetime:
     ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
@@ -34,7 +41,7 @@ def _exists(key:str)->bool:
     try:
         s3.head_object(Bucket=BUCKET, Key=key)
         return True
-    except botocore.exceptions.ClientError as e:
+    except botocore.exceptions.ClientError:
         return False
 
 def _put_json(obj:dict, key:str):

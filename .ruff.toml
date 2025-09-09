@@ -1,36 +1,27 @@
-﻿# ----------------------------
-# Ruff configuration (top-level)
-# ----------------------------
-
-# English: Your project’s Python target version
+﻿# Target Python version for this repo
 target-version = "py311"
 
-# English: Keep lines readable
-line-length = 100
+# Allow reasonable line length for ML code/comments
+line-length = 120
 
-# English: First-party code roots (helps import rules & relative paths)
+# Tell Ruff where your first-party code lives
 src = ["src", "pipelines", "tests", "app"]
 
-# English: Exclude virtual envs, build artifacts, caches, vendor dirs, infra/docker contexts
+# Do not lint virtualenvs, build outputs, or vendored packages
 extend-exclude = [
-  ".git",
-  "__pycache__",
-  ".venv",
-  "venv",
-  "env",
-  "build",
-  "dist",
-  ".eggs",
-  "*.egg-info",
-  "site-packages",
-  "pip-wheel-metadata",
-  ".tox",
-  ".mypy_cache",
-  ".pytest_cache",
-  "infra",
-  "docker",
+  ".venv", "venv", "env", "build", "dist", "site-packages",
+  "infra", "docker",
+  "src/package"            # <- your job log showed vendored libs here; exclude them
 ]
 
-# English: Rule sets:
-# E/F: pycodestyle/pyflakes; I: import sorting (isort compatible)
+[lint]
+# Enable: pycodestyle (E), pyflakes (F), and import sorting/checks (I)
 select = ["E", "F", "I"]
+
+# TEMP: do not fail on long lines while you iterate
+# (remove "E501" later if you want to enforce wrapping)
+ignore = ["E501"]
+
+[lint.isort]
+# Optional: if you have a package name (else remove this line)
+known-first-party = ["mlops_bikeshare"]

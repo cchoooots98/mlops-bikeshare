@@ -20,7 +20,9 @@
 #   #   (uncomment code in the script where indicated to call mlflow.sagemaker.deploy)
 
 import argparse
+
 import mlflow
+
 
 def main():
     parser = argparse.ArgumentParser(description="Promote MLflow model version or stage.")

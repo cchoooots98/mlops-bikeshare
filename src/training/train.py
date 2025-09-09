@@ -4,36 +4,34 @@ Train a binary classifier (XGBoost or LightGBM) for bike/dock stockout within 30
 using a time-based train/validation split and MLflow autologging.
 Everything is commented in English for clarity.
 """
-import os
 import argparse
 import json
+import os
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import List, Optional
 
-import numpy as np
-import pandas as pd
-
-# Metrics & plots
-from sklearn.metrics import average_precision_score, precision_recall_curve, confusion_matrix
-
-# Tree models
-import xgboost as xgb
 import lightgbm as lgb
-
-# Tracking
-import mlflow
-import mlflow.sklearn
-from sklearn.linear_model import LogisticRegression
-
-import mlflow.xgboost
-import mlflow.lightgbm
 
 # Visualization for artifacts
 import matplotlib.pyplot as plt
+
+# Tracking
+import mlflow
+import mlflow.lightgbm
+import mlflow.sklearn
+import mlflow.xgboost
+import numpy as np
+import pandas as pd
 import seaborn as sns
+
+# Tree models
+import xgboost as xgb
 
 # AWS Athena connector
 from pyathena import connect
+
+# Metrics & plots
+from sklearn.metrics import average_precision_score, confusion_matrix, precision_recall_curve
 
 # Project schema (feature list, labels, required base cols, validator)
 from src.features.schema import (

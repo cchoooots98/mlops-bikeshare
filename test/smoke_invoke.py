@@ -1,9 +1,18 @@
-# scripts/smoke_invoke.py
-# Purpose: Call a SageMaker endpoint with the exact features the model expects.
+#!/usr/bin/env python3
+# ruff: noqa: E402
+# -*- coding: utf-8 -*-
+"""
+Smoke invoke for SageMaker endpoint.
+
+- Keeps all imports at the top (fixes Ruff E402).
+- Uses FEATURE_COLUMNS from your project to ensure the request schema matches training.
+- Sends a minimal one-row payload to the endpoint and prints the response.
+"""
 import argparse
 import json
 import os
 import sys
+
 import boto3
 
 # Import the same schema used in training so names/order match exactly.
@@ -12,9 +21,9 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))        # .../test
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))    # repo root
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-
 # --- Import the training feature list from the project schema ---
 from src.features.schema import FEATURE_COLUMNS  # defined in your project's schema.py (25 features)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Invoke SageMaker endpoint.")

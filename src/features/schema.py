@@ -1,6 +1,6 @@
-from typing import Dict,List
 import re
-import numpy as np
+from typing import List
+
 import pandas as pd
 
 FEATURE_COLUMNS: List[str] = [
@@ -33,10 +33,10 @@ def validate_feature_df(df: pd.DataFrame, missing_rate_threshold: float = 0.01):
     
     # 2. basic type and value checking (lightweight)
     if not _is_dt_string(df["dt"]):
-        raise ValueError(f" dt must be 'YYYY-MM-DD-HH-mm' string")
+        raise ValueError(" dt must be 'YYYY-MM-DD-HH-mm' string")
     
     if (df["capacity"] < 0).any():
-        raise ValueError(f"capacity must be >=0")
+        raise ValueError("capacity must be >=0")
     
      # utilization must be in [0,1] (ignore NaNs)
     for c in ["util_bikes", "util_docks"]:

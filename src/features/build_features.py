@@ -1,19 +1,21 @@
-import os, json, argparse
+import argparse
+import json
+import os
+
+import boto3
 import numpy as np
 import pandas as pd
-from typing import Tuple
-from pyathena import connect
-import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
-from holidays import US, FR
-from sklearn.neighbors import BallTree  
+from holidays import FR, US
+from pyathena import connect
 from schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
+from sklearn.neighbors import BallTree
 
 EARTH_RADIUS_KM = 6371.0088
 
 def read_env() -> dict:
-    import os, json
+    import os
     p = os.path.join(os.path.dirname(__file__), "..", "env.json")
     with open(p, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -426,7 +428,7 @@ def main():
 
 
     # 默认最近 14 天
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     end_ts = args.end or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     if args.start:
         start_ts = args.start
