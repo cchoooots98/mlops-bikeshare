@@ -37,3 +37,29 @@ src/package/
 
 # --- Infra/docker (if generated) ---
 docker/*-build*/
+# Terraform local cache (MUST NOT be versioned)
+**/.terraform/
+infra/terraform/.terraform/
+
+# Python virtual envs / builds / MLflow runs
+.venv/
+.venv*/
+venv/
+env/
+build/
+dist/
+mlruns/
+model_dir/
+
+# Caches
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Vendored/accidental libs
+src/package/
+
+# OS / IDE
+.DS_Store
+.vscode/
