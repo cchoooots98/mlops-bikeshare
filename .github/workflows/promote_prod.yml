@@ -1,0 +1,100 @@
+name: Promote_Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      override_model_tar:
+        description: "Optional S3 model.tar.gz to promote (leave blank to reuse staging model)"
+        required: false
+        default: ""
+
+env:
+  AWS_REGION: ca-central-1
+  AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
+  ECR_IMAGE_URI: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:<tag>
+  DEFAULT_S3_MODEL_TAR: s3://mlops-bikeshare-387706002632-ca-central-1/sagemaker/models/bikeshare_risk/model.tar.gz
+  ENDPOINT_NAME: bikeshare-prod
+  INSTANCE_TYPE: ml.m5.large
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Deploy to SageMaker (prod)
+    runs-on: ubuntu-latest
+    environment: production   # Protect this environment in GitHub for approvals
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gh-actions-prod
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deploy deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve model artifact
+        id: resolve
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.override_model_tar }}" ]; then
+            echo "model_tar=${{ github.event.inputs.override_model_tar }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "model_tar=${DEFAULT_S3_MODEL_TAR}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save previous endpoint config (for rollback)
+        id: prev
+        run: |
+          PREV_CFG=$(aws sagemaker describe-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --query 'EndpointConfigName' --output text 2>/dev/null || echo "NONE")
+          echo "prev_config=$PREV_CFG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy prod (blue/green)
+        run: |
+          python pipelines/deploy_via_sagemaker_sdk.py \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --role-arn "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec" \
+            --image-uri "${ECR_IMAGE_URI}" \
+            --model-data "${{ steps.resolve.outputs.model_tar }}" \
+            --instance-type "${INSTANCE_TYPE}" \
+            --region "${AWS_REGION}"
+
+      - name: Smoke test prod
+        run: |
+          PAYLOAD='{"inputs":{"dataframe_split":{"columns":["station_id","hour","temp_c","dow"],"data":[[72,8,20.5,2]]}}}'
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --content-type "application/json" \
+            --body "$PAYLOAD" \
+            >(cat) \
+            --cli-binary-format raw-in-base64-out \
+            --region "${AWS_REGION}"
+
+      - name: Rollback on failure
+        if: failure() && steps.prev.outputs.prev_config != 'NONE'
+        run: |
+          echo "Smoke test failed — rolling back prod."
+          aws sagemaker update-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --endpoint-config-name "${{ steps.prev.outputs.prev_config }}" \
+            --region "${AWS_REGION}"

@@ -1,0 +1,92 @@
+name: CD_Staging
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispath:
+
+env:
+  AWS_REGION: ca_central_1
+  AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
+  ECR_IMAGE_URI: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5
+  S3_MODEL_TAR: s3://mlops-bikeshare-387706002632-ca-central-1/sagemaker/models/bikeshare_risk/model.tar.gz
+  ENDPOINT_NAME: bikeshare-staging
+  INSTANCE_TYPE: ml.m5.large
+
+permissions:
+  id_token: write
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false  # Avoid interrupting a live rollout
+
+jobs:
+  deploy-staging:
+    name: Deploy to SageMaker (staging)
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gh-actions-staging
+
+      # OPTIONAL: If you routinely rebuild/push the BYOC image, add ECR login + docker build/push here.
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deploy deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Capture previous endpoint config (for rollback)
+        id: prev
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREV_CFG=$(aws sagemaker describe-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --query 'EndpointConfigName' --output text 2>/dev/null || echo "NONE")
+          echo "prev_config=$PREV_CFG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy new config (blue/green)
+        id: deploy
+        run: |
+          python pipelines/deploy_via_sagemaker_sdk.py \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --role-arn "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec" \
+            --image-uri "${ECR_IMAGE_URI}" \
+            --model-data "${S3_MODEL_TAR}" \
+            --instance-type "${INSTANCE_TYPE}" \
+            --region "${AWS_REGION}"
+
+      - name: Smoke test endpoint
+        run: |
+          PAYLOAD='{"inputs":{"dataframe_split":{"columns":["station_id","hour","temp_c","dow"],"data":[[72,8,20.5,2]]}}}'
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --content-type "application/json" \
+            --body "$PAYLOAD" \
+            >(cat) \
+            --cli-binary-format raw-in-base64-out \
+            --region "${AWS_REGION}"
+
+      - name: Rollback on failure
+        if: failure() && steps.prev.outputs.prev_config != 'NONE'
+        run: |
+          echo "Smoke test failed — rolling back."
+          aws sagemaker update-endpoint \
+            --endpoint-name "${ENDPOINT_NAME}" \
+            --endpoint-config-name "${{ steps.prev.outputs.prev_config }}" \
+            --region "${AWS_REGION}"
