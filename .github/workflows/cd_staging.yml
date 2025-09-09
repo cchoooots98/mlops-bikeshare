@@ -2,8 +2,8 @@ name: CD_Staging
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispath:
+    branches: [main]
+  workflow_dispatch:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}                  # e.g., ca-central-1
@@ -15,7 +15,7 @@ env:
   SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
 
 permissions:
-  id_token: write
+  id-token: write
   contents: read
 
 concurrency:
