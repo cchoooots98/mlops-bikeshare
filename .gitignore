@@ -1,43 +1,4 @@
-﻿# --- Python basics ---
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-.ipynb_checkpoints/
-
-# --- Virtual envs ---
-.venv/
-.venv*/
-venv/
-env/
-
-# --- Build / dist / caches ---
-build/
-dist/
-.ruff_cache/
-.pytest_cache/
-.mypy_cache/
-
-# --- MLflow & artifacts (generated locally) ---
-mlruns/
-model_dir/
-*.png
-*.csv
-*.json
-MLmodel
-model.pkl
-model.tar.gz
-lambda_pkg.zip
-mlflow.db
-
-# --- Vendored libs accidentally committed ---
-src/package/
-
-# --- Infra/docker (if generated) ---
-docker/*-build*/
-# Terraform local cache (MUST NOT be versioned)
+﻿# Terraform local cache (must not be versioned)
 **/.terraform/
 infra/terraform/.terraform/
 
