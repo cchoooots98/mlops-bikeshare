@@ -79,16 +79,25 @@ jobs:
             --instance-type "${INSTANCE_TYPE}" \
             --region "${AWS_REGION}"
 
-      - name: Smoke test prod
+      - name: Smoke test prod (use repo script to match schema exactly)
+        shell: bash
         run: |
-          PAYLOAD='{"inputs":{"dataframe_split":{"columns":["station_id","hour","temp_c","dow"],"data":[[72,8,20.5,2]]}}}'
-          aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name "${ENDPOINT_NAME}" \
-            --content-type "application/json" \
-            --body "$PAYLOAD" \
-            >(cat) \
-            --cli-binary-format raw-in-base64-out \
-            --region "${AWS_REGION}"
+          # Install deps if your requirements.txt doesn't already include boto3
+          # English: Ensure boto3 is available for the script that invokes the endpoint.
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          python - <<'PY'
+          import importlib.util, sys
+          # English: Fallback install if boto3 not included in requirements.
+          spec = importlib.util.find_spec("boto3")
+          print("boto3 found:", bool(spec))
+          if not spec:
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
+          PY
+          
+          python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+
 
       - name: Rollback on failure
         if: failure() && steps.prev.outputs.prev_config != 'NONE'

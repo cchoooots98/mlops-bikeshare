@@ -6,12 +6,12 @@ on:
   workflow_dispath:
 
 env:
-  AWS_REGION: ca_central_1
-  AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
-  ECR_IMAGE_URI: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5
-  S3_MODEL_TAR: s3://mlops-bikeshare-387706002632-ca-central-1/sagemaker/models/bikeshare_risk/model.tar.gz
-  ENDPOINT_NAME: bikeshare-staging
-  INSTANCE_TYPE: ml.m5.large
+  AWS_REGION: ${{ vars.AWS_REGION }}            
+  ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}      
+  INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}      
+  ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}      
+  DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}
+  SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
 
 permissions:
   id_token: write
@@ -35,8 +35,18 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: gh-actions-staging
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: gh-actions-prod
+
+      - name: Resolve model artifact
+        id: resolve
+        run: |
+          # If user passed override_model_tar, use it; else use DEFAULT_S3_MODEL_TAR
+          if [ -n "${{ github.event.inputs.override_model_tar }}" ]; then
+            echo "model_tar=${{ github.event.inputs.override_model_tar }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "model_tar=${DEFAULT_S3_MODEL_TAR}" >> "$GITHUB_OUTPUT"
+          fi
 
       # OPTIONAL: If you routinely rebuild/push the BYOC image, add ECR login + docker build/push here.
 
@@ -65,22 +75,31 @@ jobs:
         run: |
           python pipelines/deploy_via_sagemaker_sdk.py \
             --endpoint-name "${ENDPOINT_NAME}" \
-            --role-arn "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec" \
+            --role-arn "${SM_EXECUTION_ROLE_Arn}" \
             --image-uri "${ECR_IMAGE_URI}" \
-            --model-data "${S3_MODEL_TAR}" \
+            --model-data "${{ steps.resolve.outputs.model_tar }}" \
             --instance-type "${INSTANCE_TYPE}" \
             --region "${AWS_REGION}"
 
-      - name: Smoke test endpoint
+      - name: Smoke test prod (use repo script to match schema exactly)
+        shell: bash
         run: |
-          PAYLOAD='{"inputs":{"dataframe_split":{"columns":["station_id","hour","temp_c","dow"],"data":[[72,8,20.5,2]]}}}'
-          aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name "${ENDPOINT_NAME}" \
-            --content-type "application/json" \
-            --body "$PAYLOAD" \
-            >(cat) \
-            --cli-binary-format raw-in-base64-out \
-            --region "${AWS_REGION}"
+          # Install deps if your requirements.txt doesn't already include boto3
+          # English: Ensure boto3 is available for the script that invokes the endpoint.
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          python - <<'PY'
+          import importlib.util, sys
+          # English: Fallback install if boto3 not included in requirements.
+          spec = importlib.util.find_spec("boto3")
+          print("boto3 found:", bool(spec))
+          if not spec:
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
+          PY
+          
+          python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+
 
       - name: Rollback on failure
         if: failure() && steps.prev.outputs.prev_config != 'NONE'
