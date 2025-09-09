@@ -58,7 +58,8 @@ jobs:
 
       - name: PyTest 
         env:
-          AWS_DEFAULT_REGION: ca-central-1  # if your tests need a region
+          # Ensure Python can import 'src' at repo root
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest -q
 
