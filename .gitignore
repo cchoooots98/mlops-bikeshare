@@ -5,9 +5,26 @@
 
 # Python
 .venv/
+.venv311/
+.venv313/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Tool caches
+.mypy_cache/
 .pytest_cache/
+.pyre/
+.tox/
 
 # IDE
 .vscode/
