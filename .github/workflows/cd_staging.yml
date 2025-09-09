@@ -6,11 +6,12 @@ on:
   workflow_dispath:
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}            
-  ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}      
-  INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}      
-  ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}      
-  DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}
+  AWS_REGION: ${{ vars.AWS_REGION }}                  # e.g., ca-central-1
+  ENDPOINT_NAME: ${{ vars.ENDPOINT_STAGING }}         # e.g., bikeshare-staging
+  INSTANCE_TYPE: ${{ vars.INSTANCE_STAGING }}         # e.g., ml.m5.large
+  ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}            # e.g., .../mlflow-pyfunc:3.3.2-v5
+  DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}      # default model tar to deploy
+  # ---- Secrets ----
   SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
 
 permissions:
@@ -36,17 +37,11 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          role-session-name: gh-actions-prod
+          role-session-name: gh-actions-staging
 
-      - name: Resolve model artifact
-        id: resolve
-        run: |
-          # If user passed override_model_tar, use it; else use DEFAULT_S3_MODEL_TAR
-          if [ -n "${{ github.event.inputs.override_model_tar }}" ]; then
-            echo "model_tar=${{ github.event.inputs.override_model_tar }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "model_tar=${DEFAULT_S3_MODEL_TAR}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: WhoAmI (debug)
+        # English: Quick sanity check that credentials work
+        run: aws sts get-caller-identity
 
       # OPTIONAL: If you routinely rebuild/push the BYOC image, add ECR login + docker build/push here.
 
@@ -58,7 +53,13 @@ jobs:
       - name: Install deploy deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt || true
+          python - <<'PY'
+          import importlib.util, subprocess, sys
+          for pkg in ("boto3","botocore"):
+              if importlib.util.find_spec(pkg) is None:
+                  subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+          PY
 
       - name: Capture previous endpoint config (for rollback)
         id: prev
@@ -69,36 +70,34 @@ jobs:
             --endpoint-name "${ENDPOINT_NAME}" \
             --query 'EndpointConfigName' --output text 2>/dev/null || echo "NONE")
           echo "prev_config=$PREV_CFG" >> "$GITHUB_OUTPUT"
+          echo "PreviousConfig=$PREV_CFG"
 
-      - name: Deploy new config (blue/green)
-        id: deploy
+      - name: Deploy (blue/green create-or-update)
+        # English: Same parameters as your local PowerShell command
         run: |
+          set -euo pipefail
           python pipelines/deploy_via_sagemaker_sdk.py \
             --endpoint-name "${ENDPOINT_NAME}" \
             --role-arn "${SM_EXECUTION_ROLE_Arn}" \
             --image-uri "${ECR_IMAGE_URI}" \
-            --model-data "${{ steps.resolve.outputs.model_tar }}" \
+            --model-data "${DEFAULT_S3_MODEL_TAR}" \
             --instance-type "${INSTANCE_TYPE}" \
             --region "${AWS_REGION}"
 
-      - name: Smoke test prod (use repo script to match schema exactly)
-        shell: bash
+      - name: Smoke test (use repo script to match schema exactly)
+        # English: Reuse your test/smoke_invoke.py to avoid column/order mismatch
         run: |
-          # Install deps if your requirements.txt doesn't already include boto3
-          # English: Ensure boto3 is available for the script that invokes the endpoint.
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          python - <<'PY'
-          import importlib.util, sys
-          # English: Fallback install if boto3 not included in requirements.
-          spec = importlib.util.find_spec("boto3")
-          print("boto3 found:", bool(spec))
-          if not spec:
-              import subprocess
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
-          PY
-          
+          set -euo pipefail
           python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+      
+      - name: Configure AWS (OIDC) for rollback
+        if: failure()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: gh-actions-staging-rollback
+
 
 
       - name: Rollback on failure

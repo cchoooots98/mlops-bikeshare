@@ -8,17 +8,21 @@ on:
         required: false
         default: ""
 
-env:
-  AWS_REGION: ca-central-1
-  AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
-  ECR_IMAGE_URI: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5
-  DEFAULT_S3_MODEL_TAR: s3://mlops-bikeshare-387706002632-ca-central-1/sagemaker/models/bikeshare_risk/model.tar.gz
-  ENDPOINT_NAME: bikeshare-prod
-  INSTANCE_TYPE: ml.m5.large
-
 permissions:
-  id-token: write
+  id-token: write                 # REQUIRED for GitHub OIDC → AWS
   contents: read
+
+env:
+  # ---- Non-secret configuration pulled from repo Variables ----
+  AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., ca-central-1
+  ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}           # e.g., bikeshare-prod
+  INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}           # e.g., ml.m5.large (or larger)
+  ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}           # e.g., .../mlflow-pyfunc:3.3.2-v5
+  DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}     # default model tar if no override
+  # ---- Secrets ----
+  SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
+  
+
 
 concurrency:
   group: prod-deploy
@@ -38,18 +42,28 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           role-session-name: gh-actions-prod
+      
+      - name: WhoAmI (debug)
+        run: aws sts get-caller-identity
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deploy deps
+            - name: Install deploy deps
+        # English: Ensure deploy and smoke scripts can import boto3 etc.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt || true
+          python - <<'PY'
+          import importlib.util, subprocess, sys
+          for pkg in ("boto3","botocore"):
+              if importlib.util.find_spec(pkg) is None:
+                  subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+          PY
 
       - name: Resolve model artifact
         id: resolve
@@ -57,8 +71,10 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.override_model_tar }}" ]; then
             echo "model_tar=${{ github.event.inputs.override_model_tar }}" >> "$GITHUB_OUTPUT"
+            echo "Using override model tar"
           else
             echo "model_tar=${DEFAULT_S3_MODEL_TAR}" >> "$GITHUB_OUTPUT"
+            echo "Using default model tar from repo variables"
           fi
 
       - name: Save previous endpoint config (for rollback)
@@ -68,35 +84,30 @@ jobs:
             --endpoint-name "${ENDPOINT_NAME}" \
             --query 'EndpointConfigName' --output text 2>/dev/null || echo "NONE")
           echo "prev_config=$PREV_CFG" >> "$GITHUB_OUTPUT"
+          echo "PreviousConfig=$PREV_CFG"
 
       - name: Deploy prod (blue/green)
         run: |
           python pipelines/deploy_via_sagemaker_sdk.py \
             --endpoint-name "${ENDPOINT_NAME}" \
-            --role-arn "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec" \
+            --role-arn  "${SM_EXECUTION_ROLE_Arn}"\
             --image-uri "${ECR_IMAGE_URI}" \
             --model-data "${{ steps.resolve.outputs.model_tar }}" \
             --instance-type "${INSTANCE_TYPE}" \
             --region "${AWS_REGION}"
 
       - name: Smoke test prod (use repo script to match schema exactly)
-        shell: bash
         run: |
-          # Install deps if your requirements.txt doesn't already include boto3
-          # English: Ensure boto3 is available for the script that invokes the endpoint.
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          python - <<'PY'
-          import importlib.util, sys
-          # English: Fallback install if boto3 not included in requirements.
-          spec = importlib.util.find_spec("boto3")
-          print("boto3 found:", bool(spec))
-          if not spec:
-              import subprocess
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
-          PY
-          
+          set -euo pipefail
           python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+
+      - name: Configure AWS (OIDC) for rollback
+        if: failure()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: gh-actions-prod-rollback
 
 
       - name: Rollback on failure
