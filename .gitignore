@@ -1,40 +1,39 @@
-# Terraform
-**/.terraform/
-*.tfstate
-*.tfstate.*
-
-# Python
-.venv/
-.venv311/
-.venv313/
+﻿# --- Python basics ---
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.so
+*.egg-info/
+.ipynb_checkpoints/
 
+# --- Virtual envs ---
+.venv/
+.venv*/
+venv/
+env/
 
-# Packaging / build artifacts
+# --- Build / dist / caches ---
 build/
 dist/
-*.egg-info/
-.eggs/
-pip-wheel-metadata/
-
-# Tool caches
-.mypy_cache/
+.ruff_cache/
 .pytest_cache/
-.pyre/
-.tox/
+.mypy_cache/
 
-# IDE
-.vscode/
-.idea/
+# --- MLflow & artifacts (generated locally) ---
+mlruns/
+model_dir/
+*.png
+*.csv
+*.json
+MLmodel
+model.pkl
+model.tar.gz
+lambda_pkg.zip
+mlflow.db
 
-# OS
-.DS_Store
-Thumbs.db
+# --- Vendored libs accidentally committed ---
+src/package/
 
-# GitHub specific ignores (from remote)
-node_modules/
-.env
-*.pem
+# --- Infra/docker (if generated) ---
+docker/*-build*/
