@@ -43,8 +43,8 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          role-session-name: gh-actions-prod
-          
+          role-session-name: gha-${{ github.run_id }}
+
       - name: Verify AWS identity
         run: aws sts get-caller-identity
       
