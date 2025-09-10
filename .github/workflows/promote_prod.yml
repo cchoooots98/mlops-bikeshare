@@ -44,6 +44,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           role-session-name: gh-actions-prod
+          
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
       
       - name: WhoAmI (debug)
         run: aws sts get-caller-identity
