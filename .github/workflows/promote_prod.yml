@@ -21,6 +21,7 @@ env:
   DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}     # default model tar if no override
   # ---- Secrets ----
   SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
+  MLFLOW_TRACKING_URI: sqlite:///${{ github.workspace }}/model_dir/mlflow.db
   
 
 

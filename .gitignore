@@ -24,3 +24,7 @@ src/package/
 # OS / IDE
 .DS_Store
 .vscode/
+
+# temporary JSON dumps
+*.log
+*.tmp

@@ -1,4 +1,0 @@
-MODEL_NAME=bikeshare_risk
-VERSION=1
-S3_ARTIFACT=s3://mlops-bikeshare-387706002632-ca-central-1/sagemaker/models/bikeshare_risk/model.tar.gz
-STAGE=Staging

@@ -48,7 +48,7 @@ def main():
 
     # Ensure a consistent MLflow tracking URI (absolute path recommended on Windows).
     tracking_uri = os.environ.get(
-        "MLFLOW_TRACKING_URI", "sqlite:///E:/算法自学/End2EndProject/mlops-bikeshare/mlflow.db"
+        "MLFLOW_TRACKING_URI", "sqlite:///E:/算法自学/End2EndProject/mlops-bikeshare/model_dir/mlflow.db"
     )
     mlflow.set_tracking_uri(tracking_uri)
     print("Using MLFLOW_TRACKING_URI:", tracking_uri)
