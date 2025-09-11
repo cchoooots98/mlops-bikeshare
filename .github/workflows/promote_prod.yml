@@ -104,6 +104,11 @@ jobs:
         run: |
           set -euo pipefail
           python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+        
+      - name: Tail CloudWatch logs (10m)
+        run: |
+          aws logs tail "/aws/sagemaker/Endpoints/bikeshare-prod" \
+            --since 10m --region ${{ env.AWS_REGION }} --max-items 100 || true
 
       - name: Configure AWS (OIDC) for rollback
         if: failure()
@@ -122,3 +127,19 @@ jobs:
             --endpoint-name "${ENDPOINT_NAME}" \
             --endpoint-config-name "${{ steps.prev.outputs.prev_config }}" \
             --region "${AWS_REGION}"
+      
+      - name: Capture S3 object version (if bucket versioning enabled)
+        id: s3ver
+        run: |
+          BUCKET=$(echo "${{ vars.S3_MODEL_TAR }}" | awk -F'/' '{print $3}')
+          KEY=$(echo "${{ vars.S3_MODEL_TAR }}" | cut -d'/' -f4-)
+          VID=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
+            --query 'Versions[?IsLatest==`true`].VersionId' --output text || true)
+          echo "version_id=$VID" >> $GITHUB_OUTPUT
+
+      - name: Publish release manifest
+        run: |
+          echo "### Production Release" >> $GITHUB_STEP_SUMMARY
+          echo "- S3: ${{ vars.S3_MODEL_TAR }}" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 VersionId: ${{ steps.s3ver.outputs.version_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ECR Image: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5" >> $GITHUB_STEP_SUMMARY

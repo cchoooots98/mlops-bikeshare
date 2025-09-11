@@ -198,7 +198,7 @@ def main():
     print("Uploaded to:", s3_uri)
 
     # 6) Emit a small manifest for the deploy step
-    with open("export_manifest.txt", "w", encoding="utf-8") as f:
+    with open(". model_dir/export_manifest.txt", "w", encoding="utf-8") as f:
         f.write(f"MODEL_NAME={args.model_name}\n")
         f.write(f"VERSION={version}\n")
         f.write(f"S3_ARTIFACT={s3_uri}\n")
