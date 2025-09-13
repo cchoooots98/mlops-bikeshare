@@ -3,6 +3,7 @@ requests
 pandas
 numpy
 pyarrow
+awswrangler
 s3fs
 PyAthena
 holidays

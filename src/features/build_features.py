@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from holidays import FR, US
 from pyathena import connect
-from schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
+from features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
 from sklearn.neighbors import BallTree
 
 EARTH_RADIUS_KM = 6371.0088
@@ -52,6 +52,7 @@ def query_df(cnx, sql: str) -> pd.DataFrame:
 
 
 def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
+    pd.read_sql("MSCK REPAIR TABLE station_status_raw", cnx)
     sql = f"""
     SELECT city, dt, station_id, bikes, docks, last_reported
     FROM {db}.v_station_status
@@ -65,6 +66,7 @@ def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
 def load_latest_info(cnx, city, db) -> pd.DataFrame:
     # Read from the UNNESTed view. This view already explodes $.data.stations.
     # We take the latest dt for the given city and return one row per station.
+    pd.read_sql("MSCK REPAIR TABLE station_information_raw", cnx)
     sql = f"""
     WITH latest AS (
       SELECT max(dt) AS mdt
@@ -87,6 +89,7 @@ def load_latest_info(cnx, city, db) -> pd.DataFrame:
 def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     # Read from curated view and select all available weather fields.
     # We alias prcp_mm -> precip_mm to match downstream column names used by schema.py.
+    pd.read_sql("MSCK REPAIR TABLE weather_hourly_raw", cnx)
     sql = f"""
     SELECT city,
            dt,
@@ -181,7 +184,8 @@ def _city_timezone(city: str) -> str:
 
 def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame:
     """
-    将逐小时的 weather（本地时区）对齐到 UTC 5分钟网格，使用 merge_asof 向后填充，避免 resample+reindex 带来的对齐空洞。
+    Align hourly weather (in the local time zone) to a UTC 5-minute grid,
+      using merge_asof to backfill and avoid alignment holes caused by resample+reindex.
     """
     # 5分钟 UTC 目标网格
     idx5 = pd.date_range(start=start_ts, end=end_ts, freq="5min", tz="UTC")
@@ -229,7 +233,7 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
 
     # 5) 诊断打印（可留可去）
     nn = {c: int(out[c].notna().sum()) for c in cols}
-    print(f"[DEBUG] weather5 asof non-null counts: {nn}")
+    # print(f"[DEBUG] weather5 asof non-null counts: {nn}")
 
     return out
 
@@ -478,11 +482,11 @@ def main():
     weather = load_weather(cnx, args.city, start_ts, end_ts, db)
     weather5 = align_weather_5min(weather, start_ts, end_ts, args.city)
 
-    print(
-        f"[DEBUG] weather rows: {len(weather)}; weather5 rows: {len(weather5)}; "
-        f"non-null temp_c in weather5: {weather5['temp_c'].notna().sum()}; "
-        f"non-null temp_c in weather: {weather['temp_c'].notna().sum()}"
-    )
+    # print(
+    #     f"[DEBUG] weather rows: {len(weather)}; weather5 rows: {len(weather5)}; "
+    #     f"non-null temp_c in weather5: {weather5['temp_c'].notna().sum()}; "
+    #     f"non-null temp_c in weather: {weather['temp_c'].notna().sum()}"
+    # )
 
     bad = info[info["lat"].isna() | info["lon"].isna()]
     if not bad.empty:
@@ -493,7 +497,7 @@ def main():
     df = engineer(status, info, weather5, nbr, args.horizon, args.threshold, args.city)
 
     tmp = df["temp_c"].notna().mean() if "temp_c" in df.columns else 0.0
-    print(f"[DEBUG] after merge, temp_c non-null ratio: {tmp:.1%}")
+    # print(f"[DEBUG] after merge, temp_c non-null ratio: {tmp:.1%}")
 
     keep_cols = (
         ["city", "dt", "station_id", "name", "capacity", "lat", "lon", "bikes", "docks"]

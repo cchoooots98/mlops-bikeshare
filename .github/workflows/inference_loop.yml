@@ -1,0 +1,45 @@
+name: Online inference loop
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}  
+  SM_ENDPOINT: ${{ vars.ENDPOINT_STAGING }}            
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Configure AWS OIDC -> role that has S3/Athena/SageMakerRuntime perms
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::387706002632:role/gh-oidc-deployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run online handler (predict + 30m actuals backfill)
+        env:
+          SM_ENDPOINT: ${{ env.SM_ENDPOINT }}
+        run: |
+          python src/inference/handler.py

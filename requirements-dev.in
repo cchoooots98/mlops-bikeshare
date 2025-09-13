@@ -3,3 +3,4 @@ pytest
 black
 moto[s3]>=5
 pip-tools
+ydata-profiling
