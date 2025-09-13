@@ -46,10 +46,10 @@ def _inference_table_create_if_absent(cnx, bucket):
     sql = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS inference (
         station_id string,
-        yhat double,            -- primary model score (e.g., risk of bikes stockout)
-        raw json                 -- optional raw vector/dict returned by the model
+        yhat_bikes double,            
+        raw string                 
     )
-    PARTITIONED BY (city string, dt string)
+    PARTITIONED BY (`city` string, `dt` string)
     STORED AS PARQUET
     LOCATION 's3://{bucket}/inference/'
     TBLPROPERTIES ('parquet.compression'='SNAPPY')
@@ -62,17 +62,16 @@ def _quality_table_create_if_absent(cnx, bucket):
     sql = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS monitoring_quality (
         station_id string,
-        dt string,              -- prediction time (t)
-        dt_plus30 string,       -- label time (t+30m)
-        yhat double,
+        dt string,            
+        dt_plus30 string,     
+        yhat_bikes double,
         y_stockout_bikes_30 double,
-        bikes_t30 int,
-        docks_t30 int
-    )
-    PARTITIONED BY (city string, ds string)    -- ds = date of prediction time, for fast scans
+        bikes_t30 int
+        )
+    PARTITIONED BY (city string, ds string)    
     STORED AS PARQUET
-    LOCATION 's3://{bucket}/monitoring/quality/'
-    TBLPROPERTIES ('parquet.compression'='SNAPPY')
+    LOCATION 's3://mlops-bikeshare-387706002632-ca-central-1/monitoring/quality/'
+    TBLPROPERTIES ('parquet.compression'='SNAPPY');
     """
     pd.read_sql(sql, cnx)
     pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
@@ -85,9 +84,11 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     If your Step 6 container expects a different schema, adjust here.
     """
     payload = {
-        "dataframe_split": {
-            "columns": FEATURE_COLUMNS,
-            "data": X[FEATURE_COLUMNS].astype(float).values.tolist()
+        "inputs": {
+            "dataframe_split": {
+                "columns": FEATURE_COLUMNS,
+                "data": X[FEATURE_COLUMNS].astype(float).values.tolist()
+            }
         }
     }
     resp = _smr().invoke_endpoint(
@@ -103,7 +104,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
         raise RuntimeError(f"Bad model response: {body[:500]}")
 
     # Flexible parsing: support either a scalar list or dict/list of dicts
-    # Normalize to a single 'yhat' column; keep 'raw' JSON for debugging.
+    # Normalize to a single 'yhat' column; keep 'raw'  for debugging.
     if isinstance(out, dict) and "predictions" in out:
         preds = out["predictions"]
     else:
@@ -123,7 +124,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     yhat = [to_scalar(p) for p in preds]
     res = X[["city", "dt", "station_id"]].copy()
     res["yhat_bikes"] = yhat
-    res["raw"] = pd.Series(preds, dtype="object")  # keep raw for inspection
+    res["raw"] = pd.Series([json.dumps(p, ensure_ascii=False) for p in preds], dtype="string")
     return res
 
 
@@ -135,7 +136,7 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
     # Compute t+30 string and fetch bikes/docks at t+30 for all stations
     dt_plus30 = (datetime.strptime(pred_dt, "%Y-%m-%d-%H-%M") + timedelta(minutes=30)).strftime("%Y-%m-%d-%H-%M")
     sql = f"""
-    SELECT station_id, bikes AS bikes_t30, docks AS docks_t30
+    SELECT station_id, bikes AS bikes_t30
     FROM {cnx.schema_name}.v_station_status
     WHERE city = '{city}' AND dt = '{dt_plus30}'
     """
@@ -176,6 +177,7 @@ def main():
     latest_dt = X["dt"].iloc[0]
 
     preds = _invoke_endpoint(endpoint_name, X)
+    
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"

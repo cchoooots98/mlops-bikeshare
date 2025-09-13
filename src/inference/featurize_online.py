@@ -75,7 +75,7 @@ def build_online_features(city: str) -> pd.DataFrame:
     """
     ########
     status=load_status(cnx, city, start_ts, latest_dt, db)
-    print(f"[DEBUG_online] the shape of the status:{status.shape}")
+    #print(f"[DEBUG_online] the shape of the status:{status.shape}")
     # status = query_df(cnx, sql_status)
     if status.empty:
         raise RuntimeError("No recent status rows in the chosen window.")
@@ -85,10 +85,10 @@ def build_online_features(city: str) -> pd.DataFrame:
 
     # 4) Weather: load hourlies, align to 5-min grid, and merge with status using the SAME merge_asof rules
     weather = load_weather(cnx, city, start_ts, latest_dt, db)
-    print(f"[DEBUG_online] the shape of the weather: {weather.shape}")
+    # print(f"[DEBUG_online] the shape of the weather: {weather.shape}")
 
     weather5 = align_weather_5min(weather, start_ts, latest_dt, city)
-    print(f"[DEBUG_online] the shape of the weather5: {weather5.shape}")
+    # print(f"[DEBUG_online] the shape of the weather5: {weather5.shape}")
 
     # 5) Neighbor table (same BallTree haversine approach as offline)
     nbr = build_neighbors(info, k=5, max_radius_km=0.8)
@@ -124,7 +124,7 @@ def build_online_features(city: str) -> pd.DataFrame:
             else pd.to_datetime(end_ts).tz_convert("UTC")
 
     # Align to the nearest minute to avoid seconds/milliseconds mismatches
-    end_ts = end_ts.floor("T")
+    end_ts = end_ts.floor("min")
 
     # 3) Try exact match first
     latest = df_full.loc[df_full["ts_utc"] == end_ts].copy()

@@ -337,7 +337,7 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="nyc
     ]
     hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
     counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
-    print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; non-null counts: {counts}")
+    # print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; non-null counts: {counts}")
 
     # 🔧 Impute city-level weather gaps (safe because weather is city-level)
     joined = joined.sort_values("ts_utc")

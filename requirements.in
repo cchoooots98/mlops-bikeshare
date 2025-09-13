@@ -4,6 +4,9 @@ pandas
 numpy
 pyarrow
 awswrangler
+lightgbm
+seaborn
+xgboost
 s3fs
 PyAthena
 holidays
