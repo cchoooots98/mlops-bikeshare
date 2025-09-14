@@ -92,11 +92,9 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     If your Step 6 container expects a different schema, adjust here.
     """
     payload = {
-        "inputs": {
-            "dataframe_split": {
-                "columns": FEATURE_COLUMNS,
-                "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),
-            }
+        "dataframe_split": {
+            "columns": FEATURE_COLUMNS,
+            "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),      
         }
     }
     resp = _smr().invoke_endpoint(
@@ -106,6 +104,10 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
         Body=json.dumps(payload).encode("utf-8"),
     )
     body = resp["Body"].read()
+
+    code = resp.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if code and code >= 300:
+        raise RuntimeError(f"InvokeEndpoint failed with HTTP {code}")
     try:
         out = json.loads(body.decode("utf-8"))
     except Exception:
@@ -138,7 +140,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     return res
 
 
-def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) -> pd.DataFrame:
+def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, db: str, threshold: int = 2) -> pd.DataFrame:
     """
     Build t+30m actuals from v_station_status, then compute label:
     y_stockout_bikes_30 = 1.0 if bikes(t+30m) <= threshold else 0.0
@@ -147,7 +149,7 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
     dt_plus30 = (datetime.strptime(pred_dt, "%Y-%m-%d-%H-%M") + timedelta(minutes=30)).strftime("%Y-%m-%d-%H-%M")
     sql = f"""
     SELECT station_id, bikes AS bikes_t30
-    FROM {cnx.schema_name}.v_station_status
+    FROM {db}.v_station_status
     WHERE city = '{city}' AND dt = '{dt_plus30}'
     """
     df = query_df(cnx, sql)
@@ -166,6 +168,7 @@ def main():
     cfg = read_env()
     city = cfg["city"]
     bucket = cfg["bucket"]
+    db = cfg["athena_database"]
 
     # You can switch between staging/prod via env or CLI args (simplest: set here)
     endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-prod")
@@ -218,7 +221,7 @@ def main():
         if dt_pred != latest_dt:
             continue
 
-        actuals = _compute_actuals_for_dt(cnx, city, dt_pred, threshold=2)
+        actuals = _compute_actuals_for_dt(cnx, city, dt_pred, db, threshold=2)
         if actuals.empty:
             continue
 
