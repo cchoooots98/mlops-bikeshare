@@ -26,6 +26,7 @@ from src.inference.featurize_online import build_online_features  # latest featu
 
 YHAT_PROB_THRESHOLD = 0.15
 
+
 def _s3():
     return boto3.client("s3")
 

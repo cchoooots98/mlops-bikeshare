@@ -5,7 +5,6 @@
 
 from datetime import datetime, timedelta
 
-import numpy as np
 import pandas as pd
 
 # # Ensure we can import "features.*" if script is executed directly from repo root
