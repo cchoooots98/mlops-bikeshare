@@ -34,7 +34,8 @@ def main():
 
     smrt = boto3.client("sagemaker-runtime", region_name=args.region)
 
-    row = np.array([
+    row = np.array(
+        [
             0.60,
             0.40,  # util_bikes, util_docks (0..1)
             -1.0,
@@ -60,7 +61,9 @@ def main():
             15.0,  # wind_dir_deg, wind_gust_kph
             0.0,
             2,  # snow_mm, weather_code
-        ], dtype=np.float32).tolist()  # <-- ensure float32
+        ],
+        dtype=np.float32,
+    ).tolist()  # <-- ensure float32
 
     payload = {"inputs": {"dataframe_split": {"columns": FEATURE_COLUMNS, "data": [row]}}}
 

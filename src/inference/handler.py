@@ -11,8 +11,8 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import boto3
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from src.features.build_features import athena_conn, query_df, read_env  # reuse env + athena
@@ -89,7 +89,10 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
     payload = {
         "inputs": {
-            "dataframe_split": {"columns": FEATURE_COLUMNS, "data": X[FEATURE_COLUMNS].astype(np.float32).values.tolist()}
+            "dataframe_split": {
+                "columns": FEATURE_COLUMNS,
+                "data": X[FEATURE_COLUMNS].astype(np.float32).values.tolist(),
+            }
         }
     }
     resp = _smr().invoke_endpoint(
