@@ -10,6 +10,8 @@ import sys
 
 import boto3
 import botocore
+import time
+from botocore.exceptions import ClientError
 
 
 def ts_suffix() -> str:
@@ -138,6 +140,62 @@ def wait_in_service(sm, endpoint_name: str):
         # Re-raise to make the process non-zero exit for CI/CD visibility
         raise
 
+def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, poll_sec: int = 15) -> str:
+    """
+    Wait until endpoint is NOT in a progress state like Creating/Updating/RollingBack/Deleting.
+    Returns the final status (e.g., 'InService', 'Failed', 'OutOfService', or 'NonExistent').
+    """
+    progress = {"Creating", "Updating", "SystemUpdating", "RollingBack", "Deleting"}
+    deadline = time.time() + timeout_sec
+    while True:
+        try:
+            desc = sm.describe_endpoint(EndpointName=endpoint_name)
+            status = desc.get("EndpointStatus", "Unknown")
+        except ClientError as e:
+            # If the endpoint truly does not exist, treat as ready to create
+            if e.response.get("Error", {}).get("Code") == "ValidationException":
+                return "NonExistent"
+            raise
+        if status not in progress:
+            return status
+        if time.time() >= deadline:
+            raise TimeoutError(f"Endpoint '{endpoint_name}' stuck in {status}")
+        time.sleep(poll_sec)
+
+# --- modify upsert_endpoint(...) in-place ---
+def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
+    """
+    Update the endpoint if it exists; otherwise create it.
+    Now robust against 'Cannot update in-progress endpoint'.
+    """
+    try:
+        sm.describe_endpoint(EndpointName=endpoint_name)  # exists -> we'll update
+        print(f"[INFO] Updating Endpoint: {endpoint_name}")
+        status = wait_until_not_in_progress(sm, endpoint_name)
+        print(f"[INFO] Endpoint status before update: {status}")
+        try:
+            sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
+        except ClientError as e:
+            msg = e.response.get("Error", {}).get("Message", "")
+            if "Cannot update in-progress endpoint" in msg:
+                print("[WARN] In progress again; waiting and retrying once ...")
+                status = wait_until_not_in_progress(sm, endpoint_name)
+                print(f"[INFO] Endpoint status before retry: {status}")
+                sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
+            else:
+                print("[ERROR] update_endpoint failed:")
+                print(e.response)
+                raise
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        msg = e.response.get("Error", {}).get("Message", "")
+        if code == "ValidationException" and "Could not find endpoint" in msg:
+            print(f"[INFO] Creating Endpoint: {endpoint_name}")
+            sm.create_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
+        else:
+            print("[ERROR] update_endpoint failed; not creating because endpoint exists or another error occurred.")
+            print(e.response)
+            raise
 
 def main():
     args = parse_args()
@@ -164,6 +222,9 @@ def main():
     create_endpoint_config(
         sm=sm, endpoint_config_name=endpoint_config_name, model_name=model_name, instance_type=args.instance_type
     )
+
+    wait_until_not_in_progress(sm=sm, endpoint_name=args.endpoint_name)
+    upsert_endpoint(sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
 
     # 3) Update/Create Endpoint and wait
     upsert_endpoint(sm=sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
