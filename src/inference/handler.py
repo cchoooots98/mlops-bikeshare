@@ -27,12 +27,14 @@ from src.inference.featurize_online import build_online_features  # latest featu
 def _s3():
     return boto3.client("s3")
 
+
 def _smr():
     # SageMaker runtime client for InvokeEndpoint
     return boto3.client("sagemaker-runtime")
 
+
 def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
-    # Write a small DataFrame to S3 as parquet 
+    # Write a small DataFrame to S3 as parquet
     # (in-memory buffer to avoid temp files on Windows)
     table = pa.Table.from_pandas(df)
     buf = io.BytesIO()
@@ -56,6 +58,7 @@ def _inference_table_create_if_absent(cnx, bucket):
     """
     pd.read_sql(sql, cnx)
     pd.read_sql("MSCK REPAIR TABLE inference", cnx)
+
 
 def _quality_table_create_if_absent(cnx, bucket):
     # External table for monitoring join
@@ -85,17 +88,14 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
     payload = {
         "inputs": {
-            "dataframe_split": {
-                "columns": FEATURE_COLUMNS,
-                "data": X[FEATURE_COLUMNS].astype(float).values.tolist()
-            }
+            "dataframe_split": {"columns": FEATURE_COLUMNS, "data": X[FEATURE_COLUMNS].astype(float).values.tolist()}
         }
     }
     resp = _smr().invoke_endpoint(
         EndpointName=endpoint_name,
         ContentType="application/json",
         Accept="application/json",
-        Body=json.dumps(payload).encode("utf-8")
+        Body=json.dumps(payload).encode("utf-8"),
     )
     body = resp["Body"].read()
     try:
@@ -147,7 +147,7 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
 
     if df.empty:
         # Not ready yet; a future run will fill this in.
-        return pd.DataFrame(columns=["station_id","bikes_t30","y_stockout_bikes_30","dt_plus30"])
+        return pd.DataFrame(columns=["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"])
 
     df["y_stockout_bikes_30"] = (df["bikes_t30"] <= threshold).astype("float32")
     df["dt_plus30"] = dt_plus30
@@ -180,11 +180,10 @@ def main():
     latest_dt = X["dt"].iloc[0]
 
     preds = _invoke_endpoint(endpoint_name, X)
-    
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
-    _write_parquet_s3(preds[["station_id","yhat_bikes","raw"]], bucket, pred_key)
+    _write_parquet_s3(preds[["station_id", "yhat_bikes", "raw"]], bucket, pred_key)
 
     # Repair partitions (lightweight)
     try:
@@ -199,7 +198,7 @@ def main():
     now_utc = datetime.now(timezone.utc)
     candidate_dts = []
     for k in range(0, 13):  # ~last 60 minutes
-        dtk = (datetime.strptime(latest_dt, "%Y-%m-%d-%H-%M") - timedelta(minutes=5*k)).strftime("%Y-%m-%d-%H-%M")
+        dtk = (datetime.strptime(latest_dt, "%Y-%m-%d-%H-%M") - timedelta(minutes=5 * k)).strftime("%Y-%m-%d-%H-%M")
         # Only attempt if t+30m should already exist
         if now_utc >= (datetime.strptime(dtk, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc) + timedelta(minutes=30)):
             candidate_dts.append(dtk)
@@ -217,18 +216,17 @@ def main():
             continue
 
         # Join preds+actuals on station_id
-        joined = (
-            preds.merge(actuals[["station_id","bikes_t30","y_stockout_bikes_30","dt_plus30"]],
-                        on="station_id", how="inner")
-                 .assign(dt=lambda d: dt_pred)
-        )
+        joined = preds.merge(
+            actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]], on="station_id", how="inner"
+        ).assign(dt=lambda d: dt_pred)
 
         # Write to monitoring/quality partitioned by city, ds (ds = date of pred time)
         ds = dt_pred[:10]  # YYYY-MM-DD
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
-            joined[["station_id","dt","dt_plus30","yhat_bikes","y_stockout_bikes_30","bikes_t30"]],
-            bucket, qual_key
+            joined[["station_id", "dt", "dt_plus30", "yhat_bikes", "y_stockout_bikes_30", "bikes_t30"]],
+            bucket,
+            qual_key,
         )
         try:
             pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)

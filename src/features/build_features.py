@@ -232,7 +232,6 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
     joined["dt"] = joined["ts"].dt.strftime("%Y-%m-%d-%H-%M")
     out = joined[["dt"] + cols].copy()
 
-    
     # print(f"[DEBUG] weather5 asof non-null counts: {nn}")
 
     return out

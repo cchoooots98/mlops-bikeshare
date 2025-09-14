@@ -81,8 +81,10 @@ class TrainConfig:
     xgb_params: dict = None  # baseline XGBoost params
     lgb_params: dict = None  # baseline LightGBM params
 
+
 class ProbWrapper(mlflow.pyfunc.PythonModel):
     """Wrapper so that .predict() returns P(y=1) instead of hard 0/1 labels."""
+
     def __init__(self, base_model, feature_names):
         # Store trained classifier and the feature list
         self._m = base_model
@@ -95,6 +97,8 @@ class ProbWrapper(mlflow.pyfunc.PythonModel):
         X = model_input[self._feat].astype("float32")
         # Return probability for positive class
         return self._m.predict_proba(X)[:, 1]
+
+
 # ------------------------
 # Athena helpers
 # ------------------------
@@ -208,7 +212,9 @@ def pick_threshold_fbeta(y_true: np.ndarray, y_prob: np.ndarray, beta: float):
     return best_t, best
 
 
-def log_curves_and_confusion(y_true: np.ndarray, y_prob: np.ndarray, threshold: float ,out_dir_plots: str, prefix: str = "val"):
+def log_curves_and_confusion(
+    y_true: np.ndarray, y_prob: np.ndarray, threshold: float, out_dir_plots: str, prefix: str = "val"
+):
     """
     Log PR curve + confusion matrix (PNG) to MLflow.
     """
@@ -234,7 +240,7 @@ def log_curves_and_confusion(y_true: np.ndarray, y_prob: np.ndarray, threshold: 
     plt.close(fig_cm)
 
 
-def log_feature_importance(model, feature_names: List[str],out_dir_featimp: str):
+def log_feature_importance(model, feature_names: List[str], out_dir_featimp: str):
     """
     Save feature importance as CSV and PNG.
     Supports XGBoost (gain) and LightGBM (split counts).
@@ -263,7 +269,6 @@ def log_feature_importance(model, feature_names: List[str],out_dir_featimp: str)
         return  # nothing to log
 
     importances = importances.sort_values("importance", ascending=False)
-
 
     csv_blob = importances.to_csv(index=False)
     mlflow.log_text(csv_blob, f"{out_dir_featimp}/feature_importance.csv")
@@ -306,8 +311,6 @@ def main():
     parser.add_argument("--use-sm-exp", action="store_true", help="Enable SageMaker Experiments autolog (optional)")
 
     args = parser.parse_args()
-
-
 
     # Build configs
     dcfg = DataConfig(
@@ -353,9 +356,6 @@ def main():
         },
     )
 
-
-
-
     # Load data from Athena
     cnx = athena_conn(
         region=dcfg.region,
@@ -364,19 +364,19 @@ def main():
         schema_name=dcfg.athena_database,
     )
 
-        # --------------------------
+    # --------------------------
     # Unified artifact namespaces
     # --------------------------
     task_id = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}"  # e.g., nyc_y_stockout_bikes_30_xgboost
 
-    DIR_PLOTS    = f"artifacts/{task_id}/plots"         # curves, confusion matrices
-    DIR_EVAL     = f"artifacts/{task_id}/eval"          # eval json, metrics
-    DIR_FEATIMP  = f"artifacts/{task_id}/feature_importance"
-   
-    MODEL_NAME_BASE  = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., nyc_y_stockout_bikes_30_xgboost__base_sklearn
-    MODEL_NAME_PROBA = f"{task_id}__model_proba"   # e.g., nyc_y_stockout_bikes_30_xgboost__model_proba
+    DIR_PLOTS = f"artifacts/{task_id}/plots"  # curves, confusion matrices
+    DIR_EVAL = f"artifacts/{task_id}/eval"  # eval json, metrics
+    DIR_FEATIMP = f"artifacts/{task_id}/feature_importance"
 
-
+    MODEL_NAME_BASE = (
+        f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., nyc_y_stockout_bikes_30_xgboost__base_sklearn
+    )
+    MODEL_NAME_PROBA = f"{task_id}__model_proba"  # e.g., nyc_y_stockout_bikes_30_xgboost__model_proba
 
     # Get the distinct dt’s in the window (lightweight)
     dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)
@@ -463,9 +463,15 @@ def main():
         )
 
         # Artifacts
-        log_curves_and_confusion(y_valid, valid_prob, threshold=best_t, out_dir_plots=DIR_PLOTS,prefix="val", )
+        log_curves_and_confusion(
+            y_valid,
+            valid_prob,
+            threshold=best_t,
+            out_dir_plots=DIR_PLOTS,
+            prefix="val",
+        )
         log_curves_and_confusion(y_train, train_prob, threshold=best_t, out_dir_plots=DIR_PLOTS, prefix="train")
-        log_feature_importance(model, features,out_dir_featimp=DIR_FEATIMP)
+        log_feature_importance(model, features, out_dir_featimp=DIR_FEATIMP)
 
         # Save eval summary for model_card.md generation
         eval_blob = {
@@ -496,17 +502,16 @@ def main():
 
         # Build a tiny sample input for model signature
         sample_X = pd.DataFrame({f: pd.Series([0.0], dtype="float32") for f in features})[features]
-        
+
         signature = infer_signature(sample_X, pd.Series([0.5], dtype="float64"))
 
         # Log wrapped model as a separate artifact path in MLflow
         mlflow.pyfunc.log_model(
-            name=MODEL_NAME_PROBA,                
+            name=MODEL_NAME_PROBA,
             python_model=ProbWrapper(model, features),
             signature=signature,
             input_example=sample_X,
         )
-
 
         print(f"[OK] Logged probability-serving model as MLflow model '{MODEL_NAME_PROBA}'")
 

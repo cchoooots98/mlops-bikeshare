@@ -34,12 +34,12 @@ def _latest_dt_ts(cnx, city: str, db: str) -> str:
     FROM {db}.v_station_status
     WHERE city = '{city}'
     """
-    
+
     df = pd.read_sql(sql, cnx)
     if df.empty or df.loc[0, "latest_ts"] is None:
         raise RuntimeError("No station status found for city.")
     ts = pd.to_datetime(df.loc[0, "latest_ts"], utc=True)
-    
+
     return ts.strftime("%Y-%m-%d %H:%M")
 
 
@@ -60,10 +60,10 @@ def build_online_features(city: str) -> pd.DataFrame:
 
     # 1) Find latest dt for CITY
     latest_dt = _latest_dt_ts(cnx, city, db)  # (a string)
-    
+
     # Window start is ~65 minutes before the latest to cover 12 steps (60m) + a safety margin
-    
-    end_ts = datetime.strptime(latest_dt, "%Y-%m-%d %H:%M") # datetime object
+
+    end_ts = datetime.strptime(latest_dt, "%Y-%m-%d %H:%M")  # datetime object
 
     start_ts = (end_ts - timedelta(minutes=65)).strftime("%Y-%m-%d %H:%M")
 
@@ -76,8 +76,8 @@ def build_online_features(city: str) -> pd.DataFrame:
     #           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{latest_dt}:00'
     # """
     ########
-    status=load_status(cnx, city, start_ts, latest_dt, db)
-    #print(f"[DEBUG_online] the shape of the status:{status.shape}")
+    status = load_status(cnx, city, start_ts, latest_dt, db)
+    # print(f"[DEBUG_online] the shape of the status:{status.shape}")
     # status = query_df(cnx, sql_status)
     if status.empty:
         raise RuntimeError("No recent status rows in the chosen window.")
@@ -104,26 +104,26 @@ def build_online_features(city: str) -> pd.DataFrame:
         info=info,
         weather5=weather5,
         nbr=nbr,
-        horizon_min=30,   # horizon is irrelevant for online features; labels are dropped below
+        horizon_min=30,  # horizon is irrelevant for online features; labels are dropped below
         threshold=2,
         city=city,
     )
 
-  # 1) Parse df_full["dt"] into datetime64[ns, UTC]
+    # 1) Parse df_full["dt"] into datetime64[ns, UTC]
     # dt format looks like "2025-09-12-23-05"
     df_full["ts_utc"] = pd.to_datetime(
-        df_full["dt"],
-        format="%Y-%m-%d-%H-%M",  # must match your dt format exactly
-        errors="coerce",
-        utc=True
+        df_full["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True  # must match your dt format exactly
     )
 
     # 2) Normalize end_ts to a pandas.Timestamp with UTC timezone
     # If end_ts is a string like "2025-09-13-00-10":
     #   end_ts = pd.to_datetime(end_ts, format="%Y-%m-%d-%H-%M", utc=True)
     # If it's already datetime or Timestamp, unify it to UTC:
-    end_ts = pd.to_datetime(end_ts, utc=True) if getattr(end_ts, "tzinfo", None) is None \
-            else pd.to_datetime(end_ts).tz_convert("UTC")
+    end_ts = (
+        pd.to_datetime(end_ts, utc=True)
+        if getattr(end_ts, "tzinfo", None) is None
+        else pd.to_datetime(end_ts).tz_convert("UTC")
+    )
 
     # Align to the nearest minute to avoid seconds/milliseconds mismatches
     end_ts = end_ts.floor("min")
@@ -131,8 +131,7 @@ def build_online_features(city: str) -> pd.DataFrame:
     # 3) Try exact match first
     latest = df_full.loc[df_full["ts_utc"] == end_ts].copy()
 
-
-    latest= latest.drop(columns=["ts_utc"])
+    latest = latest.drop(columns=["ts_utc"])
 
     # Minimal sanity checks to protect serving:
     if latest.empty:
