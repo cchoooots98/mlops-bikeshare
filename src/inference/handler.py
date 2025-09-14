@@ -51,7 +51,8 @@ def _inference_table_create_if_absent(cnx, bucket):
     sql = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS inference (
         station_id string,
-        yhat_bikes double,            
+        yhat_bikes double,
+        yhat_bikes_bin double,
         raw string                 
     )
     PARTITIONED BY (`city` string, `dt` string)
@@ -71,6 +72,7 @@ def _quality_table_create_if_absent(cnx, bucket):
         dt string,            
         dt_plus30 string,     
         yhat_bikes double,
+        yhat_bikes_bin double,
         y_stockout_bikes_30 double,
         bikes_t30 int
         )
@@ -115,8 +117,6 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
         preds = out["predictions"]
     else:
         preds = out
-
-    print(f"[DEBUG_hander] the out: {out}")
 
     # Heuristics:
     def to_scalar(x):
@@ -231,7 +231,7 @@ def main():
         ds = dt_pred[:10]  # YYYY-MM-DD
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
-            joined[["station_id", "dt", "dt_plus30", "yhat_bikes", "y_stockout_bikes_30", "bikes_t30"]],
+            joined[["station_id", "dt", "dt_plus30", "yhat_bikes","yhat_bikes_bin", "y_stockout_bikes_30", "bikes_t30"]],
             bucket,
             qual_key,
         )

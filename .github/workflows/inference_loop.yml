@@ -42,4 +42,4 @@ jobs:
         env:
           SM_ENDPOINT: ${{ env.SM_ENDPOINT }}
         run: |
-          python src/inference/handler.py
+          python -m src.inference.handler

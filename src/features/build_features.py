@@ -11,7 +11,7 @@ from holidays import FR, US
 from pyathena import connect
 from sklearn.neighbors import BallTree
 
-from features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
+from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
 
 EARTH_RADIUS_KM = 6371.0088
 
