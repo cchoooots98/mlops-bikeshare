@@ -24,6 +24,7 @@ from src.features.build_features import athena_conn, query_df, read_env  # reuse
 from src.features.schema import FEATURE_COLUMNS  # same order as training
 from src.inference.featurize_online import build_online_features  # latest feature batch
 
+YHAT_PROB_THRESHOLD = 0.15
 
 def _s3():
     return boto3.client("s3")
@@ -131,7 +132,8 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     res = X[["city", "dt", "station_id"]].copy()
     res["yhat_bikes"] = yhat
     res["raw"] = pd.Series([json.dumps(p, ensure_ascii=False) for p in preds], dtype="string")
-
+    # Add binary classification column based on global threshold
+    res["yhat_bikes_bin"] = (res["yhat_bikes"] >= YHAT_PROB_THRESHOLD).astype("float64")
     return res
 
 
@@ -187,7 +189,7 @@ def main():
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
-    _write_parquet_s3(preds[["station_id", "yhat_bikes", "raw"]], bucket, pred_key)
+    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "raw"]], bucket, pred_key)
 
     # Repair partitions (lightweight)
     try:

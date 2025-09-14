@@ -106,7 +106,7 @@ def build_online_features(city: str) -> pd.DataFrame:
         weather5=weather5,
         nbr=nbr,
         horizon_min=30,  # horizon is irrelevant for online features; labels are dropped below
-        threshold=2,
+        threshold=2,  # threshold is irrelevant for online features; labels are dropped below
         city=city,
     )
 
