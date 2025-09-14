@@ -6,6 +6,7 @@
 from datetime import datetime, timedelta
 
 import pandas as pd
+import numpy as np
 
 # # Ensure we can import "features.*" if script is executed directly from repo root
 # REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -142,6 +143,7 @@ def build_online_features(city: str) -> pd.DataFrame:
 
     # Assemble the feature matrix for the model
     X = latest[["city", "dt", "station_id"] + FEATURE_COLUMNS].copy()
+    X[FEATURE_COLUMNS] = X[FEATURE_COLUMNS].astype(np.float32)
     return X
 
 

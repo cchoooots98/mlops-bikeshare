@@ -16,10 +16,8 @@ import matplotlib.pyplot as plt
 
 # Tracking
 import mlflow
-import mlflow.lightgbm
 import mlflow.pyfunc
 import mlflow.sklearn
-import mlflow.xgboost
 import numpy as np
 import pandas as pd
 import seaborn as sns
