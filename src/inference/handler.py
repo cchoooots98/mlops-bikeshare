@@ -91,7 +91,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
         "inputs": {
             "dataframe_split": {
                 "columns": FEATURE_COLUMNS,
-                "data": X[FEATURE_COLUMNS].astype(np.float32).values.tolist(),
+                "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),
             }
         }
     }
@@ -153,7 +153,7 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
         # Not ready yet; a future run will fill this in.
         return pd.DataFrame(columns=["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"])
 
-    df["y_stockout_bikes_30"] = (df["bikes_t30"] <= threshold).astype("float32")
+    df["y_stockout_bikes_30"] = (df["bikes_t30"] <= threshold).astype("float64")
     df["dt_plus30"] = dt_plus30
     return df
 

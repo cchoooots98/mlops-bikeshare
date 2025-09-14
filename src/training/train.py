@@ -92,7 +92,7 @@ class ProbWrapper(mlflow.pyfunc.PythonModel):
         # Ensure DataFrame input with exact feature order
         if not isinstance(model_input, pd.DataFrame):
             model_input = pd.DataFrame(model_input, columns=self._feat)
-        X = model_input[self._feat].astype("float32")
+        X = model_input[self._feat].astype("float64")
         # Return probability for positive class
         return self._m.predict_proba(X)[:, 1]
 
@@ -409,9 +409,9 @@ def main():
     validate_feature_df(valid_df)
     valid_df = valid_df.dropna(subset=[label])
 
-    X_train = train_df[features].astype("float32")
+    X_train = train_df[features].astype("float64")
     y_train = train_df[label].astype(int).values
-    X_valid = valid_df[features].astype("float32")
+    X_valid = valid_df[features].astype("float64")
     y_valid = valid_df[label].astype(int).values
 
     # MLflow experiment
@@ -499,7 +499,7 @@ def main():
         mlflow.sklearn.log_model(model, name=MODEL_NAME_BASE)
 
         # Build a tiny sample input for model signature
-        sample_X = pd.DataFrame({f: pd.Series([0.0], dtype="float32") for f in features})[features]
+        sample_X = pd.DataFrame({f: pd.Series([0.0], dtype="float64") for f in features})[features]
 
         signature = infer_signature(sample_X, pd.Series([0.5], dtype="float64"))
 
