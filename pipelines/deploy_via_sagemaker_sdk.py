@@ -7,10 +7,10 @@ import argparse
 import datetime as dt
 import re
 import sys
+import time
 
 import boto3
 import botocore
-import time
 from botocore.exceptions import ClientError
 
 
@@ -93,28 +93,6 @@ def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, insta
         raise
 
 
-def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
-    """
-    Update the endpoint if it exists; otherwise create it.
-    """
-    try:
-        # If describe works, endpoint exists -> update it
-        sm.describe_endpoint(EndpointName=endpoint_name)
-        print(f"[INFO] Updating Endpoint: {endpoint_name}")
-        sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
-    except botocore.exceptions.ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        msg = e.response.get("Error", {}).get("Message", "")
-        # Only create if the endpoint truly does not exist
-        if code == "ValidationException" and "Could not find endpoint" in msg:
-            print(f"[INFO] Creating Endpoint: {endpoint_name}")
-            sm.create_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
-        else:
-            print("[ERROR] update_endpoint failed; not creating because endpoint exists or another error occurred.")
-            print(e.response)
-            raise
-
-
 def wait_in_service(sm, endpoint_name: str):
     """
     Wait for the endpoint to become InService. If it fails, print FailureReason.
@@ -140,6 +118,7 @@ def wait_in_service(sm, endpoint_name: str):
         # Re-raise to make the process non-zero exit for CI/CD visibility
         raise
 
+
 def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, poll_sec: int = 15) -> str:
     """
     Wait until endpoint is NOT in a progress state like Creating/Updating/RollingBack/Deleting.
@@ -162,7 +141,7 @@ def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, p
             raise TimeoutError(f"Endpoint '{endpoint_name}' stuck in {status}")
         time.sleep(poll_sec)
 
-# --- modify upsert_endpoint(...) in-place ---
+
 def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
     """
     Update the endpoint if it exists; otherwise create it.
@@ -197,6 +176,7 @@ def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
             print(e.response)
             raise
 
+
 def main():
     args = parse_args()
     assert_image_region_matches(args.image_uri, args.region)
@@ -224,7 +204,6 @@ def main():
     )
 
     wait_until_not_in_progress(sm=sm, endpoint_name=args.endpoint_name)
-    upsert_endpoint(sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
 
     # 3) Update/Create Endpoint and wait
     upsert_endpoint(sm=sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
