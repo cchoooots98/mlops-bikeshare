@@ -3,23 +3,25 @@
 # Goal: Build ONLINE features for the latest 5-min snapshot, using the SAME logic as offline.
 # We *import* the same functions/columns from your offline code to guarantee parity.
 
-import os
-import sys
-import json
-import pandas as pd
 from datetime import datetime, timedelta
 
-# Ensure we can import "features.*" if script is executed directly from repo root
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+import pandas as pd
 
-from features.build_features import (  # reused to avoid skew
-    read_env, athena_conn, query_df,
-    load_status,load_latest_info, load_weather, align_weather_5min,
-    build_neighbors, engineer
+# # Ensure we can import "features.*" if script is executed directly from repo root
+# REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# if REPO_ROOT not in sys.path:
+#     sys.path.insert(0, REPO_ROOT)
+from src.features.build_features import (  # reused to avoid skew
+    align_weather_5min,
+    athena_conn,
+    build_neighbors,
+    engineer,
+    load_latest_info,
+    load_status,
+    load_weather,
+    read_env,
 )
-from features.schema import FEATURE_COLUMNS  # exact same feature list as training
+from src.features.schema import FEATURE_COLUMNS  # exact same feature list as training
 
 
 def _latest_dt_ts(cnx, city: str, db: str) -> str:
@@ -66,13 +68,13 @@ def build_online_features(city: str) -> pd.DataFrame:
     start_ts = (end_ts - timedelta(minutes=65)).strftime("%Y-%m-%d %H:%M")
 
     # 2) Load recent status window (same source views as offline)
-    sql_status = f"""
-        SELECT city, dt, dt_ts, station_id, bikes, docks, last_reported
-        FROM {db}.v_station_status
-        WHERE city = '{city}'
-          AND parse_datetime(dt,'%Y-%m-%d %H:%M')
-              BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{latest_dt}:00'
-    """
+    # sql_status = f"""
+    #     SELECT city, dt, dt_ts, station_id, bikes, docks, last_reported
+    #     FROM {db}.v_station_status
+    #     WHERE city = '{city}'
+    #       AND parse_datetime(dt,'%Y-%m-%d %H:%M')
+    #           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{latest_dt}:00'
+    # """
     ########
     status=load_status(cnx, city, start_ts, latest_dt, db)
     #print(f"[DEBUG_online] the shape of the status:{status.shape}")

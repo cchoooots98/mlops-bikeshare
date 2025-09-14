@@ -5,7 +5,6 @@ using a time-based train/validation split and MLflow autologging.
 Everything is commented in English for clarity.
 """
 import argparse
-import json
 import os
 from dataclasses import dataclass
 from typing import List, Optional
@@ -18,16 +17,16 @@ import matplotlib.pyplot as plt
 # Tracking
 import mlflow
 import mlflow.lightgbm
+import mlflow.pyfunc
 import mlflow.sklearn
 import mlflow.xgboost
-import mlflow.pyfunc
-from mlflow.models.signature import infer_signature
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
 # Tree models
 import xgboost as xgb
+from mlflow.models.signature import infer_signature
 
 # AWS Athena connector
 from pyathena import connect

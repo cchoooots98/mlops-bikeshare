@@ -9,7 +9,7 @@ import re
 import sys
 
 import boto3
-import botocore 
+import botocore
 
 
 def ts_suffix() -> str:

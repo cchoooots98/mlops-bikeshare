@@ -5,23 +5,23 @@
 #    and writes s3://.../monitoring/quality/city=.../ds=YYYY-MM-DD/part-*.parquet
 # Run it every 5–10 minutes via GitHub Actions (cron) or locally.
 
-import os
-import sys
 import io
 import json
+import os
 from datetime import datetime, timedelta, timezone
-import pandas as pd
+
 import boto3
-import pyarrow as pa, pyarrow.parquet as pq, io
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+from src.features.build_features import athena_conn, query_df, read_env  # reuse env + athena
 
 # Import the online featurizer and shared schema
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
-
-from features.schema import FEATURE_COLUMNS        # same order as training
-from features.build_features import read_env, athena_conn, query_df     # reuse env + athena
-from inference.featurize_online import build_online_features            # latest feature batch
+# REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# if REPO_ROOT not in sys.path:
+#     sys.path.insert(0, REPO_ROOT)
+from src.features.schema import FEATURE_COLUMNS  # same order as training
+from src.inference.featurize_online import build_online_features  # latest feature batch
 
 
 def _s3():
@@ -59,7 +59,7 @@ def _inference_table_create_if_absent(cnx, bucket):
 
 def _quality_table_create_if_absent(cnx, bucket):
     # External table for monitoring join
-    sql = f"""
+    sql = """
     CREATE EXTERNAL TABLE IF NOT EXISTS monitoring_quality (
         station_id string,
         dt string,            

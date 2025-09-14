@@ -9,8 +9,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from holidays import FR, US
 from pyathena import connect
-from features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
 from sklearn.neighbors import BallTree
+
+from features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, validate_feature_df
 
 EARTH_RADIUS_KM = 6371.0088
 
@@ -231,8 +232,7 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame
     joined["dt"] = joined["ts"].dt.strftime("%Y-%m-%d-%H-%M")
     out = joined[["dt"] + cols].copy()
 
-    # 5) 诊断打印（可留可去）
-    nn = {c: int(out[c].notna().sum()) for c in cols}
+    
     # print(f"[DEBUG] weather5 asof non-null counts: {nn}")
 
     return out
@@ -335,11 +335,11 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="nyc
         "snow_mm",
         "weather_code",
     ]
-    hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
-    counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
+    # hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
+    # counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
     # print(f"[DEBUG] weather merge_asof hit ratio: {hit_ratio:.1%}; non-null counts: {counts}")
 
-    # 🔧 Impute city-level weather gaps (safe because weather is city-level)
+    # Impute city-level weather gaps (safe because weather is city-level)
     joined = joined.sort_values("ts_utc")
     for c in weather_cols:
         if c in joined.columns:
@@ -496,7 +496,7 @@ def main():
 
     df = engineer(status, info, weather5, nbr, args.horizon, args.threshold, args.city)
 
-    tmp = df["temp_c"].notna().mean() if "temp_c" in df.columns else 0.0
+    # tmp = df["temp_c"].notna().mean() if "temp_c" in df.columns else 0.0
     # print(f"[DEBUG] after merge, temp_c non-null ratio: {tmp:.1%}")
 
     keep_cols = (
