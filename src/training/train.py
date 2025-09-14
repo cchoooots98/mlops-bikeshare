@@ -20,6 +20,8 @@ import mlflow
 import mlflow.lightgbm
 import mlflow.sklearn
 import mlflow.xgboost
+import mlflow.pyfunc
+from mlflow.models.signature import infer_signature
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -80,7 +82,20 @@ class TrainConfig:
     xgb_params: dict = None  # baseline XGBoost params
     lgb_params: dict = None  # baseline LightGBM params
 
+class ProbWrapper(mlflow.pyfunc.PythonModel):
+    """Wrapper so that .predict() returns P(y=1) instead of hard 0/1 labels."""
+    def __init__(self, base_model, feature_names):
+        # Store trained classifier and the feature list
+        self._m = base_model
+        self._feat = feature_names
 
+    def predict(self, context, model_input):
+        # Ensure DataFrame input with exact feature order
+        if not isinstance(model_input, pd.DataFrame):
+            model_input = pd.DataFrame(model_input, columns=self._feat)
+        X = model_input[self._feat].astype("float32")
+        # Return probability for positive class
+        return self._m.predict_proba(X)[:, 1]
 # ------------------------
 # Athena helpers
 # ------------------------
@@ -194,37 +209,33 @@ def pick_threshold_fbeta(y_true: np.ndarray, y_prob: np.ndarray, beta: float):
     return best_t, best
 
 
-def log_curves_and_confusion(y_true: np.ndarray, y_prob: np.ndarray, threshold: float, prefix: str = "val"):
+def log_curves_and_confusion(y_true: np.ndarray, y_prob: np.ndarray, threshold: float ,out_dir_plots: str, prefix: str = "val"):
     """
     Log PR curve + confusion matrix (PNG) to MLflow.
     """
     # PR curve
     precision, recall, _ = precision_recall_curve(y_true, y_prob)
-    plt.figure()
+    fig_pr = plt.figure()
     plt.step(recall, precision, where="post")
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.title(f"Precision-Recall Curve ({prefix})")
-    pr_path = f"{prefix}_pr_curve.png"
-    plt.savefig(pr_path, bbox_inches="tight", dpi=150)
-    plt.close()
-    mlflow.log_artifact(pr_path)
+    mlflow.log_figure(fig_pr, f"{out_dir_plots}/{prefix}_pr_curve.png")  # stored under mlruns/.../artifacts
+    plt.close(fig_pr)
 
     # Confusion matrix @ threshold
     y_pred = (y_prob >= threshold).astype(int)
     cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    plt.figure()
+    fig_cm = plt.figure()
     sns.heatmap(cm, annot=True, fmt="d", cbar=False, xticklabels=["Neg", "Pos"], yticklabels=["Neg", "Pos"])
     plt.title(f"Confusion Matrix @ t={threshold:.2f} ({prefix})")
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
-    cm_path = f"{prefix}_confusion_matrix.png"
-    plt.savefig(cm_path, bbox_inches="tight", dpi=150)
-    plt.close()
-    mlflow.log_artifact(cm_path)
+    mlflow.log_figure(fig_cm, f"{out_dir_plots}/{prefix}_confusion_matrix.png")
+    plt.close(fig_cm)
 
 
-def log_feature_importance(model, feature_names: List[str]):
+def log_feature_importance(model, feature_names: List[str],out_dir_featimp: str):
     """
     Save feature importance as CSV and PNG.
     Supports XGBoost (gain) and LightGBM (split counts).
@@ -254,22 +265,19 @@ def log_feature_importance(model, feature_names: List[str]):
 
     importances = importances.sort_values("importance", ascending=False)
 
-    csv_path = "feature_importance.csv"
-    importances.to_csv(csv_path, index=False)
-    mlflow.log_artifact(csv_path)
+
+    csv_blob = importances.to_csv(index=False)
+    mlflow.log_text(csv_blob, f"{out_dir_featimp}/feature_importance.csv")
 
     top = importances.head(25)
-    plt.figure(figsize=(8, 6))
+    fig = plt.figure(figsize=(8, 6))
     plt.barh(top["feature"], top["importance"])
     plt.gca().invert_yaxis()
     plt.title("Top Feature Importance")
     plt.xlabel("Importance")
     plt.ylabel("Feature")
-    png_path = "feature_importance.png"
-    plt.tight_layout()
-    plt.savefig(png_path, dpi=150)
-    plt.close()
-    mlflow.log_artifact(png_path)
+    mlflow.log_figure(fig, f"{out_dir_featimp}/feature_importance.png")
+    plt.close(fig)
 
 
 # ------------------------
@@ -299,6 +307,8 @@ def main():
     parser.add_argument("--use-sm-exp", action="store_true", help="Enable SageMaker Experiments autolog (optional)")
 
     args = parser.parse_args()
+
+
 
     # Build configs
     dcfg = DataConfig(
@@ -344,6 +354,9 @@ def main():
         },
     )
 
+
+
+
     # Load data from Athena
     cnx = athena_conn(
         region=dcfg.region,
@@ -351,6 +364,20 @@ def main():
         s3_staging_dir=dcfg.athena_output,
         schema_name=dcfg.athena_database,
     )
+
+        # --------------------------
+    # Unified artifact namespaces
+    # --------------------------
+    task_id = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}"  # e.g., nyc_y_stockout_bikes_30_xgboost
+
+    DIR_PLOTS    = f"artifacts/{task_id}/plots"         # curves, confusion matrices
+    DIR_EVAL     = f"artifacts/{task_id}/eval"          # eval json, metrics
+    DIR_FEATIMP  = f"artifacts/{task_id}/feature_importance"
+   
+    MODEL_NAME_BASE  = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., nyc_y_stockout_bikes_30_xgboost__base_sklearn
+    MODEL_NAME_PROBA = f"{task_id}__model_proba"   # e.g., nyc_y_stockout_bikes_30_xgboost__model_proba
+
+
 
     # Get the distinct dt’s in the window (lightweight)
     dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)
@@ -393,16 +420,18 @@ def main():
     # MLflow experiment
     mlflow.set_experiment(tcfg.experiment)
 
+    mlflow.autolog(disable=True)
+
     with mlflow.start_run(run_name=f"{tcfg.model_type}-{label}") as run:
         run_id = run.info.run_id
         print("RUN_ID:", run.info.run_id)
 
         # Autologging for selected model family
         if tcfg.model_type == "xgboost":
-            mlflow.xgboost.autolog(log_models=True)
+            # mlflow.xgboost.autolog(log_models=True)
             model = xgb.XGBClassifier(**tcfg.xgb_params, n_jobs=0)
         else:
-            mlflow.lightgbm.autolog(log_models=True)
+            # mlflow.lightgbm.autolog(log_models=True)
             model = lgb.LGBMClassifier(**tcfg.lgb_params)
 
         # Fit
@@ -435,9 +464,9 @@ def main():
         )
 
         # Artifacts
-        log_curves_and_confusion(y_valid, valid_prob, threshold=best_t, prefix="val")
-        log_curves_and_confusion(y_train, train_prob, threshold=best_t, prefix="train")
-        log_feature_importance(model, features)
+        log_curves_and_confusion(y_valid, valid_prob, threshold=best_t, out_dir_plots=DIR_PLOTS,prefix="val", )
+        log_curves_and_confusion(y_train, train_prob, threshold=best_t, out_dir_plots=DIR_PLOTS, prefix="train")
+        log_feature_importance(model, features,out_dir_featimp=DIR_FEATIMP)
 
         # Save eval summary for model_card.md generation
         eval_blob = {
@@ -459,12 +488,28 @@ def main():
             "time_end": dcfg.end,
             "run_id": run_id,
         }
-        with open("eval_summary.json", "w", encoding="utf-8") as f:
-            json.dump(eval_blob, f, indent=2)
-        mlflow.log_artifact("eval_summary.json")
+        # with open("eval_summary.json", "w", encoding="utf-8") as f:
+        #     json.dump(eval_blob, f, indent=2)
+        mlflow.log_dict(eval_blob, f"{DIR_EVAL}/eval_summary.json")
 
         # Explicit log (autolog already logs a model, but this gives a stable path)
-        mlflow.sklearn.log_model(model, artifact_path="model")
+        mlflow.sklearn.log_model(model, name=MODEL_NAME_BASE)
+
+        # Build a tiny sample input for model signature
+        sample_X = pd.DataFrame({f: pd.Series([0.0], dtype="float32") for f in features})[features]
+        
+        signature = infer_signature(sample_X, pd.Series([0.5], dtype="float64"))
+
+        # Log wrapped model as a separate artifact path in MLflow
+        mlflow.pyfunc.log_model(
+            name=MODEL_NAME_PROBA,                
+            python_model=ProbWrapper(model, features),
+            signature=signature,
+            input_example=sample_X,
+        )
+
+
+        print(f"[OK] Logged probability-serving model as MLflow model '{MODEL_NAME_PROBA}'")
 
         # Soft overfitting check
         if gap >= 0.10:

@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import boto3
+import pyarrow as pa, pyarrow.parquet as pq, io
 
 # Import the online featurizer and shared schema
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,7 +34,6 @@ def _smr():
 def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     # Write a small DataFrame to S3 as parquet 
     # (in-memory buffer to avoid temp files on Windows)
-    import pyarrow as pa, pyarrow.parquet as pq
     table = pa.Table.from_pandas(df)
     buf = io.BytesIO()
     pq.write_table(table, buf)
@@ -110,6 +110,8 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     else:
         preds = out
 
+    print(f"[DEBUG_hander] the out: {out}")
+
     # Heuristics:
     def to_scalar(x):
         if isinstance(x, (int, float)):
@@ -125,6 +127,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     res = X[["city", "dt", "station_id"]].copy()
     res["yhat_bikes"] = yhat
     res["raw"] = pd.Series([json.dumps(p, ensure_ascii=False) for p in preds], dtype="string")
+
     return res
 
 
