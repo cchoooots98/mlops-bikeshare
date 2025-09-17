@@ -1,4 +1,5 @@
--r requirements.in     
+-r requirements.in   
+ruff  
 pytest
 black
 moto[s3]>=5

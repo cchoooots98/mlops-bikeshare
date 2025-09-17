@@ -10,5 +10,8 @@ xgboost
 s3fs
 PyAthena
 holidays
-scikit-learn         # Only used for quick calculation of simple importance (optional; not required if EDA is not used)
+scikit-learn
+sagemaker
+
+         # Only used for quick calculation of simple importance (optional; not required if EDA is not used)
 # ydata-profiling==4.8.3  #Lightweight EDA (optional; not required if --eda is not enabled)

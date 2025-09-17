@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+
 from src.features.build_features import athena_conn, query_df, read_env  # reuse env + athena
 
 # Import the online featurizer and shared schema
@@ -231,7 +232,9 @@ def main():
         ds = dt_pred[:10]  # YYYY-MM-DD
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
-            joined[["station_id", "dt", "dt_plus30", "yhat_bikes","yhat_bikes_bin", "y_stockout_bikes_30", "bikes_t30"]],
+            joined[
+                ["station_id", "dt", "dt_plus30", "yhat_bikes", "yhat_bikes_bin", "y_stockout_bikes_30", "bikes_t30"]
+            ],
             bucket,
             qual_key,
         )

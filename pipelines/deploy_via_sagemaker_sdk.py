@@ -86,6 +86,19 @@ def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, insta
                     "ContainerStartupHealthCheckTimeoutInSeconds": 600,
                 }
             ],
+            DataCaptureConfig={
+                # Enable traffic capture
+                "EnableCapture": True,
+                # 100 = capture all requests; reduce if traffic is high
+                "InitialSamplingPercentage": 100,
+                # Send captured payloads to this S3 prefix
+                # >>> EDIT to your bucket <<< e.g. mlops-bikeshare-...-ca-central-1
+                "DestinationS3Uri": f"s3://mlops-bikeshare-387706002632-ca-central-1/datacapture/endpoint={endpoint_config_name}/",
+                # Capture both request (inputs) and response (outputs)
+                "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
+                # Tell SageMaker which content-types to capture
+                "CaptureContentTypeHeader": {"JsonContentTypes": ["application/json"], "CsvContentTypes": ["text/csv"]},
+            },
         )
     except botocore.exceptions.ClientError as e:
         print("[ERROR] create_endpoint_config failed:")
