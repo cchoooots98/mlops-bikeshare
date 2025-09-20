@@ -47,6 +47,21 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
+# --- JSONL writer for Model Quality ground truth) ---
+def _write_jsonl_s3(records, bucket: str, key: str):
+    """
+    Write a list[dict] as JSON Lines to S3.
+    - Each element of `records` must be a JSON-serializable dict.
+    - This is used to write ground-truth labels for Model Monitor (ModelQuality).
+    """
+    lines = []
+    for r in records:
+        # Ensure minimal schema: at least {"label": 0 or 1}
+        lines.append(json.dumps(r, ensure_ascii=False))
+    body = ("\n".join(lines) + "\n").encode("utf-8")
+    _s3().put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+
+
 def _inference_table_create_if_absent(cnx, bucket):
     # External table for predictions (partitioned by city, dt)
     sql = f"""
@@ -107,6 +122,7 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
         Body=json.dumps(payload).encode("utf-8"),
     )
     body = resp["Body"].read()
+    raw_json = body.decode("utf-8")
     try:
         out = json.loads(body.decode("utf-8"))
     except Exception:
@@ -133,7 +149,8 @@ def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     yhat = [to_scalar(p) for p in preds]
     res = X[["city", "dt", "station_id"]].copy()
     res["yhat_bikes"] = yhat
-    res["raw"] = pd.Series([json.dumps(p, ensure_ascii=False) for p in preds], dtype="string")
+    res["raw"] = raw_json  # use object dtype to avoid null coercion
+    res["raw"] = res["raw"].astype("object")
     # Add binary classification column based on global threshold
     res["yhat_bikes_bin"] = (res["yhat_bikes"] >= YHAT_PROB_THRESHOLD).astype("float64")
     return res
@@ -238,6 +255,22 @@ def main():
             bucket,
             qual_key,
         )
+        # --- ALSO write a minimal JSONL file for Model Quality (YYYY/MM/DD layout) ---
+        # Model Monitor will look under s3://.../monitoring/quality/city=nyc/YYYY/MM/DD/
+        y, m, d = dt_pred[:4], dt_pred[5:7], dt_pred[8:10]
+
+        # Minimal schema for MQ: one JSON object per line containing at least "label"
+        jsonl_records = (
+            joined[["station_id", "dt", "y_stockout_bikes_30"]]
+            .rename(columns={"y_stockout_bikes_30": "label"})
+            .assign(label=lambda df: df["label"].astype(float))  # ensure numeric 0.0/1.0
+            .to_dict(orient="records")
+        )
+
+        # Example object: {"station_id":"...","dt":"2025-09-20-14-00","label":1.0}
+        mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/labels-{dt_pred}.jsonl"
+        _write_jsonl_s3(jsonl_records, bucket, mq_key)
+
         try:
             pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
         except Exception:
