@@ -100,6 +100,7 @@ def _quality_table_create_if_absent(cnx, bucket):
     pd.read_sql(sql, cnx)
     pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
 
+
 def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
     Invoke the SageMaker endpoint one row at a time and attach an InferenceId per record.
@@ -164,6 +165,7 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
         )
 
     return pd.DataFrame(rows)
+
 
 def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
