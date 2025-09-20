@@ -100,6 +100,70 @@ def _quality_table_create_if_absent(cnx, bucket):
     pd.read_sql(sql, cnx)
     pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
 
+def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Invoke the SageMaker endpoint one row at a time and attach an InferenceId per record.
+    This enables Model Monitor (ModelQuality) to merge predictions with Ground Truth by 'inferenceId'.
+    NOTE: This is slower than batching but is robust for joining.
+    """
+    rows = []
+    rt = _smr()  # boto3.client("sagemaker-runtime")
+
+    for rec in X[["city", "dt", "station_id"] + FEATURE_COLUMNS].itertuples(index=False, name=None):
+        city, dt_str, station_id, *features = rec
+
+        # Build dataframe_split payload with a single record to preserve column order
+        payload = {
+            "inputs": {
+                "dataframe_split": {
+                    "columns": FEATURE_COLUMNS,
+                    "data": [list(map(float, features))],
+                }
+            }
+        }
+
+        # Deterministic inference id so the Ground Truth builder can regenerate it:
+        inference_id = f"{dt_str}_{station_id}"
+
+        resp = rt.invoke_endpoint(
+            EndpointName=endpoint_name,
+            ContentType="application/json",
+            Accept="application/json",
+            InferenceId=inference_id,  # <-- critical for ModelQuality merge
+            Body=json.dumps(payload).encode("utf-8"),
+        )
+        body = resp["Body"].read()
+        try:
+            out = json.loads(body.decode("utf-8"))
+        except Exception as e:
+            raise RuntimeError(f"Bad model response for {inference_id}: {body[:500]}") from e
+
+        # Normalize to a scalar probability from various common shapes
+        def to_scalar(x):
+            if isinstance(x, (int, float)):
+                return float(x)
+            if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (int, float)):
+                return float(x[0])
+            if isinstance(x, dict) and "yhat" in x:
+                return float(x["yhat"])
+            return float("nan")
+
+        preds = out["predictions"] if isinstance(out, dict) and "predictions" in out else out
+        yhat = to_scalar(preds[0] if isinstance(preds, list) else preds)
+
+        rows.append(
+            {
+                "city": city,
+                "dt": dt_str,
+                "station_id": station_id,
+                "yhat_bikes": yhat,
+                "yhat_bikes_bin": float(yhat >= YHAT_PROB_THRESHOLD),
+                "inference_id": inference_id,
+                "raw": json.dumps(out, ensure_ascii=False),
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
@@ -204,7 +268,8 @@ def main():
     X = build_online_features(city)  # includes ["city","dt","station_id"] + FEATURE_COLUMNS
     latest_dt = X["dt"].iloc[0]
 
-    preds = _invoke_endpoint(endpoint_name, X)
+    # preds = _invoke_endpoint(endpoint_name, X)
+    preds = _invoke_endpoint_rowwise(endpoint_name, X)
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
