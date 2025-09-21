@@ -9,6 +9,7 @@ import io
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import boto3
 import numpy as np
@@ -24,7 +25,7 @@ from src.features.build_features import athena_conn, query_df, read_env  # reuse
 #     sys.path.insert(0, REPO_ROOT)
 from src.features.schema import FEATURE_COLUMNS  # same order as training
 from src.inference.featurize_online import build_online_features  # latest feature batch
-from zoneinfo import ZoneInfo
+
 TZ_LOCAL = ZoneInfo("America/New_York")
 TZ_UTC = ZoneInfo("UTC")
 
@@ -325,6 +326,7 @@ def main():
             bucket,
             qual_key,
         )
+
         def _utc_hour_parts_from_local_dt(dt_str: str):
             """Parse 'YYYY-MM-DD-HH-mm' in local tz and return (YYYY,MM,DD,HH) in UTC."""
             t_local = datetime.strptime(dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=TZ_LOCAL)

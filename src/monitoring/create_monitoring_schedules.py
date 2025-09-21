@@ -14,7 +14,7 @@ role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # ED
 baseline_constraints = f"s3://{bucket}/monitoring/baseline/city=nyc/constraints.json"
 baseline_statistics = f"s3://{bucket}/monitoring/baseline/city=nyc/statistics.json"
 reports_prefix = f"s3://{bucket}/monitoring/reports/"
-groundtruth_prefix = f"s3://{bucket}/monitoring/quality/city=nyc/"
+groundtruth_prefix = f"s3://{bucket}/monitoring/quality/city=nyc"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 # image_uri = "536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer"
 
@@ -119,6 +119,7 @@ try:
             "MonitoringType": "DataQuality",
         },
     )
+    print("Schedule already exists: bikeshare-data-quality")
 except botocore.exceptions.ClientError as e:
     if e.response["Error"]["Code"] == "ResourceInUse":
         print("Schedule already exists: bikeshare-data-quality (reusing)")
@@ -133,6 +134,7 @@ try:
             "MonitoringType": "DataQuality",
         },
     )
+    print("Schedule already exists: bikeshare-data-drift")
 except botocore.exceptions.ClientError as e:
     if e.response["Error"]["Code"] == "ResourceInUse":
         print("Schedule already exists: bikeshare-data-drift (reusing)")
@@ -143,11 +145,16 @@ try:
     sm.create_monitoring_schedule(
         MonitoringScheduleName="bikeshare-model-quality",
         MonitoringScheduleConfig={
-            "ScheduleConfig": {"ScheduleExpression": "cron(0 0/2 ? * * *)"},
+            "ScheduleConfig": {
+                "ScheduleExpression": "NOW",
+                "DataAnalysisStartTime": "-PT5H",
+                "DataAnalysisEndTime": "-PT0H",
+            },  # cron(0 0/2 ? * * *)
             "MonitoringJobDefinitionName": mq_name,
             "MonitoringType": "ModelQuality",
         },
     )
+    print("Schedule already exists: bikeshare-model-quality")
 except botocore.exceptions.ClientError as e:
     if e.response["Error"]["Code"] == "ResourceInUse":
         print("Schedule already exists: bikeshare-model-quality (reusing)")
