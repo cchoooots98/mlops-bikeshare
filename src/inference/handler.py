@@ -24,6 +24,9 @@ from src.features.build_features import athena_conn, query_df, read_env  # reuse
 #     sys.path.insert(0, REPO_ROOT)
 from src.features.schema import FEATURE_COLUMNS  # same order as training
 from src.inference.featurize_online import build_online_features  # latest feature batch
+from zoneinfo import ZoneInfo
+TZ_LOCAL = ZoneInfo("America/New_York")
+TZ_UTC = ZoneInfo("UTC")
 
 YHAT_PROB_THRESHOLD = 0.15
 
@@ -322,20 +325,24 @@ def main():
             bucket,
             qual_key,
         )
-        # --- ALSO write a minimal JSONL file for Model Quality (YYYY/MM/DD layout) ---
-        # Model Monitor will look under s3://.../monitoring/quality/city=nyc/YYYY/MM/DD/
-        y, m, d = dt_pred[:4], dt_pred[5:7], dt_pred[8:10]
+        def _utc_hour_parts_from_local_dt(dt_str: str):
+            """Parse 'YYYY-MM-DD-HH-mm' in local tz and return (YYYY,MM,DD,HH) in UTC."""
+            t_local = datetime.strptime(dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=TZ_LOCAL)
+            t_utc = t_local.astimezone(TZ_UTC)
+            return t_utc.strftime("%Y"), t_utc.strftime("%m"), t_utc.strftime("%d"), t_utc.strftime("%H")
 
-        # Minimal schema for MQ: one JSON object per line containing at least "label"
+        # ...
+        y, m, d, h = _utc_hour_parts_from_local_dt(dt_pred)  # dt_pred is your local string
+
         jsonl_records = (
             joined[["station_id", "dt", "y_stockout_bikes_30"]]
             .rename(columns={"y_stockout_bikes_30": "label"})
-            .assign(label=lambda df: df["label"].astype(float))  # ensure numeric 0.0/1.0
+            .assign(label=lambda df: df["label"].astype(float))
             .to_dict(orient="records")
         )
 
-        # Example object: {"station_id":"...","dt":"2025-09-20-14-00","label":1.0}
-        mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/labels-{dt_pred}.jsonl"
+        # Envelope + inferenceId when writing lines (or reuse the v3 writer)
+        mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/{h}/labels-{y}-{m}-{d}-{h}.jsonl"
         _write_jsonl_s3(jsonl_records, bucket, mq_key)
 
         try:
