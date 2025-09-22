@@ -294,7 +294,7 @@ def main():
     bucket = cfg["bucket"]
 
     # You can switch between staging/prod via env or CLI args (simplest: set here)
-    endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-prod")
+    endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-staging")
 
     # Prepare Athena connection
     cnx = athena_conn(

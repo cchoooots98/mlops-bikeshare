@@ -14,22 +14,15 @@ role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # ED
 
 sm = boto3.client("sagemaker", region_name=region)
 
-
-def get_capture_prefix(endpoint):
-    ep = sm.describe_endpoint(EndpointName=endpoint)
-    return ep["DataCaptureConfig"]["DestinationS3Uri"]
-
-
 baseline_constraints = f"s3://{bucket}/monitoring/baseline/city=nyc/constraints.json"
 baseline_statistics = f"s3://{bucket}/monitoring/baseline/city=nyc/statistics.json"
 reports_prefix = f"s3://{bucket}/monitoring/reports"
-groundtruth_prefix = f"s3://{bucket}/monitoring/quality/city=nyc"
+
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 # image_uri = "536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer"
 
 preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor.py"
 
-capture_prefix = get_capture_prefix(endpoint_name)
 # 1) DataQuality job definition (covers schema, nulls, ranges, AND drift vs baseline)
 dq_name = "bikeshare-data-quality-jd"
 try:
@@ -71,46 +64,6 @@ except botocore.exceptions.ClientError as e:
     else:
         raise
 
-# 2) ModelQuality job definition (computes classification metrics vs ground truth)
-mq_post_uri = f"s3://{bucket}/monitoring/code/mq_postprocessor.py"
-mq_name = "bikeshare-model-quality-jd"
-try:
-    sm.create_model_quality_job_definition(
-        JobDefinitionName=mq_name,
-        ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
-        ModelQualityJobInput={
-            "BatchTransformInput": {
-                "DataCapturedDestinationS3Uri": f"s3://{bucket}/monitoring/inference_jsonl/endpoint=bikeshare-staging/",
-                "DatasetFormat": {"Json": {"Line": True}},
-                "LocalPath": "/opt/ml/processing/input_data",
-                "ProbabilityAttribute": "probability",
-                "ProbabilityThresholdAttribute": 0.15,
-            },
-            "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
-        },
-        ModelQualityJobOutputConfig={
-            "MonitoringOutputs": [
-                {
-                    "S3Output": {
-                        "S3Uri": reports_prefix,
-                        "LocalPath": "/opt/ml/processing/output",
-                        "S3UploadMode": "EndOfJob",
-                    }
-                }
-            ]
-        },
-        JobResources={"ClusterConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.large", "VolumeSizeInGB": 30}},
-        NetworkConfig={"EnableNetworkIsolation": False},
-        RoleArn=role_arn,
-        StoppingCondition={"MaxRuntimeInSeconds": 3300},
-    )
-    print(f"Job Definition is created: {mq_name} ")
-except botocore.exceptions.ClientError as e:
-    if e.response["Error"]["Code"] == "ResourceInUse":
-        print(f"Job Definition already exists: {mq_name} (reusing)")
-    else:
-        raise
-
 
 # 3) Create THREE schedules (hourly)
 try:
@@ -128,6 +81,7 @@ except botocore.exceptions.ClientError as e:
         print("Schedule already exists: bikeshare-data-quality (reusing)")
     else:
         raise
+
 try:
     sm.create_monitoring_schedule(
         MonitoringScheduleName="bikeshare-data-drift",
@@ -141,26 +95,6 @@ try:
 except botocore.exceptions.ClientError as e:
     if e.response["Error"]["Code"] == "ResourceInUse":
         print("Schedule already exists: bikeshare-data-drift (reusing)")
-    else:
-        raise
-
-try:
-    sm.create_monitoring_schedule(
-        MonitoringScheduleName="bikeshare-model-quality",
-        MonitoringScheduleConfig={
-            "ScheduleConfig": {
-                "ScheduleExpression": "NOW",
-                "DataAnalysisStartTime": "-PT1H",
-                "DataAnalysisEndTime": "PT0H",
-            },  # cron(0 0/2 ? * * *)
-            "MonitoringJobDefinitionName": mq_name,
-            "MonitoringType": "ModelQuality",
-        },
-    )
-    print("Schedule already exists: bikeshare-model-quality")
-except botocore.exceptions.ClientError as e:
-    if e.response["Error"]["Code"] == "ResourceInUse":
-        print("Schedule already exists: bikeshare-model-quality (reusing)")
     else:
         raise
 
