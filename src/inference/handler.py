@@ -8,6 +8,8 @@
 import io
 import json
 import os
+import time
+import warnings
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,15 +18,14 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from botocore.exceptions import ClientError
 
 from src.features.build_features import athena_conn, query_df, read_env  # reuse env + athena
-
-# Import the online featurizer and shared schema
-# REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-# if REPO_ROOT not in sys.path:
-#     sys.path.insert(0, REPO_ROOT)
 from src.features.schema import FEATURE_COLUMNS  # same order as training
 from src.inference.featurize_online import build_online_features  # latest feature batch
+
+warnings.filterwarnings("ignore", message="pandas only supports SQLAlchemy")
+
 
 TZ_LOCAL = ZoneInfo("America/New_York")
 TZ_UTC = ZoneInfo("UTC")
@@ -105,6 +106,27 @@ def _quality_table_create_if_absent(cnx, bucket):
     pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
 
 
+def _invoke_with_retry(rt, **kwargs):
+    """
+    InvokeEndpoint with simple exponential backoff.
+    Retries on ModelError / 5xx up to max_retries times.
+    """
+    max_retries = int(os.environ.get("SM_MAX_RETRIES", "5"))
+    base = 0.5  # seconds
+    for i in range(max_retries + 1):
+        try:
+            return rt.invoke_endpoint(**kwargs)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            # Retry on throttling / 5xx / model errors
+            if i < max_retries and (
+                code in ("ModelError", "ValidationError", "InternalFailure", "ThrottlingException")
+            ):
+                time.sleep(base * (2**i))  # 0.5,1,2,4,8...
+                continue
+            raise
+
+
 def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
     Invoke the SageMaker endpoint one row at a time and attach an InferenceId per record.
@@ -130,13 +152,15 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
         # Deterministic inference id so the Ground Truth builder can regenerate it:
         inference_id = f"{dt_str}_{station_id}"
 
-        resp = rt.invoke_endpoint(
+        resp = _invoke_with_retry(
+            rt,
             EndpointName=endpoint_name,
             ContentType="application/json",
             Accept="application/json",
-            InferenceId=inference_id,  # <-- critical for ModelQuality merge
+            InferenceId=inference_id,
             Body=json.dumps(payload).encode("utf-8"),
         )
+
         body = resp["Body"].read()
         try:
             out = json.loads(body.decode("utf-8"))
@@ -167,6 +191,9 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
                 "raw": json.dumps(out, ensure_ascii=False),
             }
         )
+        sleep_ms = int(os.environ.get("ROWWISE_SLEEP_MS", "20"))  # 20ms default
+        if sleep_ms > 0:
+            time.sleep(sleep_ms / 1000)
 
     return pd.DataFrame(rows)
 
@@ -272,6 +299,10 @@ def main():
 
     # === A. Produce predictions for the latest snapshot ===
     X = build_online_features(city)  # includes ["city","dt","station_id"] + FEATURE_COLUMNS
+    max_rows = int(os.environ.get("MAX_ROWS_PER_RUN", "300"))  # process at most 300 rows per run
+    if len(X) > max_rows:
+        X = X.head(max_rows).copy()
+
     latest_dt = X["dt"].iloc[0]
 
     preds = _invoke_endpoint_rowwise(endpoint_name, X)
