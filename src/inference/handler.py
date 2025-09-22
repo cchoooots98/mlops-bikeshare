@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import boto3
-import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -93,8 +92,7 @@ def write_ground_truth_jsonl(s3_client, bucket: str, gt_root_prefix: str, rows):
         }
         buf.write(json.dumps(rec) + "\n")
 
-    s3_client.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode("utf-8"),
-                         ContentType="application/json")
+    s3_client.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode("utf-8"), ContentType="application/json")
     return f"s3://{bucket}/{key}"
 
 
@@ -359,7 +357,6 @@ def main():
 
     candidate_dts = sorted(set(candidate_dts))  # ensure unique + ascending (oldest -> newest)
 
-
     def _gt_hour_exists(s3_client, bucket: str, gt_root_prefix: str, y: str, m: str, d: str, h: str) -> bool:
         """
         Return True if there is at least one labels-*.jsonl under s3://bucket/gt_root_prefix/YYYY/MM/DD/HH/.
@@ -368,7 +365,6 @@ def main():
         prefix = f"{gt_root_prefix}/{y}/{m}/{d}/{h}/"
         resp = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
         return "Contents" in resp
-
 
     # This dict aggregates ground-truth rows by the *dt_plus30 hour*.
     # Key   : "YYYY/MM/DD/HH" (UTC hour of the label, derived from dt_plus30)
@@ -496,8 +492,6 @@ def main():
             pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
         except Exception:
             pass
-
-
 
 
 if __name__ == "__main__":

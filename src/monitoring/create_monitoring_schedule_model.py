@@ -1,5 +1,4 @@
 import boto3
-import botocore
 from sagemaker import image_uris
 
 region = "ca-central-1"
@@ -31,7 +30,6 @@ except sm.exceptions.ResourceNotFound:
     pass
 
 
-
 sm.create_model_quality_job_definition(
     JobDefinitionName="bikeshare-model-quality-jd",
     ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
@@ -43,7 +41,7 @@ sm.create_model_quality_job_definition(
             "S3DataDistributionType": "FullyReplicated",
             "InferenceAttribute": "predictions",
             "ProbabilityAttribute": "predictions",
-            "ProbabilityThresholdAttribute": 0.15
+            "ProbabilityThresholdAttribute": 0.15,
         },
         "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
     },
@@ -63,8 +61,7 @@ sm.create_model_quality_job_definition(
     RoleArn=role_arn,
     StoppingCondition={"MaxRuntimeInSeconds": 3300},
 )
-print(f"Job Definition is created: {mq_name} ")
-
+print("Job Definition is created: bikeshare-model-quality-jd")
 
 
 sm.create_monitoring_schedule(
@@ -75,9 +72,8 @@ sm.create_monitoring_schedule(
             "DataAnalysisStartTime": "-PT5H",
             "DataAnalysisEndTime": "-PT1H",
         },  # cron(0 0/2 ? * * *)
-        "MonitoringJobDefinitionName": mq_name,
+        "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
         "MonitoringType": "ModelQuality",
     },
 )
 print("Schedule already exists: bikeshare-model-quality")
-
