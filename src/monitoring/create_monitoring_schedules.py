@@ -23,7 +23,7 @@ def get_capture_prefix(endpoint):
 baseline_constraints = f"s3://{bucket}/monitoring/baseline/city=nyc/constraints.json"
 baseline_statistics = f"s3://{bucket}/monitoring/baseline/city=nyc/statistics.json"
 reports_prefix = f"s3://{bucket}/monitoring/reports"
-groundtruth_prefix = f"s3://{bucket}/monitoring/quality/latest"
+groundtruth_prefix = f"s3://{bucket}/monitoring/quality/city=nyc"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 # image_uri = "536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer"
 
@@ -80,9 +80,11 @@ try:
         ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
         ModelQualityJobInput={
             "BatchTransformInput": {
-                "DataCapturedDestinationS3Uri": f"s3://{bucket}/monitoring/inference_jsonl/latest",
-                "DatasetFormat": {"JsonLines": {}},
+                "DataCapturedDestinationS3Uri": f"s3://{bucket}/monitoring/inference_jsonl/endpoint=bikeshare-staging/",
+                "DatasetFormat": {"Json": {"Line": True}},
                 "LocalPath": "/opt/ml/processing/input_data",
+                "ProbabilityAttribute": "probability",
+                "ProbabilityThresholdAttribute": 0.15,
             },
             "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
         },
@@ -148,8 +150,8 @@ try:
         MonitoringScheduleConfig={
             "ScheduleConfig": {
                 "ScheduleExpression": "NOW",
-                "DataAnalysisStartTime": "-PT5H",
-                "DataAnalysisEndTime": "-PT1H",
+                "DataAnalysisStartTime": "-PT1H",
+                "DataAnalysisEndTime": "PT0H",
             },  # cron(0 0/2 ? * * *)
             "MonitoringJobDefinitionName": mq_name,
             "MonitoringType": "ModelQuality",

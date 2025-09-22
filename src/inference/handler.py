@@ -42,6 +42,17 @@ def _smr():
     return boto3.client("sagemaker-runtime")
 
 
+def _read_parquet_s3(bucket: str, key: str) -> pd.DataFrame:
+    """
+    Read a small Parquet file from S3 into a pandas DataFrame.
+    This is used to backfill older dt predictions for joining with actuals.
+    """
+    obj = _s3().get_object(Bucket=bucket, Key=key)
+    buf = io.BytesIO(obj["Body"].read())
+    table = pq.read_table(buf)
+    return table.to_pandas()
+
+
 def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     # Write a small DataFrame to S3 as parquet
     # (in-memory buffer to avoid temp files on Windows)
@@ -322,31 +333,53 @@ def main():
     # For simplicity, compute for *this* latest_dt if it is older than now-30m,
     # and also try the previous 12 intervals to reduce gaps.
     now_utc = datetime.now(timezone.utc)
+
+    # Build candidate dts for the last ~60 minutes in 5-min steps,
+    # but keep only those whose t+30 ground truth should already exist
     candidate_dts = []
-    for k in range(0, 13):  # ~last 60 minutes
+    for k in range(0, 13):  # 0,5,10,...,60 minutes back
         dtk = (datetime.strptime(latest_dt, "%Y-%m-%d-%H-%M") - timedelta(minutes=5 * k)).strftime("%Y-%m-%d-%H-%M")
-        # Only attempt if t+30m should already exist
         if now_utc >= (datetime.strptime(dtk, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc) + timedelta(minutes=30)):
             candidate_dts.append(dtk)
 
-    # Load any predictions for candidate dts and fill quality if actuals exist
-    for dt_pred in candidate_dts:
-        # Read preds back via S3 Select would add complexity; we already have them in memory for latest,
-        # but for older we just try to compute actuals then join with what we just wrote for 'latest_dt'.
-        # Practical simplification: only finalize 'latest_dt' quality here; a nightly job can fully backfill.
-        if dt_pred != latest_dt:
-            continue
+    # Process from oldest -> newest so that "latest/labels.jsonl" finally contains the newest hour
+    candidate_dts = sorted(set(candidate_dts))
 
+    def _ymdh_from_utc_dt(dt_str: str):
+        """
+        dt_str format: 'YYYY-MM-DD-HH-mm' already in UTC.
+        Return (YYYY, MM, DD, HH) by simple slicing to avoid timezone issues.
+        """
+        return dt_str[0:4], dt_str[5:7], dt_str[8:10], dt_str[11:13]
+
+    wrote_any = False
+    for idx, dt_pred in enumerate(candidate_dts):
+        # Load predictions for this dt:
+        # - reuse in-memory 'preds' if it's the current latest_dt
+        # - otherwise read back from S3 partition inference/city=.../dt=.../predictions.parquet
+        if dt_pred == latest_dt:
+            preds_dt = preds.copy()
+        else:
+            pred_key_prev = f"inference/city={city}/dt={dt_pred}/predictions.parquet"
+            try:
+                preds_dt = _read_parquet_s3(bucket, pred_key_prev)
+            except Exception as e:
+                # No predictions found for this dt; skip
+                print(f"[warn] missing predictions parquet: s3://{bucket}/{pred_key_prev} ({e})")
+                continue
+
+        # Compute actuals for this dt; if not ready, skip
         actuals = _compute_actuals_for_dt(cnx, city, dt_pred, threshold=2)
         if actuals.empty:
+            print(f"[info] actuals not ready for dt={dt_pred}; skip")
             continue
 
-        # Join preds+actuals on station_id
-        joined = preds.merge(
+        # Join on station_id; keep inference_id for ModelQuality matching
+        joined = preds_dt.merge(
             actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]], on="station_id", how="inner"
         ).assign(dt=lambda d: dt_pred)
 
-        # Write to monitoring/quality partitioned by city, ds (ds = date of pred time)
+        # Write partitioned parquet (for Athena/Auditing)
         ds = dt_pred[:10]  # YYYY-MM-DD
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
@@ -366,15 +399,8 @@ def main():
             qual_key,
         )
 
-        def _utc_hour_parts_from_local_dt(dt_str: str):
-            """Parse 'YYYY-MM-DD-HH-mm' in local tz and return (YYYY,MM,DD,HH) in UTC."""
-            t_local = datetime.strptime(dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=TZ_LOCAL)
-            t_utc = t_local.astimezone(TZ_UTC)
-            return t_utc.strftime("%Y"), t_utc.strftime("%m"), t_utc.strftime("%d"), t_utc.strftime("%H")
-
-        # ...
-        y, m, d, h = _utc_hour_parts_from_local_dt(dt_pred)  # dt_pred is your local string
-
+        # Build hourly ground-truth JSONL for ModelQuality (BatchTransformInput)
+        y, m, d, h = _ymdh_from_utc_dt(dt_pred)
         jsonl_records = (
             joined[["inference_id", "y_stockout_bikes_30"]]
             .rename(columns={"inference_id": "inferenceId", "y_stockout_bikes_30": "groundTruthLabel"})
@@ -382,17 +408,25 @@ def main():
             .to_dict(orient="records")
         )
 
-        # Envelope + inferenceId when writing lines (or reuse the v3 writer)
+        # Write hourly labels (time-partitioned)
         mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/{h}/labels-{y}-{m}-{d}-{h}.jsonl"
         _write_jsonl_s3(jsonl_records, bucket, mq_key)
+        wrote_any = True
 
-        mq_latest_key = "monitoring/quality/latest/labels.jsonl"
-        _write_jsonl_s3(jsonl_records, bucket, mq_latest_key)
+        # Only for the newest processed dt, also write/overwrite "latest/labels.jsonl"
+        if idx == len(candidate_dts) - 1:
+            mq_latest_key = "monitoring/quality/latest/labels.jsonl"
+            _write_jsonl_s3(jsonl_records, bucket, mq_latest_key)
+            print(f"[ok] wrote latest labels: s3://{bucket}/{mq_latest_key}")
 
-        try:
-            pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
-        except Exception:
-            pass
+    # Lightweight repair (best-effort)
+    try:
+        pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
+    except Exception:
+        pass
+
+    if not wrote_any:
+        print("[info] No eligible dt to write labels this run (either <30m or missing actuals/preds)")
 
 
 if __name__ == "__main__":
