@@ -63,19 +63,39 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
-# --- JSONL writer for Model Quality ground truth) ---
-def _write_jsonl_s3(records, bucket: str, key: str):
+def write_ground_truth_jsonl(s3_client, bucket: str, gt_root_prefix: str, rows):
     """
-    Write a list[dict] as JSON Lines to S3.
-    - Each element of `records` must be a JSON-serializable dict.
-    - This is used to write ground-truth labels for Model Monitor (ModelQuality).
+    Write Ground Truth JSONL for SageMaker Model Monitor (ModelQuality).
+    - bucket: your S3 bucket name (string).
+    - gt_root_prefix: S3 prefix whose immediate children are YYYY directories,
+      e.g. "monitoring/ground-truth" (DO NOT use 'latest/').
+    - rows: iterable of tuples (inference_id: str, label: int|bool).
+    Output path: s3://bucket/gt_root_prefix/YYYY/MM/DD/HH/labels-<timestamp>.jsonl
+    The 'YYYY/MM/DD/HH' MUST be the UTC hour of *label collection time*
+    (see official doc).
     """
-    lines = []
-    for r in records:
-        # Ensure minimal schema: at least {"label": 0 or 1}
-        lines.append(json.dumps(r, ensure_ascii=False))
-    body = ("\n".join(lines) + "\n").encode("utf-8")
-    _s3().put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+    # Use UTC "now" as the label collection time per AWS docs
+    now_utc = datetime.now(timezone.utc)
+    key = f"{gt_root_prefix}/{now_utc:%Y/%m/%d/%H}/labels-{now_utc:%Y%m%d%H%M%S}.jsonl"
+
+    # Build lines using the EXACT schema required by AWS:
+    # {
+    #  "groundTruthData":{"data":"0|1","encoding":"CSV"},
+    #  "eventMetadata":{"eventId":"<inference_id>"},
+    #  "eventVersion":"0"
+    # }
+    buf = io.StringIO()
+    for inference_id, label in rows:
+        rec = {
+            "groundTruthData": {"data": str(int(label)), "encoding": "CSV"},
+            "eventMetadata": {"eventId": str(inference_id)},
+            "eventVersion": "0",
+        }
+        buf.write(json.dumps(rec) + "\n")
+
+    s3_client.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode("utf-8"),
+                         ContentType="application/json")
+    return f"s3://{bucket}/{key}"
 
 
 def _inference_table_create_if_absent(cnx, bucket):
@@ -209,59 +229,59 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
-    """
-    Invoke an MLflow pyfunc SageMaker endpoint.
-    We send a pandas 'dataframe_split' payload to preserve column order and types.
-    If your Step 6 container expects a different schema, adjust here.
-    """
-    payload = {
-        "inputs": {
-            "dataframe_split": {
-                "columns": FEATURE_COLUMNS,
-                "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),
-            }
-        }
-    }
-    resp = _smr().invoke_endpoint(
-        EndpointName=endpoint_name,
-        ContentType="application/json",
-        Accept="application/json",
-        Body=json.dumps(payload).encode("utf-8"),
-    )
-    body = resp["Body"].read()
-    raw_json = body.decode("utf-8")
-    try:
-        out = json.loads(body.decode("utf-8"))
-    except Exception:
-        raise RuntimeError(f"Bad model response: {body[:500]}")
+# def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Invoke an MLflow pyfunc SageMaker endpoint.
+#     We send a pandas 'dataframe_split' payload to preserve column order and types.
+#     If your Step 6 container expects a different schema, adjust here.
+#     """
+#     payload = {
+#         "inputs": {
+#             "dataframe_split": {
+#                 "columns": FEATURE_COLUMNS,
+#                 "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),
+#             }
+#         }
+#     }
+#     resp = _smr().invoke_endpoint(
+#         EndpointName=endpoint_name,
+#         ContentType="application/json",
+#         Accept="application/json",
+#         Body=json.dumps(payload).encode("utf-8"),
+#     )
+#     body = resp["Body"].read()
+#     raw_json = body.decode("utf-8")
+#     try:
+#         out = json.loads(body.decode("utf-8"))
+#     except Exception:
+#         raise RuntimeError(f"Bad model response: {body[:500]}")
 
-    # Flexible parsing: support either a scalar list or dict/list of dicts
-    # Normalize to a single 'yhat' column; keep 'raw'  for debugging.
-    if isinstance(out, dict) and "predictions" in out:
-        preds = out["predictions"]
-    else:
-        preds = out
+#     # Flexible parsing: support either a scalar list or dict/list of dicts
+#     # Normalize to a single 'yhat' column; keep 'raw'  for debugging.
+#     if isinstance(out, dict) and "predictions" in out:
+#         preds = out["predictions"]
+#     else:
+#         preds = out
 
-    # Heuristics:
-    def to_scalar(x):
-        if isinstance(x, (int, float)):
-            return float(x)
-        if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (int, float)):
-            return float(x[0])
-        if isinstance(x, dict) and "yhat" in x:
-            return float(x["yhat"])
-        # fallback: NaN
-        return float("nan")
+#     # Heuristics:
+#     def to_scalar(x):
+#         if isinstance(x, (int, float)):
+#             return float(x)
+#         if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (int, float)):
+#             return float(x[0])
+#         if isinstance(x, dict) and "yhat" in x:
+#             return float(x["yhat"])
+#         # fallback: NaN
+#         return float("nan")
 
-    yhat = [to_scalar(p) for p in preds]
-    res = X[["city", "dt", "station_id"]].copy()
-    res["yhat_bikes"] = yhat
-    res["raw"] = raw_json  # use object dtype to avoid null coercion
-    res["raw"] = res["raw"].astype("object")
-    # Add binary classification column based on global threshold
-    res["yhat_bikes_bin"] = (res["yhat_bikes"] >= YHAT_PROB_THRESHOLD).astype("float64")
-    return res
+#     yhat = [to_scalar(p) for p in preds]
+#     res = X[["city", "dt", "station_id"]].copy()
+#     res["yhat_bikes"] = yhat
+#     res["raw"] = raw_json  # use object dtype to avoid null coercion
+#     res["raw"] = res["raw"].astype("object")
+#     # Add binary classification column based on global threshold
+#     res["yhat_bikes_bin"] = (res["yhat_bikes"] >= YHAT_PROB_THRESHOLD).astype("float64")
+#     return res
 
 
 def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) -> pd.DataFrame:
@@ -328,35 +348,41 @@ def main():
     except Exception:
         pass
 
-    # === B. Backfill actuals for any predictions older than 30 minutes ===
-    # Strategy: find inference partitions (last ~2 hours), join those with missing quality rows.
-    # For simplicity, compute for *this* latest_dt if it is older than now-30m,
-    # and also try the previous 12 intervals to reduce gaps.
-    now_utc = datetime.now(timezone.utc)
-
-    # Build candidate dts for the last ~60 minutes in 5-min steps,
-    # but keep only those whose t+30 ground truth should already exist
+    # === Build candidate dt list (last ~60 minutes in 5-min steps) ===
+    # Keep only those whose t+30 ground truth should already exist
     candidate_dts = []
+    now_utc = datetime.now(timezone.utc)
     for k in range(0, 13):  # 0,5,10,...,60 minutes back
         dtk = (datetime.strptime(latest_dt, "%Y-%m-%d-%H-%M") - timedelta(minutes=5 * k)).strftime("%Y-%m-%d-%H-%M")
         if now_utc >= (datetime.strptime(dtk, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc) + timedelta(minutes=30)):
             candidate_dts.append(dtk)
 
-    # Process from oldest -> newest so that "latest/labels.jsonl" finally contains the newest hour
-    candidate_dts = sorted(set(candidate_dts))
+    candidate_dts = sorted(set(candidate_dts))  # ensure unique + ascending (oldest -> newest)
 
-    def _ymdh_from_utc_dt(dt_str: str):
-        """
-        dt_str format: 'YYYY-MM-DD-HH-mm' already in UTC.
-        Return (YYYY, MM, DD, HH) by simple slicing to avoid timezone issues.
-        """
-        return dt_str[0:4], dt_str[5:7], dt_str[8:10], dt_str[11:13]
 
-    wrote_any = False
-    for idx, dt_pred in enumerate(candidate_dts):
+    def _gt_hour_exists(s3_client, bucket: str, gt_root_prefix: str, y: str, m: str, d: str, h: str) -> bool:
+        """
+        Return True if there is at least one labels-*.jsonl under s3://bucket/gt_root_prefix/YYYY/MM/DD/HH/.
+        This makes ground-truth writing idempotent and avoids duplicate hours.
+        """
+        prefix = f"{gt_root_prefix}/{y}/{m}/{d}/{h}/"
+        resp = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
+        return "Contents" in resp
+
+
+    # This dict aggregates ground-truth rows by the *dt_plus30 hour*.
+    # Key   : "YYYY/MM/DD/HH" (UTC hour of the label, derived from dt_plus30)
+    # Value : list of tuples [(inference_id, label_int), ...]
+    hour_to_rows = {}
+
+    # We will also keep track whether we wrote any parquet or labels this run
+    wrote_any_parquet = False
+
+    # === Iterate candidate dts, join predictions & actuals, write parquet for auditing, collect GT rows ===
+    for dt_pred in candidate_dts:
         # Load predictions for this dt:
         # - reuse in-memory 'preds' if it's the current latest_dt
-        # - otherwise read back from S3 partition inference/city=.../dt=.../predictions.parquet
+        # - otherwise read back from S3: inference/city=.../dt=.../predictions.parquet
         if dt_pred == latest_dt:
             preds_dt = preds.copy()
         else:
@@ -364,22 +390,24 @@ def main():
             try:
                 preds_dt = _read_parquet_s3(bucket, pred_key_prev)
             except Exception as e:
-                # No predictions found for this dt; skip
+                # Missing predictions parquet is not fatal for ModelQuality
                 print(f"[warn] missing predictions parquet: s3://{bucket}/{pred_key_prev} ({e})")
                 continue
 
-        # Compute actuals for this dt; if not ready, skip
+        # Compute actuals for this dt; if not ready yet, skip and let a future run handle it
         actuals = _compute_actuals_for_dt(cnx, city, dt_pred, threshold=2)
         if actuals.empty:
             print(f"[info] actuals not ready for dt={dt_pred}; skip")
             continue
 
-        # Join on station_id; keep inference_id for ModelQuality matching
+        # Join on station_id; keep inference_id (used by Model Monitor merge)
         joined = preds_dt.merge(
-            actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]], on="station_id", how="inner"
+            actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]],
+            on="station_id",
+            how="inner",
         ).assign(dt=lambda d: dt_pred)
 
-        # Write partitioned parquet (for Athena/Auditing)
+        # Write partitioned parquet for auditing / Athena
         ds = dt_pred[:10]  # YYYY-MM-DD
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
@@ -398,35 +426,78 @@ def main():
             bucket,
             qual_key,
         )
+        wrote_any_parquet = True
 
-        # Build hourly ground-truth JSONL for ModelQuality (BatchTransformInput)
-        y, m, d, h = _ymdh_from_utc_dt(dt_pred)
-        jsonl_records = (
-            joined[["inference_id", "y_stockout_bikes_30"]]
-            .rename(columns={"inference_id": "inferenceId", "y_stockout_bikes_30": "groundTruthLabel"})
-            .assign(groundTruthLabel=lambda df: df["groundTruthLabel"].astype(int))
-            .to_dict(orient="records")
+        # === Aggregate Ground Truth rows by the hour of dt_plus30 (UTC) ===
+        # Model Monitor allows the hour folders to represent "label collection time".
+        # Here we use the dt_plus30 hour (when the truth is observed) as the hour bucket.
+        # Example: if dt_pred=18:45, dt_plus30=19:15 -> hour bucket is 19.
+        # This produces stable hour folders even when we backfill.
+        if "dt_plus30" not in joined.columns:
+            # Safety guard (should not happen if _compute_actuals_for_dt returns dt_plus30)
+            continue
+
+        # Parse the dt_plus30 string "YYYY-MM-DD-HH-mm" and get UTC hour components
+        def _ymdh_from_utc_dt(dt_str: str):
+            # Slice strings (no tz math needed because dt strings are already UTC)
+            return dt_str[0:4], dt_str[5:7], dt_str[8:10], dt_str[11:13]
+
+        # Build GT rows for this dt_pred and add them into the corresponding hour bucket
+        rows = (
+            joined[["inference_id", "y_stockout_bikes_30", "dt_plus30"]]
+            .assign(y_stockout_bikes_30=lambda df: df["y_stockout_bikes_30"].astype(int))
+            .itertuples(index=False, name=None)
         )
+        # rows is a sequence of tuples: (inference_id, label_int, dt_plus30)
+        for inference_id, label_int, dtp30 in rows:
+            y, m, d, h = _ymdh_from_utc_dt(str(dtp30))
+            hour_key = f"{y}/{m}/{d}/{h}"
+            hour_to_rows.setdefault(hour_key, []).append((str(inference_id), int(label_int)))
 
-        # Write hourly labels (time-partitioned)
-        mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/{h}/labels-{y}-{m}-{d}-{h}.jsonl"
-        _write_jsonl_s3(jsonl_records, bucket, mq_key)
-        wrote_any = True
-
-        # Only for the newest processed dt, also write/overwrite "latest/labels.jsonl"
-        if idx == len(candidate_dts) - 1:
-            mq_latest_key = "monitoring/quality/latest/labels.jsonl"
-            _write_jsonl_s3(jsonl_records, bucket, mq_latest_key)
-            print(f"[ok] wrote latest labels: s3://{bucket}/{mq_latest_key}")
-
-    # Lightweight repair (best-effort)
-    try:
-        pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
-    except Exception:
-        pass
-
-    if not wrote_any:
+    # === Write ONE jsonl per label hour (idempotent) ===
+    # This avoids duplicates within the same hour and matches the folder convention:
+    # s3://bucket/monitoring/ground-truth/YYYY/MM/DD/HH/labels-*.jsonl
+    if not hour_to_rows:
         print("[info] No eligible dt to write labels this run (either <30m or missing actuals/preds)")
+    else:
+        for hour_key in sorted(hour_to_rows.keys()):
+            y, m, d, h = hour_key.split("/")
+            # Skip if this hour already has a labels-*.jsonl (idempotent write)
+            if _gt_hour_exists(_s3(), bucket, "monitoring/ground-truth", y, m, d, h):
+                print(f"[info] ground-truth already exists for hour {hour_key}; skip")
+                continue
+
+            # Compose rows for this hour and write exactly one jsonl file
+            rows_for_hour = hour_to_rows[hour_key]
+            # write_ground_truth_jsonl() writes to the current UTC hour by default.
+            # To place it under the exact hour folder (y/m/d/h), we pass the data through a small wrapper:
+            # We temporarily override "now" by computing an S3 key manually.
+            # Simpler approach: reuse write_ground_truth_jsonl but trick its Body/key? -> keep simple:
+            # Implement a focused writer for this case:
+
+            # Minimal in-place writer using the exact AWS-required schema
+            lines = []
+            for inf_id, lbl in rows_for_hour:
+                rec = {
+                    "groundTruthData": {"data": str(int(lbl)), "encoding": "CSV"},
+                    "eventMetadata": {"eventId": str(inf_id)},
+                    "eventVersion": "0",
+                }
+                lines.append(json.dumps(rec))
+            body = ("\n".join(lines) + "\n").encode("utf-8")
+
+            gt_key = f"monitoring/ground-truth/{hour_key}/labels-{y}{m}{d}{h}{datetime.now(timezone.utc):%M%S}.jsonl"
+            _s3().put_object(Bucket=bucket, Key=gt_key, Body=body, ContentType="application/json")
+            print(f"[ok] wrote model-quality labels -> s3://{bucket}/{gt_key}")
+
+    # Optional log for parquet auditing status
+    if wrote_any_parquet:
+        try:
+            pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
+        except Exception:
+            pass
+
+
 
 
 if __name__ == "__main__":

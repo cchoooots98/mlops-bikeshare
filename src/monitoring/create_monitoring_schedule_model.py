@@ -20,61 +20,64 @@ reports_prefix = f"s3://{bucket}/monitoring/reports"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 capture_prefix = get_capture_prefix(endpoint_name)
 
-mq_name = "bikeshare-model-quality-jd"
 try:
-    sm.create_model_quality_job_definition(
-        JobDefinitionName=mq_name,
-        ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
-        ModelQualityJobInput={
-            "EndpointInput": {
-                "EndpointName": endpoint_name,
-                "LocalPath": "/opt/ml/processing/input_data",
-                "S3InputMode": "File",
-                "S3DataDistributionType": "FullyReplicated",
-                "ProbabilityAttribute": "yhat",
-                "ProbabilityThresholdAttribute": 0.15,
-            },
-            "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
-        },
-        ModelQualityJobOutputConfig={
-            "MonitoringOutputs": [
-                {
-                    "S3Output": {
-                        "S3Uri": reports_prefix,
-                        "LocalPath": "/opt/ml/processing/output",
-                        "S3UploadMode": "EndOfJob",
-                    }
-                }
-            ]
-        },
-        JobResources={"ClusterConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.large", "VolumeSizeInGB": 30}},
-        NetworkConfig={"EnableNetworkIsolation": False},
-        RoleArn=role_arn,
-        StoppingCondition={"MaxRuntimeInSeconds": 3300},
-    )
-    print(f"Job Definition is created: {mq_name} ")
-except botocore.exceptions.ClientError as e:
-    if e.response["Error"]["Code"] == "ResourceInUse":
-        print(f"Job Definition already exists: {mq_name} (reusing)")
-    else:
-        raise
+    sm.delete_monitoring_schedule(MonitoringScheduleName="bikeshare-model-quality")
+except sm.exceptions.ResourceNotFound:
+    pass
 
 try:
-    sm.create_monitoring_schedule(
-        MonitoringScheduleName="bikeshare-model-quality",
-        MonitoringScheduleConfig={
-            "ScheduleConfig": {
-                "ScheduleExpression": "NOW",
-                "DataAnalysisStartTime": "-PT5H",
-                "DataAnalysisEndTime": "-PT1H",
-            },  # cron(0 0/2 ? * * *)
-            "MonitoringJobDefinitionName": mq_name,
-            "MonitoringType": "ModelQuality",
+    sm.delete_model_quality_job_definition(JobDefinitionName="bikeshare-model-quality-jd")
+except sm.exceptions.ResourceNotFound:
+    pass
+
+
+
+sm.create_model_quality_job_definition(
+    JobDefinitionName="bikeshare-model-quality-jd",
+    ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
+    ModelQualityJobInput={
+        "EndpointInput": {
+            "EndpointName": endpoint_name,
+            "LocalPath": "/opt/ml/processing/input_data",
+            "S3InputMode": "File",
+            "S3DataDistributionType": "FullyReplicated",
+            "InferenceAttribute": "predictions",
+            "ProbabilityAttribute": "predictions",
+            "ProbabilityThresholdAttribute": 0.15
         },
-    )
-    print("Schedule already exists: bikeshare-model-quality")
-except botocore.exceptions.ClientError as e:
-    if e.response["Error"]["Code"] == "ResourceInUse":
-        print("Schedule already exists: bikeshare-model-quality (reusing)")
-    else:
-        raise
+        "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
+    },
+    ModelQualityJobOutputConfig={
+        "MonitoringOutputs": [
+            {
+                "S3Output": {
+                    "S3Uri": reports_prefix,
+                    "LocalPath": "/opt/ml/processing/output",
+                    "S3UploadMode": "EndOfJob",
+                }
+            }
+        ]
+    },
+    JobResources={"ClusterConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.large", "VolumeSizeInGB": 30}},
+    NetworkConfig={"EnableNetworkIsolation": False},
+    RoleArn=role_arn,
+    StoppingCondition={"MaxRuntimeInSeconds": 3300},
+)
+print(f"Job Definition is created: {mq_name} ")
+
+
+
+sm.create_monitoring_schedule(
+    MonitoringScheduleName="bikeshare-model-quality",
+    MonitoringScheduleConfig={
+        "ScheduleConfig": {
+            "ScheduleExpression": "NOW",
+            "DataAnalysisStartTime": "-PT5H",
+            "DataAnalysisEndTime": "-PT1H",
+        },  # cron(0 0/2 ? * * *)
+        "MonitoringJobDefinitionName": mq_name,
+        "MonitoringType": "ModelQuality",
+    },
+)
+print("Schedule already exists: bikeshare-model-quality")
+
