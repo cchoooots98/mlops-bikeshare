@@ -274,12 +274,11 @@ def main():
     X = build_online_features(city)  # includes ["city","dt","station_id"] + FEATURE_COLUMNS
     latest_dt = X["dt"].iloc[0]
 
-    # preds = _invoke_endpoint(endpoint_name, X)
     preds = _invoke_endpoint_rowwise(endpoint_name, X)
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
-    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "raw"]], bucket, pred_key)
+    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "inference_id", "raw"]], bucket, pred_key)
 
     # Repair partitions (lightweight)
     try:
@@ -321,7 +320,16 @@ def main():
         qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
         _write_parquet_s3(
             joined[
-                ["station_id", "dt", "dt_plus30", "yhat_bikes", "yhat_bikes_bin", "y_stockout_bikes_30", "bikes_t30"]
+                [
+                    "station_id",
+                    "dt",
+                    "dt_plus30",
+                    "yhat_bikes",
+                    "yhat_bikes_bin",
+                    "y_stockout_bikes_30",
+                    "bikes_t30",
+                    "inference_id",
+                ]
             ],
             bucket,
             qual_key,
@@ -337,15 +345,18 @@ def main():
         y, m, d, h = _utc_hour_parts_from_local_dt(dt_pred)  # dt_pred is your local string
 
         jsonl_records = (
-            joined[["station_id", "dt", "y_stockout_bikes_30"]]
-            .rename(columns={"y_stockout_bikes_30": "label"})
-            .assign(label=lambda df: df["label"].astype(float))
+            joined[["inference_id", "y_stockout_bikes_30"]]
+            .rename(columns={"inference_id": "inferenceId", "y_stockout_bikes_30": "groundTruthLabel"})
+            .assign(groundTruthLabel=lambda df: df["groundTruthLabel"].astype(int))
             .to_dict(orient="records")
         )
 
         # Envelope + inferenceId when writing lines (or reuse the v3 writer)
         mq_key = f"monitoring/quality/city={city}/{y}/{m}/{d}/{h}/labels-{y}-{m}-{d}-{h}.jsonl"
         _write_jsonl_s3(jsonl_records, bucket, mq_key)
+
+        mq_latest_key = "monitoring/quality/latest/labels.jsonl"
+        _write_jsonl_s3(jsonl_records, bucket, mq_latest_key)
 
         try:
             pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)

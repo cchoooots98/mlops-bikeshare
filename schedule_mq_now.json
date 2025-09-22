@@ -1,9 +1,0 @@
-{
-  "ScheduleConfig": {
-    "ScheduleExpression": "NOW",
-    "DataAnalysisStartTime": "-PT3H",
-    "DataAnalysisEndTime": "PT0H"
-  },
-  "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
-  "MonitoringType": "ModelQuality"
-}

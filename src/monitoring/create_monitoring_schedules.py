@@ -11,17 +11,25 @@ bucket = "mlops-bikeshare-387706002632-ca-central-1"  # EDIT
 endpoint_name = "bikeshare-staging"  # EDIT
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # EDIT
 
+
+sm = boto3.client("sagemaker", region_name=region)
+
+
+def get_capture_prefix(endpoint):
+    ep = sm.describe_endpoint(EndpointName=endpoint)
+    return ep["DataCaptureConfig"]["DestinationS3Uri"]
+
+
 baseline_constraints = f"s3://{bucket}/monitoring/baseline/city=nyc/constraints.json"
 baseline_statistics = f"s3://{bucket}/monitoring/baseline/city=nyc/statistics.json"
-reports_prefix = f"s3://{bucket}/monitoring/reports/"
-groundtruth_prefix = f"s3://{bucket}/monitoring/quality/city=nyc"
+reports_prefix = f"s3://{bucket}/monitoring/reports"
+groundtruth_prefix = f"s3://{bucket}/monitoring/quality/latest"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 # image_uri = "536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer"
 
 preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor.py"
 
-sm = boto3.client("sagemaker", region_name=region)
-
+capture_prefix = get_capture_prefix(endpoint_name)
 # 1) DataQuality job definition (covers schema, nulls, ranges, AND drift vs baseline)
 dq_name = "bikeshare-data-quality-jd"
 try:
@@ -69,19 +77,12 @@ mq_name = "bikeshare-model-quality-jd"
 try:
     sm.create_model_quality_job_definition(
         JobDefinitionName=mq_name,
-        ModelQualityAppSpecification={
-            "ImageUri": image_uri,
-            "ProblemType": "BinaryClassification",
-            "PostAnalyticsProcessorSourceUri": mq_post_uri,
-        },
+        ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
         ModelQualityJobInput={
-            "EndpointInput": {
-                "EndpointName": endpoint_name,
+            "BatchTransformInput": {
+                "DataCapturedDestinationS3Uri": f"s3://{bucket}/monitoring/inference_jsonl/latest",
+                "DatasetFormat": {"JsonLines": {}},
                 "LocalPath": "/opt/ml/processing/input_data",
-                "S3InputMode": "File",
-                "S3DataDistributionType": "FullyReplicated",
-                "ProbabilityAttribute": "yhat",
-                "ProbabilityThresholdAttribute": 0.15,
             },
             "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
         },
@@ -148,7 +149,7 @@ try:
             "ScheduleConfig": {
                 "ScheduleExpression": "NOW",
                 "DataAnalysisStartTime": "-PT5H",
-                "DataAnalysisEndTime": "-PT0H",
+                "DataAnalysisEndTime": "-PT1H",
             },  # cron(0 0/2 ? * * *)
             "MonitoringJobDefinitionName": mq_name,
             "MonitoringType": "ModelQuality",
