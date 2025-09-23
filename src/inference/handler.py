@@ -181,7 +181,7 @@ def _build_inferenceid_to_eventid_map(
     bucket: str,
     capture_prefix: str,
     hour_keys: Iterable[str],
-    limit_files_per_hour: int = 200,
+    limit_files_per_hour: int = 3000,
 ) -> Dict[str, str]:
     """
     读取指定小时段下的 capture jsonl，建立 {inferenceId -> eventId} 映射。
@@ -554,17 +554,22 @@ def main():
         )
 
         miss_cnt = 0
+        total_cnt = 0
         # rows is a sequence of tuples: (inference_id, label_int, dt_plus30)
         for inference_id, label_int, dtp30 in rows:
+            total_cnt += 1
             event_id = infid_to_evid.get(str(inference_id))
             if not event_id:
                 miss_cnt += 1
                 continue
             y, m, d, h = _ymdh_from_utc_dt(str(dtp30))
             hour_key = f"{y}/{m}/{d}/{h}"
-            hour_to_rows.setdefault(hour_key, []).append((str(inference_id), int(label_int)))
+            hour_to_rows.setdefault(hour_key, []).append((str(event_id), int(label_int)))
         if miss_cnt:
-            print(f"[warn] {miss_cnt} records for dt={dt_pred} have no capture eventId; skipped")
+            print(
+                f"[warn] {miss_cnt}/{total_cnt} records for dt={dt_pred} have no capture eventId; "
+                f"scanned hours={capture_hours}"
+            )
 
     # === Write ONE jsonl per label hour (idempotent) ===
     # This avoids duplicates within the same hour and matches the folder convention:
