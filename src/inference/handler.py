@@ -12,6 +12,8 @@ import time
 import warnings
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import gzip
+from typing import Dict, Iterable, Tuple
 
 import boto3
 import pandas as pd
@@ -40,6 +42,70 @@ def _smr():
     # SageMaker runtime client for InvokeEndpoint
     return boto3.client("sagemaker-runtime")
 
+def _discover_capture_prefix(bucket: str, endpoint_name: str) -> str:
+    """
+    自动发现 Data Capture 的根前缀，目标形如：
+    datacapture/endpoint=<endpoint-config>/<endpoint_name>/AllTraffic
+
+    策略：
+      1) 列出 datacapture/ 下的一级目录，筛选以 'endpoint=' 开头的目录；
+      2) 在每个 endpoint=<...>/ 下面查找是否存在 '<endpoint_name>/AllTraffic/'；
+      3) 选择最近修改的一个作为前缀（更稳妥地对应最新 endpoint-config）。
+    """
+    s3 = _s3()
+    root = "datacapture/"
+    # 先枚举 endpoint=* 目录
+    token = None
+    cand_prefixes = []
+    while True:
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/",
+                                  ContinuationToken=token) if token else \
+               s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/")
+        for cp in resp.get("CommonPrefixes", []):
+            pfx = cp.get("Prefix")  # e.g. 'datacapture/endpoint=xxx/'
+            if pfx and pfx.startswith("datacapture/endpoint="):
+                cand_prefixes.append(pfx)
+        if resp.get("IsTruncated"):
+            token = resp.get("NextContinuationToken")
+        else:
+            break
+
+    best = None
+    best_mtime = None
+
+    # 在每个 endpoint=* 下面找 '<endpoint_name>/AllTraffic/'
+    for ep_root in cand_prefixes:
+        target = f"{ep_root}{endpoint_name}/AllTraffic/"
+        # 看这个 target 下是否有文件
+        token = None
+        found_any = False
+        last_mtime = None
+        while True:
+            resp = s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1,
+                                      ContinuationToken=token) if token else \
+                   s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1)
+            contents = resp.get("Contents", [])
+            if contents:
+                found_any = True
+                # 记录这个 capture 路径下最新文件时间，作为“最近”的依据
+                last_mtime = contents[0].get("LastModified")
+            if resp.get("IsTruncated"):
+                token = resp.get("NextContinuationToken")
+            else:
+                break
+
+        if found_any:
+            if best is None or (last_mtime and (best_mtime is None or last_mtime > best_mtime)):
+                best = target.rstrip("/")  # 去掉尾部斜杠，和我们其余逻辑对齐
+                best_mtime = last_mtime
+
+    if not best:
+        # 兜底：返回最常见的形态，仍然按你给出的目录结构
+        # 这里不包含 endpoint-config，因为我们没找到具体的；调用方可选择报 warn
+        return f"datacapture/endpoint=<UNKNOWN>/{endpoint_name}/AllTraffic"
+    return best
+
+
 
 def _read_parquet_s3(bucket: str, key: str) -> pd.DataFrame:
     """
@@ -60,6 +126,86 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     pq.write_table(table, buf)
     buf.seek(0)
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+
+def _list_s3_keys(bucket: str, prefix: str) -> Iterable[str]:
+    """List all S3 object keys under prefix (non-recursive)."""
+    s3 = _s3()
+    token = None
+    while True:
+        kwargs = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": 1000}
+        if token:
+            kwargs["ContinuationToken"] = token
+        resp = s3.list_objects_v2(**kwargs)
+        for it in resp.get("Contents", []):
+            yield it["Key"]
+        if resp.get("IsTruncated"):
+            token = resp.get("NextContinuationToken")
+        else:
+            break
+
+
+def _read_s3_text(bucket: str, key: str) -> Iterable[str]:
+    """Stream lines from a (possibly gzip) text object in S3."""
+    obj = _s3().get_object(Bucket=bucket, Key=key)
+    body = obj["Body"].read()
+    # Many capture files are .jsonl or .jsonl.gz；两种都兼容
+    if key.endswith(".gz"):
+        try:
+            body = gzip.decompress(body)
+        except OSError:
+            pass
+    for line in body.splitlines():
+        yield line.decode("utf-8", errors="ignore")
+
+
+def _capture_hours_around(dt_str: str, window_minutes: int = 10) -> Iterable[str]:
+    """
+    给定一次预测的 dt(UTC 字符串 'YYYY-MM-DD-HH-MM')，返回应扫描的 capture 小时文件夹列表（字符串 'YYYY/MM/DD/HH'）。
+    取 dt 所在小时，外加前/后各 1 小时，避免边界卡点。
+    """
+    base = datetime.strptime(dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc)
+    hours = {
+        base.strftime("%Y/%m/%d/%H"),
+        (base - timedelta(hours=1)).strftime("%Y/%m/%d/%H"),
+        (base + timedelta(hours=1)).strftime("%Y/%m/%d/%H"),
+    }
+    return sorted(hours)
+
+
+def _build_inferenceid_to_eventid_map(
+    bucket: str,
+    capture_prefix: str,
+    hour_keys: Iterable[str],
+    limit_files_per_hour: int = 200,
+) -> Dict[str, str]:
+    """
+    读取指定小时段下的 capture jsonl，建立 {inferenceId -> eventId} 映射。
+    只使用包含两者字段的行，遇到异常/脏行跳过。
+    """
+    m: Dict[str, str] = {}
+    for hour_key in hour_keys:
+        prefix = f"{capture_prefix}/{hour_key}/"
+        seen = 0
+        for key in _list_s3_keys(bucket, prefix):
+            # 限流，防止小时下文件极多
+            if limit_files_per_hour and seen >= limit_files_per_hour:
+                break
+            if not (key.endswith(".jsonl") or key.endswith(".jsonl.gz") or key.endswith(".json")):
+                continue
+            seen += 1
+            for line in _read_s3_text(bucket, key):
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                meta = rec.get("eventMetadata") or {}
+                inf_id = meta.get("inferenceId")
+                ev_id = meta.get("eventId")
+                # 只要二者同时存在才可用于映射
+                if isinstance(inf_id, str) and isinstance(ev_id, str):
+                    # 第一次出现的映射采用；后续重复的同 key 忽略
+                    m.setdefault(inf_id, ev_id)
+    return m
 
 
 def write_ground_truth_jsonl(s3_client, bucket: str, gt_root_prefix: str, rows):
@@ -226,62 +372,6 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
 
     return pd.DataFrame(rows)
 
-
-# def _invoke_endpoint(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Invoke an MLflow pyfunc SageMaker endpoint.
-#     We send a pandas 'dataframe_split' payload to preserve column order and types.
-#     If your Step 6 container expects a different schema, adjust here.
-#     """
-#     payload = {
-#         "inputs": {
-#             "dataframe_split": {
-#                 "columns": FEATURE_COLUMNS,
-#                 "data": X[FEATURE_COLUMNS].astype(np.float64).values.tolist(),
-#             }
-#         }
-#     }
-#     resp = _smr().invoke_endpoint(
-#         EndpointName=endpoint_name,
-#         ContentType="application/json",
-#         Accept="application/json",
-#         Body=json.dumps(payload).encode("utf-8"),
-#     )
-#     body = resp["Body"].read()
-#     raw_json = body.decode("utf-8")
-#     try:
-#         out = json.loads(body.decode("utf-8"))
-#     except Exception:
-#         raise RuntimeError(f"Bad model response: {body[:500]}")
-
-#     # Flexible parsing: support either a scalar list or dict/list of dicts
-#     # Normalize to a single 'yhat' column; keep 'raw'  for debugging.
-#     if isinstance(out, dict) and "predictions" in out:
-#         preds = out["predictions"]
-#     else:
-#         preds = out
-
-#     # Heuristics:
-#     def to_scalar(x):
-#         if isinstance(x, (int, float)):
-#             return float(x)
-#         if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (int, float)):
-#             return float(x[0])
-#         if isinstance(x, dict) and "yhat" in x:
-#             return float(x["yhat"])
-#         # fallback: NaN
-#         return float("nan")
-
-#     yhat = [to_scalar(p) for p in preds]
-#     res = X[["city", "dt", "station_id"]].copy()
-#     res["yhat_bikes"] = yhat
-#     res["raw"] = raw_json  # use object dtype to avoid null coercion
-#     res["raw"] = res["raw"].astype("object")
-#     # Add binary classification column based on global threshold
-#     res["yhat_bikes_bin"] = (res["yhat_bikes"] >= YHAT_PROB_THRESHOLD).astype("float64")
-#     return res
-
-
 def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) -> pd.DataFrame:
     """
     Build t+30m actuals from v_station_status, then compute label:
@@ -313,7 +403,14 @@ def main():
 
     # You can switch between staging/prod via env or CLI args (simplest: set here)
     endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-staging")
-
+    capture_prefix = os.environ.get("SM_CAPTURE_PREFIX")
+    if not capture_prefix:
+        # 自动发现形如 datacapture/endpoint=<...>/<endpoint_name>/AllTraffic
+        capture_prefix = _discover_capture_prefix(bucket=bucket, endpoint_name=endpoint_name)
+        print(f"[info] SM_CAPTURE_PREFIX not set. Auto-discovered capture_prefix={capture_prefix}")
+    else:
+        print(f"[info] Using SM_CAPTURE_PREFIX={capture_prefix}")
+        
     # Prepare Athena connection
     cnx = athena_conn(
         region=cfg["region"],
@@ -369,7 +466,7 @@ def main():
     # This dict aggregates ground-truth rows by the *dt_plus30 hour*.
     # Key   : "YYYY/MM/DD/HH" (UTC hour of the label, derived from dt_plus30)
     # Value : list of tuples [(inference_id, label_int), ...]
-    hour_to_rows = {}
+    hour_to_rows: Dict[str, list[Tuple[str, int]]] = {}
 
     # We will also keep track whether we wrote any parquet or labels this run
     wrote_any_parquet = False
@@ -438,17 +535,30 @@ def main():
             # Slice strings (no tz math needed because dt strings are already UTC)
             return dt_str[0:4], dt_str[5:7], dt_str[8:10], dt_str[11:13]
 
+        capture_hours = _capture_hours_around(dt_pred)
+        infid_to_evid = _build_inferenceid_to_eventid_map(bucket=bucket,
+                                                          capture_prefix=capture_prefix,
+                                                          hour_keys=capture_hours)
+        
         # Build GT rows for this dt_pred and add them into the corresponding hour bucket
         rows = (
             joined[["inference_id", "y_stockout_bikes_30", "dt_plus30"]]
             .assign(y_stockout_bikes_30=lambda df: df["y_stockout_bikes_30"].astype(int))
             .itertuples(index=False, name=None)
         )
+
+        miss_cnt = 0
         # rows is a sequence of tuples: (inference_id, label_int, dt_plus30)
         for inference_id, label_int, dtp30 in rows:
+            event_id = infid_to_evid.get(str(inference_id))
+            if not event_id:
+                miss_cnt += 1
+                continue
             y, m, d, h = _ymdh_from_utc_dt(str(dtp30))
             hour_key = f"{y}/{m}/{d}/{h}"
             hour_to_rows.setdefault(hour_key, []).append((str(inference_id), int(label_int)))
+        if miss_cnt:
+            print(f"[warn] {miss_cnt} records for dt={dt_pred} have no capture eventId; skipped")
 
     # === Write ONE jsonl per label hour (idempotent) ===
     # This avoids duplicates within the same hour and matches the folder convention:
@@ -473,10 +583,10 @@ def main():
 
             # Minimal in-place writer using the exact AWS-required schema
             lines = []
-            for inf_id, lbl in rows_for_hour:
+            for event_id, lbl in rows_for_hour:
                 rec = {
                     "groundTruthData": {"data": str(int(lbl)), "encoding": "CSV"},
-                    "eventMetadata": {"eventId": str(inf_id)},
+                    "eventMetadata": {"eventId": str(event_id)},
                     "eventVersion": "0",
                 }
                 lines.append(json.dumps(rec))
