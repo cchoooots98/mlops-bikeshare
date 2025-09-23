@@ -5,7 +5,7 @@
 Build Model Quality Ground Truth JSONL from prediction+actuals parquet files.
 
 Input (per-row parquet schema must include at least):
-  - inference_id : str
+  - inferenceId : str
   - y_stockout_bikes_30 : numeric (0.0/1.0)
 
 Behavior:
@@ -24,17 +24,16 @@ import io
 import json
 import re
 from datetime import datetime, timedelta
-from typing import Iterator, List, Tuple, Dict
+from typing import Dict, Iterator, List, Tuple
 
 import boto3
 import pandas as pd
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 # ---- Configuration constants ----
 BUCKET = "mlops-bikeshare-387706002632-ca-central-1"
-QUALITY_PREFIX = "monitoring/quality/city=nyc"          # where parquet lives
-GROUNDTRUTH_PREFIX = "monitoring/ground-truth"          # where JSONL will be written
+QUALITY_PREFIX = "monitoring/quality/city=nyc"  # where parquet lives
+GROUNDTRUTH_PREFIX = "monitoring/ground-truth"  # where JSONL will be written
 # Parquet key pattern example: monitoring/quality/city=nyc/ds=2025-09-22/part-2025-09-22-21-55.parquet
 PART_REGEX = re.compile(r".*/ds=(\d{4}-\d{2}-\d{2})/part-(\d{4}-\d{2}-\d{2}-\d{2})-(\d{2})\.parquet$")
 
@@ -83,7 +82,7 @@ def extract_ds_hour_from_key(key: str) -> Tuple[datetime, str]:
     m = PART_REGEX.match(key)
     if not m:
         raise ValueError(f"Key does not match expected pattern: {key}")
-    ds_str, hour_str, minute = m.group(1), m.group(2), m.group(3)
+    _, hour_str, minute = m.group(1), m.group(2), m.group(3)
     # hour_str format: YYYY-MM-DD-HH
     hour_dt = datetime.strptime(hour_str, "%Y-%m-%d-%H")
     return hour_dt, minute
@@ -106,9 +105,9 @@ def write_jsonl_to_s3(bucket: str, key: str, lines: List[dict]):
     s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode("utf-8"))
 
 
-def build_ground_truth_record(inference_id: str, label_val) -> dict:
+def build_ground_truth_record(inferenceId: str, label_val) -> dict:
     """
-    Convert a (inference_id, label) pair to Ground Truth JSONL item.
+    Convert a (inferenceId, label) pair to Ground Truth JSONL item.
     - label is cast to {0,1} then to string.
     - encoding is "CSV" per Model Monitor doc for simple scalar labels.
     """
@@ -120,7 +119,7 @@ def build_ground_truth_record(inference_id: str, label_val) -> dict:
         raise ValueError(f"Invalid label value: {label_val!r}")
     return {
         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-        "eventMetadata": {"inferenceId": str(inference_id)},
+        "eventMetadata": {"inferenceId": str(inferenceId)},
         "eventVersion": "0",
     }
 
@@ -168,26 +167,26 @@ def main():
             df = read_parquet_s3_to_df(BUCKET, key)
 
             # Basic schema validation (fail fast if required columns missing)
-            missing = [c for c in ("inference_id", "y_stockout_bikes_30") if c not in df.columns]
+            missing = [c for c in ("inferenceId", "y_stockout_bikes_30") if c not in df.columns]
             if missing:
                 raise KeyError(f"Missing columns {missing} in {key}")
 
             # Keep only the columns necessary to build ground truth
-            frames.append(df[["inference_id", "y_stockout_bikes_30"]])
+            frames.append(df[["inferenceId", "y_stockout_bikes_30"]])
 
         if not frames:
             continue
 
         joined = pd.concat(frames, ignore_index=True)
-        # Drop rows with NaN inference_id or label
-        joined = joined.dropna(subset=["inference_id", "y_stockout_bikes_30"])
+        # Drop rows with NaN inferenceId or label
+        joined = joined.dropna(subset=["inferenceId", "y_stockout_bikes_30"])
 
         # Convert to JSONL lines
         lines = []
         for rec in joined.itertuples(index=False):
-            inference_id = getattr(rec, "inference_id")
+            inferenceId = getattr(rec, "inferenceId")
             label_val = getattr(rec, "y_stockout_bikes_30")
-            lines.append(build_ground_truth_record(inference_id, label_val))
+            lines.append(build_ground_truth_record(inferenceId, label_val))
 
         # Compute destination key: monitoring/ground-truth/Y/M/D/H/labels-YYYYMMDDHH.jsonl
         y = hour_dt.strftime("%Y")

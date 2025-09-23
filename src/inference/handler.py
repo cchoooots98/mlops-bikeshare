@@ -107,20 +107,20 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
         }
 
         # Deterministic inference id so the Ground Truth builder can regenerate it:
-        inference_id = f"{dt_str}_{station_id}"
+        inferenceId = f"{dt_str}_{station_id}"
 
         resp = rt.invoke_endpoint(
             EndpointName=endpoint_name,
             ContentType="application/json",
             Accept="application/json",
-            InferenceId=inference_id,  # <-- critical for ModelQuality merge
+            InferenceId=inferenceId,  # <-- critical for ModelQuality merge
             Body=json.dumps(payload).encode("utf-8"),
         )
         body = resp["Body"].read()
         try:
             out = json.loads(body.decode("utf-8"))
         except Exception as e:
-            raise RuntimeError(f"Bad model response for {inference_id}: {body[:500]}") from e
+            raise RuntimeError(f"Bad model response for {inferenceId}: {body[:500]}") from e
 
         # Normalize to a scalar probability from various common shapes
         def to_scalar(x):
@@ -142,7 +142,7 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
                 "station_id": station_id,
                 "yhat_bikes": yhat,
                 "yhat_bikes_bin": float(yhat >= YHAT_PROB_THRESHOLD),
-                "inference_id": inference_id,
+                "inferenceId": inferenceId,
                 "raw": json.dumps(out, ensure_ascii=False),
             }
         )
@@ -202,7 +202,7 @@ def main():
 
     # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
     pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
-    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "inference_id", "raw"]], bucket, pred_key)
+    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]], bucket, pred_key)
 
     # Repair partitions (lightweight)
     try:
@@ -250,7 +250,7 @@ def main():
                     "yhat_bikes_bin",
                     "y_stockout_bikes_30",
                     "bikes_t30",
-                    "inference_id",
+                    "inferenceId",
                 ]
             ],
             bucket,
