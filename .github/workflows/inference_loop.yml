@@ -11,10 +11,7 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}  
-  SM_ENDPOINT: ${{ vars.ENDPOINT_STAGING }}
-  SM_MAX_RETRIES: "5"                            # exponential backoff max retries
-  ROWWISE_SLEEP_MS: "20"                         # 20ms per record to smooth burst
-  MAX_ROWS_PER_RUN: "300"                        # cap per run to protect endpoint            
+  SM_ENDPOINT: ${{ vars.ENDPOINT_STAGING }}         
   PYTHONUNBUFFERED: "1"
 
 jobs:
@@ -44,8 +41,5 @@ jobs:
       - name: Run online handler (predict + 30m actuals backfill)
         env:
            SM_ENDPOINT: ${{ env.SM_ENDPOINT }}
-           SM_MAX_RETRIES: ${{ env.SM_MAX_RETRIES }}
-           ROWWISE_SLEEP_MS: ${{ env.ROWWISE_SLEEP_MS }}
-           MAX_ROWS_PER_RUN: ${{ env.MAX_ROWS_PER_RUN }}
         run: |
           python -m src.inference.handler

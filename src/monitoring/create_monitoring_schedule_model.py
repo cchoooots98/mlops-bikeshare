@@ -45,8 +45,6 @@ sm.create_model_quality_job_definition(
             "S3DataDistributionType": "FullyReplicated",
             "ProbabilityAttribute": "predictions",
             "ProbabilityThresholdAttribute": 0.15,
-            "StartTimeOffset": "-PT5H",
-            "EndTimeOffset": "-PT0H",
         },
         "GroundTruthS3Input": {"S3Uri": groundtruth_prefix},
     },
@@ -74,7 +72,7 @@ sm.create_monitoring_schedule(
     MonitoringScheduleConfig={
         "ScheduleConfig": {
             "ScheduleExpression": "NOW",
-            "DataAnalysisStartTime": "-PT5H",
+            "DataAnalysisStartTime": "-PT2H",
             "DataAnalysisEndTime": "-PT0H",
         },  # cron(0 0/2 ? * * *)
         "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",

@@ -34,7 +34,7 @@ import pyarrow.parquet as pq
 BUCKET = "mlops-bikeshare-387706002632-ca-central-1"
 QUALITY_PREFIX = "monitoring/quality/city=nyc"  # where parquet lives
 GROUNDTRUTH_PREFIX = "monitoring/ground-truth"  # where JSONL will be written
-# Parquet key pattern example: monitoring/quality/city=nyc/ds=2025-09-22/part-2025-09-22-21-55.parquet
+
 PART_REGEX = re.compile(r".*/ds=(\d{4}-\d{2}-\d{2})/part-(\d{4}-\d{2}-\d{2}-\d{2})-(\d{2})\.parquet$")
 
 s3 = boto3.client("s3")
@@ -44,6 +44,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--start", required=True, help="Start timestamp inclusive, format YYYY-MM-DD-HH")
     p.add_argument("--end", required=True, help="End timestamp inclusive, format YYYY-MM-DD-HH")
+    p.add_argument("--endpoint", required=True, help="Endpoint name")
     return p.parse_args()
 
 
@@ -105,6 +106,52 @@ def write_jsonl_to_s3(bucket: str, key: str, lines: List[dict]):
     s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode("utf-8"))
 
 
+def get_endpoint_config(endpoint_name: str) -> str:
+    """
+    Get the endpoint config name for a given endpoint name using boto3.
+    """
+    sm = boto3.client("sagemaker")
+    resp = sm.describe_endpoint(EndpointName=endpoint_name)
+    return resp["EndpointConfigName"]
+
+
+def list_jsonl_files(start: datetime, end: datetime, endpoint_config: str, endpoint_name: str) -> List[str]:
+    """List all .jsonl files in the specified S3 path within the time range."""
+    start_dt = start - timedelta(hours=1)
+    end_dt = end + timedelta(hours=1)
+    jsonl_files = []
+
+    # Generate the S3 prefix for the search
+    for hour in hour_range(start_dt, end_dt):
+        y = hour.strftime("%Y")
+        m = hour.strftime("%m")
+        d = hour.strftime("%d")
+        h = hour.strftime("%H")
+        prefix = f"datacapture/endpoint={endpoint_config}/{endpoint_name}/AllTraffic/{y}/{m}/{d}/{h}/"
+
+        for obj in list_objects(prefix):
+            if obj["Key"].endswith(".jsonl"):
+                jsonl_files.append(obj["Key"])
+
+    return jsonl_files
+
+
+def extract_event_metadata_from_jsonl(bucket: str, jsonl_files: List[str]) -> Dict[str, Dict]:
+    """Extract event metadata from the specified .jsonl files."""
+    event_metadata = {}
+    for key in jsonl_files:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        lines = obj["Body"].read().decode("utf-8").splitlines()
+        for line in lines:
+            record = json.loads(line)
+            inference_id = record["eventMetadata"]["inferenceId"]
+            event_metadata[inference_id] = {
+                "eventId": record["eventMetadata"]["eventId"],
+                "inferenceTime": record["eventMetadata"]["inferenceTime"],
+            }
+    return event_metadata
+
+
 def build_ground_truth_record(inferenceId: str, label_val) -> dict:
     """
     Convert a (inferenceId, label) pair to Ground Truth JSONL item.
@@ -124,6 +171,25 @@ def build_ground_truth_record(inferenceId: str, label_val) -> dict:
     }
 
 
+def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_metadata: Dict) -> dict:
+    """Build ground truth record with additional event metadata."""
+    try:
+        label_int = int(float(label_val))
+    except Exception:
+        raise ValueError(f"Invalid label value: {label_val!r}")
+
+    event_info = event_metadata.get(inferenceId, {})
+    return {
+        "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
+        "eventMetadata": {
+            "eventId": event_info.get("eventId", ""),
+            "inferenceId": str(inferenceId),
+            "inferenceTime": event_info.get("inferenceTime", ""),
+        },
+        "eventVersion": "0",
+    }
+
+
 def main():
     args = parse_args()
     start_dt = datetime.strptime(args.start, "%Y-%m-%d-%H")
@@ -131,6 +197,16 @@ def main():
 
     if end_dt < start_dt:
         raise ValueError("end must be >= start")
+
+    # Get endpoint config
+    endpoint_name = args.endpoint
+    endpoint_config = get_endpoint_config(endpoint_name)
+
+    # List .jsonl files
+    jsonl_files = list_jsonl_files(start_dt, end_dt, endpoint_config, endpoint_name)
+
+    # Extract event metadata
+    event_metadata = extract_event_metadata_from_jsonl(BUCKET, jsonl_files)
 
     # Pre-compute all hours we need to cover
     hours = set(hour_range(start_dt, end_dt))
@@ -186,7 +262,7 @@ def main():
         for rec in joined.itertuples(index=False):
             inferenceId = getattr(rec, "inferenceId")
             label_val = getattr(rec, "y_stockout_bikes_30")
-            lines.append(build_ground_truth_record(inferenceId, label_val))
+            lines.append(build_ground_truth_record_with_metadata(inferenceId, label_val, event_metadata))
 
         # Compute destination key: monitoring/ground-truth/Y/M/D/H/labels-YYYYMMDDHH.jsonl
         y = hour_dt.strftime("%Y")
