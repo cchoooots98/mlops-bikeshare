@@ -1,6 +1,7 @@
+from time import sleep
+
 import boto3
 from sagemaker import image_uris
-from time import sleep
 
 region = "ca-central-1"
 bucket = "mlops-bikeshare-387706002632-ca-central-1"

@@ -5,15 +5,15 @@
 #    and writes s3://.../monitoring/quality/city=.../ds=YYYY-MM-DD/part-*.parquet
 # Run it every 5–10 minutes via GitHub Actions (cron) or locally.
 
+import gzip
 import io
 import json
 import os
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-import gzip
 from typing import Dict, Iterable, Tuple
+from zoneinfo import ZoneInfo
 
 import boto3
 import pandas as pd
@@ -42,6 +42,7 @@ def _smr():
     # SageMaker runtime client for InvokeEndpoint
     return boto3.client("sagemaker-runtime")
 
+
 def _discover_capture_prefix(bucket: str, endpoint_name: str) -> str:
     """
     自动发现 Data Capture 的根前缀，目标形如：
@@ -58,9 +59,11 @@ def _discover_capture_prefix(bucket: str, endpoint_name: str) -> str:
     token = None
     cand_prefixes = []
     while True:
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/",
-                                  ContinuationToken=token) if token else \
-               s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/")
+        resp = (
+            s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/", ContinuationToken=token)
+            if token
+            else s3.list_objects_v2(Bucket=bucket, Prefix=root, Delimiter="/")
+        )
         for cp in resp.get("CommonPrefixes", []):
             pfx = cp.get("Prefix")  # e.g. 'datacapture/endpoint=xxx/'
             if pfx and pfx.startswith("datacapture/endpoint="):
@@ -81,9 +84,11 @@ def _discover_capture_prefix(bucket: str, endpoint_name: str) -> str:
         found_any = False
         last_mtime = None
         while True:
-            resp = s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1,
-                                      ContinuationToken=token) if token else \
-                   s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1)
+            resp = (
+                s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1, ContinuationToken=token)
+                if token
+                else s3.list_objects_v2(Bucket=bucket, Prefix=target, MaxKeys=1)
+            )
             contents = resp.get("Contents", [])
             if contents:
                 found_any = True
@@ -106,7 +111,6 @@ def _discover_capture_prefix(bucket: str, endpoint_name: str) -> str:
     return best
 
 
-
 def _read_parquet_s3(bucket: str, key: str) -> pd.DataFrame:
     """
     Read a small Parquet file from S3 into a pandas DataFrame.
@@ -126,6 +130,7 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     pq.write_table(table, buf)
     buf.seek(0)
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+
 
 def _list_s3_keys(bucket: str, prefix: str) -> Iterable[str]:
     """List all S3 object keys under prefix (non-recursive)."""
@@ -372,6 +377,7 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
 
     return pd.DataFrame(rows)
 
+
 def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) -> pd.DataFrame:
     """
     Build t+30m actuals from v_station_status, then compute label:
@@ -410,7 +416,7 @@ def main():
         print(f"[info] SM_CAPTURE_PREFIX not set. Auto-discovered capture_prefix={capture_prefix}")
     else:
         print(f"[info] Using SM_CAPTURE_PREFIX={capture_prefix}")
-        
+
     # Prepare Athena connection
     cnx = athena_conn(
         region=cfg["region"],
@@ -536,10 +542,10 @@ def main():
             return dt_str[0:4], dt_str[5:7], dt_str[8:10], dt_str[11:13]
 
         capture_hours = _capture_hours_around(dt_pred)
-        infid_to_evid = _build_inferenceid_to_eventid_map(bucket=bucket,
-                                                          capture_prefix=capture_prefix,
-                                                          hour_keys=capture_hours)
-        
+        infid_to_evid = _build_inferenceid_to_eventid_map(
+            bucket=bucket, capture_prefix=capture_prefix, hour_keys=capture_hours
+        )
+
         # Build GT rows for this dt_pred and add them into the corresponding hour bucket
         rows = (
             joined[["inference_id", "y_stockout_bikes_30", "dt_plus30"]]
