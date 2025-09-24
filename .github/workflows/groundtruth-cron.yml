@@ -9,6 +9,7 @@ on:
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}   # Change if needed
   ENDPOINT_NAME: ${{ vars.ENDPOINT_STAGING }}  # <-- set your endpoint name
+  SM_EXECUTION_ROLE_ARN: ${{ secrets.SM_EXECUTION_ROLE_ARN }}
 
 jobs:
   build-gt:
@@ -44,7 +45,7 @@ jobs:
 
       - name: Verify AWS identity
         run: aws sts get-caller-identity
-        
+
       - name: Compute time window (UTC) in PowerShell
         # Use PowerShell to compute start/end with hour precision
         shell: pwsh
