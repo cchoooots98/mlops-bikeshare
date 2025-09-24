@@ -2,8 +2,6 @@ from time import sleep
 
 import boto3
 from sagemaker import image_uris
-from sagemaker.model_monitor import ModelQualityMonitor
-from sagemaker.model_monitor.dataset_format import DatasetFormat
 
 region = "ca-central-1"
 bucket = "mlops-bikeshare-387706002632-ca-central-1"
@@ -37,7 +35,6 @@ except sm.exceptions.ResourceNotFound:
     pass
 
 
-
 sm.create_model_quality_job_definition(
     JobDefinitionName="bikeshare-model-quality-jd",
     ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
@@ -45,8 +42,8 @@ sm.create_model_quality_job_definition(
         "EndpointInput": {
             "EndpointName": "bikeshare-staging",
             "LocalPath": "/opt/ml/processing/input_data",
-             "S3InputMode": "File",
-             "ProbabilityAttribute": "predictions",
+            "S3InputMode": "File",
+            "ProbabilityAttribute": "predictions",
             "ProbabilityThresholdAttribute": 0.15,
             "StartTimeOffset": "-PT8H",
             "EndTimeOffset": "-PT4H",
@@ -77,7 +74,7 @@ sm.create_monitoring_schedule(
     MonitoringScheduleConfig={
         "ScheduleConfig": {
             "ScheduleExpression": "cron(0 0/2 ? * * *)",
-        },  
+        },
         "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
         "MonitoringType": "ModelQuality",
     },

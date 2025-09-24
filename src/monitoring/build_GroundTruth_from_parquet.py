@@ -182,9 +182,14 @@ def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_m
 
     return {
         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-        "eventMetadata": {"eventId": event_info.get("eventId", ""), "inferenceId": str(inferenceId), "inferenceTime": event_info.get("inferenceTime", "")},
-        "eventVersion": "0"
+        "eventMetadata": {
+            "eventId": event_info.get("eventId", ""),
+            "inferenceId": str(inferenceId),
+            "inferenceTime": event_info.get("inferenceTime", ""),
+        },
+        "eventVersion": "0",
     }
+
 
 def main():
     args = parse_args()
