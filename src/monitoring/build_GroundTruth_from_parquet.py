@@ -137,54 +137,80 @@ def list_jsonl_files(start: datetime, end: datetime, endpoint_config: str, endpo
 
 
 def extract_event_metadata_from_jsonl(bucket: str, jsonl_files: List[str]) -> Dict[str, Dict]:
-    """Extract event metadata from the specified .jsonl files."""
-    event_metadata = {}
+    """
+    Extract event metadata from model data capture JSONL files.
+    Key by inferenceId -> {eventId, inferenceTime}.
+    If a JSON line does not contain the needed fields, skip it safely.
+    NOTE:
+    - Some data-capture records may not include eventMetadata.inferenceId.
+      Model Monitor aligns ground-truth with data-capture by eventId, so we only
+      keep entries where BOTH inferenceId and eventId are present.
+    """
+    event_metadata: Dict[str, Dict] = {}
+    total_lines = 0
+    kept = 0
+    skipped_no_md = 0
+    skipped_no_inf_id = 0
+    skipped_no_event_id = 0
+
     for key in jsonl_files:
         obj = s3.get_object(Bucket=bucket, Key=key)
         lines = obj["Body"].read().decode("utf-8").splitlines()
         for line in lines:
-            record = json.loads(line)
-            inference_id = record["eventMetadata"]["inferenceId"]
-            event_metadata[inference_id] = {
-                "eventId": record["eventMetadata"]["eventId"],
-                "inferenceTime": record["eventMetadata"]["inferenceTime"],
-            }
+            total_lines += 1
+            try:
+                record = json.loads(line)
+                md = record.get("eventMetadata", None)
+                if not md:
+                    skipped_no_md += 1
+                    continue
+
+                inf_id = md.get("inferenceId", None)
+                if not inf_id:
+                    # If inferenceId is absent, we cannot map parquet inferenceId -> eventId; skip.
+                    skipped_no_inf_id += 1
+                    continue
+
+                ev_id = md.get("eventId", None)
+                if not ev_id:
+                    # Model Quality requires eventId to join with data capture; skip.
+                    skipped_no_event_id += 1
+                    continue
+
+                event_metadata[str(inf_id)] = {
+                    "eventId": str(ev_id),
+                    "inferenceTime": md.get("inferenceTime", ""),
+                }
+                kept += 1
+            except Exception:
+                # Ignore malformed lines defensively
+                continue
     return event_metadata
 
 
-# def build_ground_truth_record(inferenceId: str, label_val) -> dict:
-#     """
-#     Convert a (inferenceId, label) pair to Ground Truth JSONL item.
-#     - label is cast to {0,1} then to string.
-#     - encoding is "CSV" per Model Monitor doc for simple scalar labels.
-#     """
-#     try:
-#         # y_stockout_bikes_30 may be float in parquet; normalize to 0/1 int
-#         label_int = int(float(label_val))
-#     except Exception:
-#         # If label is malformed, mark as 0 (or raise); here we choose to raise to avoid silent corruption.
-#         raise ValueError(f"Invalid label value: {label_val!r}")
-#     return {
-#         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-#         "eventMetadata": {"inferenceId": str(inferenceId)},
-#         "eventVersion": "0",
-#     }
-
-
 def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_metadata: Dict) -> dict:
-    """Build ground truth record with additional event metadata."""
+    """
+    Build one ground-truth JSONL line.
+    REQUIREMENT: event_metadata must have a mapping for this inferenceId (providing eventId).
+    If the mapping is missing, the caller should SKIP this record (do not write an empty eventId).
+    """
+    # Normalize label to int {0,1}
     try:
         label_int = int(float(label_val))
     except Exception:
         raise ValueError(f"Invalid label value: {label_val!r}")
 
-    event_info = event_metadata.get(inferenceId, {})
+    # Lookup capture metadata by inferenceId
+    event_info = event_metadata.get(str(inferenceId))
+    if not event_info or not event_info.get("eventId"):
+        # The caller will skip this record; we keep this function pure.
+        raise KeyError("Missing eventId mapping for this inferenceId")
 
     return {
         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
         "eventMetadata": {
-            "eventId": event_info.get("eventId", ""),
-            "inferenceId": str(inferenceId),
+            "eventId": event_info["eventId"],  # MUST be present for Model Quality join
+            "inferenceId": str(inferenceId),  # Optional, helpful for debugging
             "inferenceTime": event_info.get("inferenceTime", ""),
         },
         "eventVersion": "0",
@@ -260,10 +286,21 @@ def main():
 
         # Convert to JSONL lines
         lines = []
+        skipped_no_mapping = 0
         for rec in joined.itertuples(index=False):
             inferenceId = getattr(rec, "inferenceId")
             label_val = getattr(rec, "y_stockout_bikes_30")
-            lines.append(build_ground_truth_record_with_metadata(inferenceId, label_val, event_metadata))
+            try:
+                line = build_ground_truth_record_with_metadata(inferenceId, label_val, event_metadata)
+                lines.append(line)
+            except KeyError:
+                # No eventId mapping for this inferenceId; skip
+                skipped_no_mapping += 1
+                continue
+
+        if not lines:
+            print(f"[{hour_dt}] No valid records with eventId mapping; skip writing.")
+            continue
 
         # Compute destination key: monitoring/ground-truth/Y/M/D/H/labels-YYYYMMDDHH.jsonl
         y = hour_dt.strftime("%Y")
