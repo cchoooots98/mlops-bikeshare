@@ -35,13 +35,16 @@ jobs:
           # Install libraries required by your script
           pip install boto3 pandas pyarrow
 
-      - name: Configure AWS credentials (OIDC)
-        # This uses GitHub OIDC to assume an AWS role without long-lived keys
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}   # <-- put your role ARN in repo secrets
           aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: gha-${{ github.run_id }}
 
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+        
       - name: Compute time window (UTC) in PowerShell
         # Use PowerShell to compute start/end with hour precision
         shell: pwsh
