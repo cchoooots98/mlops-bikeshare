@@ -18,6 +18,7 @@ sm = boto3.client("sagemaker", region_name=region)
 
 reports_prefix = f"s3://{bucket}/monitoring/reports"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
+preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor_model.py"
 print(f"Image URI: {image_uri}")
 # capture_prefix = get_capture_prefix(endpoint_name) #
 # Image URI: 536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer
@@ -37,7 +38,11 @@ except sm.exceptions.ResourceNotFound:
 
 sm.create_model_quality_job_definition(
     JobDefinitionName="bikeshare-model-quality-jd",
-    ModelQualityAppSpecification={"ImageUri": image_uri, "ProblemType": "BinaryClassification"},
+    ModelQualityAppSpecification={
+        "ImageUri": image_uri, 
+        "ProblemType": "BinaryClassification",
+        "RecordPreprocessorSourceUri": preprocessor_uri
+        },
     ModelQualityJobInput={
         "EndpointInput": {
             "EndpointName": "bikeshare-staging",
@@ -73,7 +78,7 @@ sm.create_monitoring_schedule(
     MonitoringScheduleName="bikeshare-model-quality",
     MonitoringScheduleConfig={
         "ScheduleConfig": {
-            "ScheduleExpression": "cron(0 0/2 ? * * *)",
+            "ScheduleExpression":"cron(0 0/2 ? * * *)",
         },
         "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
         "MonitoringType": "ModelQuality",

@@ -205,16 +205,16 @@ def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_m
     if not event_info or not event_info.get("eventId"):
         # The caller will skip this record; we keep this function pure.
         raise KeyError("Missing eventId mapping for this inferenceId")
-
+    
     return {
         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
         "eventMetadata": {
-            "eventId": event_info["eventId"],  # MUST be present for Model Quality join
-            "inferenceId": str(inferenceId),  # Optional, helpful for debugging
-            "inferenceTime": event_info.get("inferenceTime", ""),
+            "eventId": str(inferenceId)
         },
         "eventVersion": "0",
     }
+
+
 
 
 def main():
