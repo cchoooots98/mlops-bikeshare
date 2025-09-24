@@ -152,23 +152,23 @@ def extract_event_metadata_from_jsonl(bucket: str, jsonl_files: List[str]) -> Di
     return event_metadata
 
 
-def build_ground_truth_record(inferenceId: str, label_val) -> dict:
-    """
-    Convert a (inferenceId, label) pair to Ground Truth JSONL item.
-    - label is cast to {0,1} then to string.
-    - encoding is "CSV" per Model Monitor doc for simple scalar labels.
-    """
-    try:
-        # y_stockout_bikes_30 may be float in parquet; normalize to 0/1 int
-        label_int = int(float(label_val))
-    except Exception:
-        # If label is malformed, mark as 0 (or raise); here we choose to raise to avoid silent corruption.
-        raise ValueError(f"Invalid label value: {label_val!r}")
-    return {
-        "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-        "eventMetadata": {"inferenceId": str(inferenceId)},
-        "eventVersion": "0",
-    }
+# def build_ground_truth_record(inferenceId: str, label_val) -> dict:
+#     """
+#     Convert a (inferenceId, label) pair to Ground Truth JSONL item.
+#     - label is cast to {0,1} then to string.
+#     - encoding is "CSV" per Model Monitor doc for simple scalar labels.
+#     """
+#     try:
+#         # y_stockout_bikes_30 may be float in parquet; normalize to 0/1 int
+#         label_int = int(float(label_val))
+#     except Exception:
+#         # If label is malformed, mark as 0 (or raise); here we choose to raise to avoid silent corruption.
+#         raise ValueError(f"Invalid label value: {label_val!r}")
+#     return {
+#         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
+#         "eventMetadata": {"inferenceId": str(inferenceId)},
+#         "eventVersion": "0",
+#     }
 
 
 def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_metadata: Dict) -> dict:
@@ -179,16 +179,12 @@ def build_ground_truth_record_with_metadata(inferenceId: str, label_val, event_m
         raise ValueError(f"Invalid label value: {label_val!r}")
 
     event_info = event_metadata.get(inferenceId, {})
+
     return {
         "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-        "eventMetadata": {
-            "eventId": event_info.get("eventId", ""),
-            "inferenceId": str(inferenceId),
-            "inferenceTime": event_info.get("inferenceTime", ""),
-        },
-        "eventVersion": "0",
+        "eventMetadata": {"eventId": event_info.get("eventId", ""), "inferenceId": str(inferenceId), "inferenceTime": event_info.get("inferenceTime", "")},
+        "eventVersion": "0"
     }
-
 
 def main():
     args = parse_args()
