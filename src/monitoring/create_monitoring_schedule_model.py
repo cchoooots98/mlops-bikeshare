@@ -39,10 +39,10 @@ except sm.exceptions.ResourceNotFound:
 sm.create_model_quality_job_definition(
     JobDefinitionName="bikeshare-model-quality-jd",
     ModelQualityAppSpecification={
-        "ImageUri": image_uri, 
+        "ImageUri": image_uri,
         "ProblemType": "BinaryClassification",
-        "RecordPreprocessorSourceUri": preprocessor_uri
-        },
+        "RecordPreprocessorSourceUri": preprocessor_uri,
+    },
     ModelQualityJobInput={
         "EndpointInput": {
             "EndpointName": "bikeshare-staging",
@@ -78,7 +78,7 @@ sm.create_monitoring_schedule(
     MonitoringScheduleName="bikeshare-model-quality",
     MonitoringScheduleConfig={
         "ScheduleConfig": {
-            "ScheduleExpression":"cron(0 0/2 ? * * *)",
+            "ScheduleExpression": "cron(0 0/2 ? * * *)",
         },
         "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
         "MonitoringType": "ModelQuality",

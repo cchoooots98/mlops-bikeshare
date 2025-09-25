@@ -20,12 +20,14 @@
 
 import json
 
+
 def _safe_json_loads(text: str):
     """Safely parse JSON; return None on failure."""
     try:
         return json.loads(text)
     except Exception:
         return None
+
 
 def _extract_rows_from_dataframe_split(payload: dict):
     """
@@ -41,6 +43,7 @@ def _extract_rows_from_dataframe_split(payload: dict):
     except Exception:
         pass
     return [], []
+
 
 def _extract_prediction_scalar(resp_payload: dict):
     """
@@ -73,6 +76,7 @@ def _extract_prediction_scalar(resp_payload: dict):
 
     # Not a supported shape
     return None
+
 
 def preprocess_handler(inference_record):
     """
@@ -115,8 +119,14 @@ def preprocess_handler(inference_record):
 
         # If predictions is a vector and length matches number of rows,
         # we can keep it as a per-row list; otherwise fall back to scalar.
-        if isinstance(out_payload, dict) and "predictions" in out_payload and isinstance(out_payload["predictions"], list):
-            if len(out_payload["predictions"]) == len(rows) and all(isinstance(x, (int, float)) for x in out_payload["predictions"]):
+        if (
+            isinstance(out_payload, dict)
+            and "predictions" in out_payload
+            and isinstance(out_payload["predictions"], list)
+        ):
+            if len(out_payload["predictions"]) == len(rows) and all(
+                isinstance(x, (int, float)) for x in out_payload["predictions"]
+            ):
                 pred_series = [float(x) for x in out_payload["predictions"]]
 
         # Always try to produce a scalar fallback

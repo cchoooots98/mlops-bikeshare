@@ -4,6 +4,7 @@
 
 import json
 
+
 def preprocess_handler(inference_record):
     """
     Parameters
