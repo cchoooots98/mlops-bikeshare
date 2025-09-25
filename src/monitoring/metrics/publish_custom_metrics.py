@@ -6,14 +6,14 @@
 import argparse
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Tuple, Optional, List
+from typing import List, Optional
 
 import boto3
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 
 # ---------- Metric helpers (no heavy sklearn dependency) ----------
+
 
 def _auto_pick_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     """Return the first column that exists in df from candidates, or None."""
@@ -76,6 +76,7 @@ def compute_threshold_hit_rate(y_score: np.ndarray, thr: float) -> float:
 
 # ---------- S3 + Data loading ----------
 
+
 def list_parquet_keys_for_last_24h(s3, bucket: str, prefix_root: str) -> List[str]:
     """
     List object keys under prefix_root limited to partitions for the last 24h.
@@ -120,25 +121,25 @@ def load_quality_dataframe(bucket: str, prefix_root: str, time_col_hint: str = "
     if time_col is not None:
         # dt like "2025-09-25 01:55:00" (no timezone)
         df[time_col] = pd.to_datetime(
-            df[time_col],
-            format="%Y-%m-%d-%H-%M",  # exact format for "YYYY-MM-DD-HH-MM"
-            utc=True,
-            errors="coerce"
+            df[time_col], format="%Y-%m-%d-%H-%M", utc=True, errors="coerce"  # exact format for "YYYY-MM-DD-HH-MM"
         )
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         df = df[df[time_col] >= cutoff].copy()
-
 
     return df
 
 
 # ---------- Main ----------
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bucket", required=True, help="S3 bucket containing quality data")
-    parser.add_argument("--quality-prefix", required=True,
-                        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=nyc")
+    parser.add_argument(
+        "--quality-prefix",
+        required=True,
+        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=nyc",
+    )
     parser.add_argument("--endpoint", required=True, help="Endpoint name as a metric dimension")
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "ca-central-1"))
     parser.add_argument("--threshold", type=float, default=0.15, help="Probability threshold for F1/hit-rate")
@@ -159,8 +160,7 @@ def main():
     score_col = "yhat_bikes"
     if label_col not in df.columns or score_col not in df.columns:
         raise RuntimeError(
-            f"Expected columns not found. Have: {list(df.columns)}. "
-            f"Need '{label_col}' and '{score_col}'."
+            f"Expected columns not found. Have: {list(df.columns)}. " f"Need '{label_col}' and '{score_col}'."
         )
 
     y_true = df[label_col].astype(int).to_numpy(copy=False)
@@ -172,8 +172,10 @@ def main():
     hit_rate = compute_threshold_hit_rate(y_score, args.threshold)
     samples = int(y_true.size)
 
-    print(f"Computed metrics (last 24h): AP={pr_auc:.4f}, F1@{args.threshold}={f1:.4f}, "
-          f"HitRate@{args.threshold}={hit_rate:.4f}, N={samples}")
+    print(
+        f"Computed metrics (last 24h): AP={pr_auc:.4f}, F1@{args.threshold}={f1:.4f}, "
+        f"HitRate@{args.threshold}={hit_rate:.4f}, N={samples}"
+    )
 
     # Build CloudWatch dimensions
     dims = [{"Name": "EndpointName", "Value": args.endpoint}]

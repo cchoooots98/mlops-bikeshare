@@ -17,7 +17,7 @@ jobs:
       BUCKET: mlops-bikeshare-387706002632-ca-central-1
       ENDPOINT: bikeshare-staging
       QUALITY_PREFIX: monitoring/quality/city=nyc   
-      THRESHOLD: "0.5"
+      THRESHOLD: "0.15"
       CITY: "nyc"
     steps:
       - name: Checkout
