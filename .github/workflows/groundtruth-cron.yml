@@ -58,7 +58,7 @@ jobs:
       - name: Run build_GroundTruth_from_parquet.py
         # IMPORTANT: update the relative path below to where the file lives in your repo
         run: |
-          python src/monitoring/build_GroundTruth_from_parquet.py \
+          python src/monitoring/scheduler/build_GroundTruth_from_parquet.py \
             --start "$START" \
             --end "$END" \
             --endpoint "$ENDPOINT_NAME"
