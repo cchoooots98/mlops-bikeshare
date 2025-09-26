@@ -1,29 +1,43 @@
-# handler.py
-# Calls SageMaker endpoint with the latest online features and writes:
-# 1) s3://.../inference/city=.../dt=.../predictions.parquet
-# 2) After 30 minutes, builds actuals from v_station_status, joins with predictions,
-#    and writes s3://.../monitoring/quality/city=.../ds=YYYY-MM-DD/part-*.parquet
-# Run it every 5–10 minutes via GitHub Actions (cron) or locally.
+# handler.py (improved)
+# End-to-end:
+# 1) Build online features and invoke the SageMaker endpoint (row-wise with InferenceId).
+# 2) Write predictions to s3://.../inference/city=.../dt=.../predictions.parquet
+# 3) Backfill model-quality for any matured prediction dt within a sliding window.
+#    - Window length is configurable (default 120 minutes).
+#    - 5-minute grid to align with raw data cadence.
+#    - Only backfill for dt that actually has predictions.
+#    - Idempotent: skip if quality shard already exists.
+#    - Reads the correct predictions for each dt (no reuse of "latest" predictions).
+#
+# Windows/PowerShell ready.
 
 import io
 import json
 import os
 import warnings
 from datetime import datetime, timedelta, timezone
+from typing import List
 
 import boto3
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.features.build_features import athena_conn, query_df, read_env  # reuse env + athena
-from src.features.schema import FEATURE_COLUMNS  # same order as training
-from src.inference.featurize_online import build_online_features  # latest feature batch
+from src.features.build_features import athena_conn, query_df, read_env
+from src.features.schema import FEATURE_COLUMNS
+from src.inference.featurize_online import build_online_features
 
 warnings.filterwarnings("ignore", message="pandas only supports SQLAlchemy")
 
+# ===== Tunables =====
+YHAT_PROB_THRESHOLD = 0.15  # Decision threshold for binary label from probability
+STOCKOUT_THRESHOLD = 2  # bikes <= 2 => y=1 within 30 minutes
+MATURITY_MINUTES = 30  # Ground-truth maturity (t+30m)
+BACKFILL_MINUTES = 120  # Backfill window length
+STEP_MINUTES = 5  # 5-min grid to align with data ingestion
+MAX_CANDIDATES = BACKFILL_MINUTES // STEP_MINUTES  # Safety cap (e.g., 24 for 120m/5m)
 
-YHAT_PROB_THRESHOLD = 0.15
+# ==================== Clients ====================
 
 
 def _s3():
@@ -31,13 +45,14 @@ def _s3():
 
 
 def _smr():
-    # SageMaker runtime client for InvokeEndpoint
     return boto3.client("sagemaker-runtime")
 
 
+# ==================== S3 Utils ====================
+
+
 def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
-    # Write a small DataFrame to S3 as parquet
-    # (in-memory buffer to avoid temp files on Windows)
+    """Write a small DataFrame to S3 as Parquet using an in-memory buffer (Windows friendly)."""
     table = pa.Table.from_pandas(df)
     buf = io.BytesIO()
     pq.write_table(table, buf)
@@ -45,14 +60,44 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str):
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
-def _inference_table_create_if_absent(cnx, bucket):
-    # External table for predictions (partitioned by city, dt)
+def _read_parquet_s3(bucket: str, key: str) -> pd.DataFrame:
+    """Read a Parquet object from S3 into a pandas DataFrame (no temp files)."""
+    try:
+        obj = _s3().get_object(Bucket=bucket, Key=key)
+    except _s3().exceptions.NoSuchKey:
+        return pd.DataFrame()
+    data = obj["Body"].read()
+    table = pq.read_table(io.BytesIO(data))
+    return table.to_pandas()
+
+
+def _object_exists(bucket: str, key: str) -> bool:
+    """Check if an S3 object exists without downloading it."""
+    try:
+        _s3().head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
+
+
+def _prefix_has_any_object(bucket: str, prefix: str) -> bool:
+    """Check if there is any object under a prefix (used to test 'already backfilled?')."""
+    resp = _s3().list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
+    return "Contents" in resp
+
+
+# ==================== Athena Tables (idempotent) ====================
+
+
+def _inference_table_create_if_absent(cnx, bucket: str):
+    """Create the external table for predictions if missing."""
     sql = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS inference (
         station_id string,
         yhat_bikes double,
         yhat_bikes_bin double,
-        raw string                 
+        inferenceId string,
+        raw string
     )
     PARTITIONED BY (`city` string, `dt` string)
     STORED AS PARQUET
@@ -63,40 +108,42 @@ def _inference_table_create_if_absent(cnx, bucket):
     pd.read_sql("MSCK REPAIR TABLE inference", cnx)
 
 
-def _quality_table_create_if_absent(cnx, bucket):
-    # External table for monitoring join
-    sql = """
+def _quality_table_create_if_absent(cnx, bucket: str):
+    """Create the external table for monitoring quality if missing."""
+    sql = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS monitoring_quality (
         station_id string,
-        dt string,            
-        dt_plus30 string,     
+        dt string,
+        dt_plus30 string,
         yhat_bikes double,
         yhat_bikes_bin double,
         y_stockout_bikes_30 double,
-        bikes_t30 int
-        )
-    PARTITIONED BY (city string, ds string)    
+        bikes_t30 int,
+        inferenceId string
+    )
+    PARTITIONED BY (city string, ds string)
     STORED AS PARQUET
-    LOCATION 's3://mlops-bikeshare-387706002632-ca-central-1/monitoring/quality/'
-    TBLPROPERTIES ('parquet.compression'='SNAPPY');
+    LOCATION 's3://{bucket}/monitoring/quality/'
+    TBLPROPERTIES ('parquet.compression'='SNAPPY')
     """
     pd.read_sql(sql, cnx)
     pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
 
 
+# ==================== Inference & Actuals ====================
+
+
 def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFrame:
     """
-    Invoke the SageMaker endpoint one row at a time and attach an InferenceId per record.
-    This enables Model Monitor (ModelQuality) to merge predictions with Ground Truth by 'inferenceId'.
-    NOTE: This is slower than batching but is robust for joining.
+    Invoke the SageMaker endpoint one record at a time with a deterministic InferenceId.
+    This ensures Ground Truth can be joined later.
     """
     rows = []
-    rt = _smr()  # boto3.client("sagemaker-runtime")
+    rt = _smr()
 
     for rec in X[["city", "dt", "station_id"] + FEATURE_COLUMNS].itertuples(index=False, name=None):
         city, dt_str, station_id, *features = rec
 
-        # Build dataframe_split payload with a single record to preserve column order
         payload = {
             "inputs": {
                 "dataframe_split": {
@@ -106,14 +153,14 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
             }
         }
 
-        # Deterministic inference id so the Ground Truth builder can regenerate it:
+        # Deterministic inference id: dt + station_id
         inferenceId = f"{dt_str}_{station_id}"
 
         resp = rt.invoke_endpoint(
             EndpointName=endpoint_name,
             ContentType="application/json",
             Accept="application/json",
-            InferenceId=inferenceId,  # <-- critical for ModelQuality merge
+            InferenceId=inferenceId,
             Body=json.dumps(payload).encode("utf-8"),
         )
         body = resp["Body"].read()
@@ -122,8 +169,8 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
         except Exception as e:
             raise RuntimeError(f"Bad model response for {inferenceId}: {body[:500]}") from e
 
-        # Normalize to a scalar probability from various common shapes
         def to_scalar(x):
+            # Normalize common response shapes to a float
             if isinstance(x, (int, float)):
                 return float(x)
             if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (int, float)):
@@ -150,12 +197,11 @@ def _invoke_endpoint_rowwise(endpoint_name: str, X: pd.DataFrame) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) -> pd.DataFrame:
+def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = STOCKOUT_THRESHOLD) -> pd.DataFrame:
     """
     Build t+30m actuals from v_station_status, then compute label:
     y_stockout_bikes_30 = 1.0 if bikes(t+30m) <= threshold else 0.0
     """
-    # Compute t+30 string and fetch bikes/docks at t+30 for all stations
     dt_plus30 = (datetime.strptime(pred_dt, "%Y-%m-%d-%H-%M") + timedelta(minutes=30)).strftime("%Y-%m-%d-%H-%M")
     sql = f"""
     SELECT station_id, bikes AS bikes_t30
@@ -163,9 +209,8 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
     WHERE city = '{city}' AND dt = '{dt_plus30}'
     """
     df = query_df(cnx, sql)
-
     if df.empty:
-        # Not ready yet; a future run will fill this in.
+        # Not matured yet or missing raw snapshot; skip for now.
         return pd.DataFrame(columns=["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"])
 
     df["y_stockout_bikes_30"] = (df["bikes_t30"] <= threshold).astype("float64")
@@ -173,16 +218,51 @@ def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = 2) ->
     return df
 
 
+# ==================== Backfill Helpers ====================
+
+
+def _make_candidate_dts(latest_dt_str: str, now_utc: datetime) -> List[str]:
+    """
+    Build a 5-minute grid backwards from latest_dt_str for BACKFILL_MINUTES,
+    keeping only matured dts (now >= dt + MATURITY_MINUTES).
+    """
+    base = datetime.strptime(latest_dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc)
+    out = []
+    for k in range(0, MAX_CANDIDATES + 1):
+        dtk = base - timedelta(minutes=STEP_MINUTES * k)
+        if now_utc >= (dtk + timedelta(minutes=MATURITY_MINUTES)):
+            out.append(dtk.strftime("%Y-%m-%d-%H-%M"))
+    return out
+
+
+def _prediction_key(city: str, dt: str) -> str:
+    """S3 key for predictions written by this job."""
+    return f"inference/city={city}/dt={dt}/predictions.parquet"
+
+
+def _quality_key(city: str, dt: str) -> str:
+    """S3 key prefix for monitoring quality for this pred dt."""
+    ds = dt[:10]  # YYYY-MM-DD
+    # Using part-{dt}.parquet as you do; if you sharded later, keep the prefix check.
+    return f"monitoring/quality/city={city}/ds={ds}/part-{dt}.parquet"
+
+
+def _quality_prefix_for_day(city: str, dt: str) -> str:
+    """Day-level prefix helper (not strictly needed but handy)."""
+    ds = dt[:10]
+    return f"monitoring/quality/city={city}/ds={ds}/"
+
+
+# ==================== Main ====================
+
+
 def main():
-    # Read config
+    # ----- 1) Config & Connections -----
     cfg = read_env()
     city = cfg["city"]
     bucket = cfg["bucket"]
+    endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-staging")
 
-    # You can switch between staging/prod via env or CLI args (simplest: set here)
-    endpoint_name = os.environ.get("SM_ENDPOINT", "bikeshare-prod")
-
-    # Prepare Athena connection
     cnx = athena_conn(
         region=cfg["region"],
         s3_staging_dir=cfg["athena_output"],
@@ -190,58 +270,68 @@ def main():
         schema_name=cfg["athena_database"],
     )
 
-    # Ensure external tables exist (idempotent)
     _inference_table_create_if_absent(cnx, bucket)
     _quality_table_create_if_absent(cnx, bucket)
 
-    # === A. Produce predictions for the latest snapshot ===
-    X = build_online_features(city)  # includes ["city","dt","station_id"] + FEATURE_COLUMNS
+    # ----- 2) Inference for the latest snapshot -----
+    X = build_online_features(city)  # ["city","dt","station_id"] + FEATURE_COLUMNS, sorted with latest first
     latest_dt = X["dt"].iloc[0]
 
-    preds = _invoke_endpoint_rowwise(endpoint_name, X)
+    preds_latest = _invoke_endpoint_rowwise(endpoint_name, X)
 
-    # Write to S3 partition: inference/city=.../dt=.../predictions.parquet
-    pred_key = f"inference/city={city}/dt={latest_dt}/predictions.parquet"
-    _write_parquet_s3(preds[["station_id", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]], bucket, pred_key)
+    pred_key_latest = _prediction_key(city, latest_dt)
+    _write_parquet_s3(
+        preds_latest[["station_id", "dt", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]],
+        bucket,
+        pred_key_latest,
+    )
 
-    # Repair partitions (lightweight)
+    # Lightweight partition repair (best-effort)
     try:
         pd.read_sql("MSCK REPAIR TABLE inference", cnx)
     except Exception:
         pass
 
-    # === B. Backfill actuals for any predictions older than 30 minutes ===
-    # Strategy: find inference partitions (last ~2 hours), join those with missing quality rows.
-    # For simplicity, compute for *this* latest_dt if it is older than now-30m,
-    # and also try the previous 12 intervals to reduce gaps.
+    # ----- 3) Backfill loop (windowed, matured, idempotent) -----
     now_utc = datetime.now(timezone.utc)
-    candidate_dts = []
-    for k in range(0, 13):  # ~last 60 minutes
-        dtk = (datetime.strptime(latest_dt, "%Y-%m-%d-%H-%M") - timedelta(minutes=5 * k)).strftime("%Y-%m-%d-%H-%M")
-        # Only attempt if t+30m should already exist
-        if now_utc >= (datetime.strptime(dtk, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc) + timedelta(minutes=30)):
-            candidate_dts.append(dtk)
+    candidates = _make_candidate_dts(latest_dt, now_utc)
 
-    # Load any predictions for candidate dts and fill quality if actuals exist
-    for dt_pred in candidate_dts:
-        # Read preds back via S3 Select would add complexity; we already have them in memory for latest,
-        # but for older we just try to compute actuals then join with what we just wrote for 'latest_dt'.
-        # Practical simplification: only finalize 'latest_dt' quality here; a nightly job can fully backfill.
+    processed = 0
+    for dt_pred in candidates:
+        if processed >= MAX_CANDIDATES:
+            break  # Safety cap
 
-        actuals = _compute_actuals_for_dt(cnx, city, dt_pred, threshold=2)
-        if actuals.empty:
+        # Skip if quality shard already exists (idempotent)
+        qual_key = _quality_key(city, dt_pred)
+        if _object_exists(bucket, qual_key):
             continue
 
-        # Join preds+actuals on station_id
-        joined = preds.merge(
-            actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]], on="station_id", how="inner"
-        ).assign(dt=lambda d: dt_pred)
+        # Skip if predictions for this dt do not exist (no point in backfilling)
+        pred_key = _prediction_key(city, dt_pred)
+        if not _object_exists(bucket, pred_key):
+            continue
 
-        # Write to monitoring/quality partitioned by city, ds (ds = date of pred time)
-        ds = dt_pred[:10]  # YYYY-MM-DD
-        qual_key = f"monitoring/quality/city={city}/ds={ds}/part-{dt_pred}.parquet"
-        _write_parquet_s3(
-            joined[
+        # Read predictions for THIS dt (very important: do not reuse "latest" batch)
+        preds_dt = _read_parquet_s3(bucket, pred_key)
+        if preds_dt.empty:
+            continue
+
+        # Compute actuals (t+30) for THIS dt
+        actuals = _compute_actuals_for_dt(cnx, city, dt_pred, threshold=STOCKOUT_THRESHOLD)
+        if actuals.empty:
+            # Not matured yet or missing raw snapshot; skip and let a later run fill it
+            continue
+
+        # Join on station_id; preserve inferenceId for traceability
+        joined = (
+            preds_dt.merge(
+                actuals[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]],
+                on="station_id",
+                how="inner",
+            )
+            .assign(dt=lambda d: dt_pred)
+            .loc[
+                :,
                 [
                     "station_id",
                     "dt",
@@ -251,16 +341,24 @@ def main():
                     "y_stockout_bikes_30",
                     "bikes_t30",
                     "inferenceId",
-                ]
-            ],
-            bucket,
-            qual_key,
+                ],
+            ]
         )
 
+        if joined.empty:
+            # Unlikely, but keep it safe
+            continue
+
+        # Write a single shard per pred dt (idempotent filename)
+        _write_parquet_s3(joined, bucket, qual_key)
+
+        # Best-effort partition repair for the day
         try:
             pd.read_sql("MSCK REPAIR TABLE monitoring_quality", cnx)
         except Exception:
             pass
+
+        processed += 1
 
 
 if __name__ == "__main__":
