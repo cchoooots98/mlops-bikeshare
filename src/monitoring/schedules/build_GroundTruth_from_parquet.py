@@ -22,16 +22,16 @@ import io
 import json
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List
 
 import boto3
 import pandas as pd
 import pyarrow.parquet as pq
 
 # -------------------- Configuration --------------------
-BUCKET = "mlops-bikeshare-387706002632-ca-central-1"         # S3 bucket name
-QUALITY_PREFIX = "monitoring/quality/city=nyc"               # where parquet lives
-GROUNDTRUTH_PREFIX = "monitoring/ground-truth"               # where JSONL will be written
+BUCKET = "mlops-bikeshare-387706002632-ca-central-1"  # S3 bucket name
+QUALITY_PREFIX = "monitoring/quality/city=nyc"  # where parquet lives
+GROUNDTRUTH_PREFIX = "monitoring/ground-truth"  # where JSONL will be written
 
 # Match keys like: .../ds=2025-09-29/part-2025-09-29-06-15.parquet
 #   group(1): YYYY-MM-DD (day)
@@ -168,11 +168,13 @@ def main():
                 # Skip rows with invalid labels
                 continue
 
-            lines.append({
-                "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
-                "eventMetadata":   {"eventId": inference_id},   # directly use inferenceId
-                "eventVersion":    "0",
-            })
+            lines.append(
+                {
+                    "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
+                    "eventMetadata": {"eventId": inference_id},  # directly use inferenceId
+                    "eventVersion": "0",
+                }
+            )
 
         if not lines:
             print(f"[{hour_dt:%Y-%m-%d %H}:00] No valid rows to write. Skip.")
