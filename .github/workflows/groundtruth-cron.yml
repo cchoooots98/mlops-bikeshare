@@ -75,6 +75,6 @@ jobs:
       #    Update the path below if your script lives elsewhere.
       - name: Build Ground Truth JSONL (hourly)
         run: |
-          python src/monitoring/build_ground_truth_jsonl_simple.py \
+          python src/monitoring/schedules/build_ground_truth_jsonl_simple.py \
             --start "$START" \
             --end "$END"
