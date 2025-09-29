@@ -2,7 +2,7 @@ boto3
 requests
 pandas
 numpy
-pyarrow
+pywin32==311 ; platform_system == "Windows"
 awswrangler
 lightgbm
 seaborn

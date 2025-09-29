@@ -147,9 +147,7 @@ protobuf==5.29.5
 psutil==7.0.0
     # via sagemaker
 pyarrow==15.0.2
-    # via
-    #   -r requirements.in
-    #   awswrangler
+    # via awswrangler
 pyathena==3.18.0
     # via -r requirements.in
 pydantic==2.11.9
@@ -171,8 +169,10 @@ python-dateutil==2.9.0.post0
     #   pyathena
 pytz==2025.2
     # via pandas
-pywin32==311
-    # via docker
+pywin32==311 ; platform_system == "Windows"
+    # via
+    #   -r requirements.in
+    #   docker
 pyyaml==6.0.2
     # via
     #   omegaconf
