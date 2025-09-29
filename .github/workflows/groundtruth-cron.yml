@@ -6,6 +6,10 @@ on:
     - cron: "*/30 * * * *"     # Run every 30 minutes (UTC)
   workflow_dispatch:            # Allow manual run
 
+concurrency:
+  group: groundtruth-schedule            # Fixed key for this workflow
+  cancel-in-progress: true             # Cancel the older run if a new one starts
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}   # Change if needed
   ENDPOINT_NAME: ${{ vars.ENDPOINT_STAGING }}  # <-- set your endpoint name
@@ -16,6 +20,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    
+    timeout-minutes: 32
 
     steps:
       - name: Checkout repo
@@ -25,6 +31,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       
 
       - name: Install Python deps
