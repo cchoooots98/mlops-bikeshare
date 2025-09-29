@@ -1,0 +1,32 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "region": "ca-central-1",
+        "title": "Quality (staging, nyc) — PR-AUC & F1 (24h rolling)",
+        "view": "timeSeries",
+        "period": 300,
+        "metrics": [
+          [ "Bikeshare/Model", "PR-AUC-24h", "EndpointName", "bikeshare-staging", "City", "nyc", { "stat": "Average" } ],
+          [ ".", "F1-24h", ".", ".", ".", ".", { "stat": "Average", "yAxis": "right" } ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "region": "ca-central-1",
+        "title": "Hit-Rate & Samples (staging, nyc) — 24h rolling",
+        "view": "timeSeries",
+        "period": 300,
+        "metrics": [
+          [ "Bikeshare/Model", "ThresholdHitRate-24h", "EndpointName", "bikeshare-staging", "City", "nyc", { "stat": "Average" } ],
+          [ ".", "Samples-24h", ".", ".", ".", ".", { "stat": "Average", "yAxis": "right" } ]
+        ]
+      }
+    }
+  ]
+}

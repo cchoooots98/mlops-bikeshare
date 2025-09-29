@@ -3,69 +3,78 @@ name: Build Ground Truth (every 30m)
 
 on:
   schedule:
-    - cron: "*/30 * * * *"     # Run every 30 minutes (UTC)
-  workflow_dispatch:            # Allow manual run
+    - cron: "*/30 * * * *"   # Runs every 30 minutes (UTC)
+  workflow_dispatch:          # Allow manual trigger from the Actions tab
 
 concurrency:
-  group: groundtruth-schedule            # Fixed key for this workflow
-  cancel-in-progress: true             # Cancel the older run if a new one starts
+  group: groundtruth-schedule
+  cancel-in-progress: true    # If a new run starts, cancel the previous one
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}   # Change if needed
-  ENDPOINT_NAME: ${{ vars.ENDPOINT_STAGING }}  # <-- set your endpoint name
+  # Keep region in repo-level Variables (Settings → Variables → Actions → Variables)
+  AWS_REGION: ${{ vars.AWS_REGION }}
 
 jobs:
   build-gt:
     runs-on: ubuntu-latest
+
+    # Required for GitHub OIDC → AWS
     permissions:
       id-token: write
       contents: read
-    
+
     timeout-minutes: 32
 
     steps:
+      # 1) Get repository code
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # 2) Python runtime with pip cache
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-      
 
+      # 3) Minimal dependencies for reading Parquet + AWS calls
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install boto3 pandas pyarrow
 
+      # 4) Configure AWS credentials via OIDC (no static keys)
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}   # e.g. arn:aws:iam::387706002632:role/gh-oidc-deployer
           role-session-name: gha-${{ github.run_id }}
 
+      # 5) Quick sanity check
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
-      - name: Compute time window (UTC) in PowerShell
-        # Use PowerShell to compute start/end with hour precision
+      # 6) Compute time window (UTC) with hour precision
+      - name: Compute time window (UTC)
         shell: pwsh
         run: |
-          # Compute "start" as current UTC time minus 2 hours, hour-granularity
+          # Compute start as now-2h (hour bucket), end as current hour
           $nowUtc = [DateTime]::UtcNow
-          $start  = $nowUtc.AddHours(-2).ToString('yyyy-MM-dd-HH')  # format required by your script
-          $end    = $nowUtc.ToString('yyyy-MM-dd-HH')               # format required by your script
+          $start  = $nowUtc.AddHours(-2).ToString('yyyy-MM-dd-HH')
+          $end    = $nowUtc.ToString('yyyy-MM-dd-HH')
 
-          # Export to GITHUB_ENV for later steps (bash will read START/END)
+          # Export to env for next steps
           "START=$start" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "END=$end"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Run build_GroundTruth_from_parquet.py
-        # IMPORTANT: update the relative path below to where the file lives in your repo
+          # Log for debugging
+          Write-Host "START=$start  END=$end (UTC)"
+
+      # 7) Run the simplified builder (NO endpoint argument)
+      #    Update the path below if your script lives elsewhere.
+      - name: Build Ground Truth JSONL (hourly)
         run: |
-          python src/monitoring/schedules/build_GroundTruth_from_parquet.py \
+          python src/monitoring/build_ground_truth_jsonl_simple.py \
             --start "$START" \
-            --end "$END" \
-            --endpoint "$ENDPOINT_NAME"
+            --end "$END"
