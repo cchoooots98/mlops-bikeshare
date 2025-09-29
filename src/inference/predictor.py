@@ -154,7 +154,7 @@ def main():
     latest_dt = str(X["dt"].iloc[0])
 
     # 3) Batch inference
-    preds = _predict_in_batches(endpoint, X, batch_size=256)
+    preds = _predict_in_batches(endpoint, X, batch_size=512)
 
     # 4) Write the single parquet shard for this dt
     key = _prediction_key(city, latest_dt)

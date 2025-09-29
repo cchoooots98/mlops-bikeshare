@@ -16,6 +16,9 @@ env:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # 允许拿 GitHub OIDC token
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
