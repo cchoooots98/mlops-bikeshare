@@ -1,0 +1,19 @@
+# Dockerfile.lambda
+# AWS Lambda container image for bikeshare predictor
+# Uses AWS Lambda Python 3.11 base image for x86_64 architecture
+
+FROM public.ecr.aws/lambda/python:3.11
+
+# Set working directory to Lambda task directory
+WORKDIR /var/task
+
+# Copy and install Python dependencies
+COPY requirements-lambda.txt ./requirements-lambda.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements-lambda.txt
+
+# Copy all application code
+COPY . .
+
+# Lambda handler is in src/inference/handler.py
+CMD ["src.inference.handler.lambda_handler"]
