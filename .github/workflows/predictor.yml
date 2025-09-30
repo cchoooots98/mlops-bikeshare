@@ -1,9 +1,10 @@
 name: predictor
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes
+  workflow_dispatch:
+  # workflow_dispatch: {}
+  # schedule:
+  #   - cron: "*/10 * * * *"   # every 10 minutes
 
 permissions:
   id-token: write

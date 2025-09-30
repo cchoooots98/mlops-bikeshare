@@ -1,0 +1,18 @@
+# Lambda base image for Python 3.11
+FROM public.ecr.aws/lambda/python:3.11
+
+# Install system build deps only if you need (kept minimal here)
+# RUN yum -y install gcc
+
+# Copy dependency list and install into the image
+COPY requirements-lambda.txt  ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
+RUN python -m pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
+
+# Copy your src tree and env.json into the image at /var/task (LAMBDA_TASK_ROOT)
+COPY src ${LAMBDA_TASK_ROOT}/src
+COPY src/env.json ${LAMBDA_TASK_ROOT}/src/env.json
+
+# Set the default command to your handler (module.function)
+# Your file is src/inference/lambda_handler.py, handler(event, context)
+# So the handler path is: src.inference.lambda_handler.handler
+CMD [ "src.inference.lambda_handler.handler" ]
