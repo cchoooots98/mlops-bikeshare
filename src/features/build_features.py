@@ -53,7 +53,6 @@ def query_df(cnx, sql: str) -> pd.DataFrame:
 
 
 def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
-    pd.read_sql("MSCK REPAIR TABLE station_status_raw", cnx)
     sql = f"""
     SELECT city, dt, station_id, bikes, docks, last_reported
     FROM {db}.v_station_status
@@ -67,7 +66,6 @@ def load_status(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
 def load_latest_info(cnx, city, db) -> pd.DataFrame:
     # Read from the UNNESTed view. This view already explodes $.data.stations.
     # We take the latest dt for the given city and return one row per station.
-    pd.read_sql("MSCK REPAIR TABLE station_information_raw", cnx)
     sql = f"""
     WITH latest AS (
       SELECT max(dt) AS mdt
@@ -90,7 +88,6 @@ def load_latest_info(cnx, city, db) -> pd.DataFrame:
 def load_weather(cnx, city, start_ts, end_ts, db) -> pd.DataFrame:
     # Read from curated view and select all available weather fields.
     # We alias prcp_mm -> precip_mm to match downstream column names used by schema.py.
-    pd.read_sql("MSCK REPAIR TABLE weather_hourly_raw", cnx)
     sql = f"""
     SELECT city,
            dt,

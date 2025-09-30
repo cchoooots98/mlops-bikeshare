@@ -19,7 +19,6 @@ import json
 import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
 
 import boto3
 import pandas as pd
@@ -138,78 +137,78 @@ def _predict_rowwise_threaded(endpoint: str, X: pd.DataFrame, max_workers: int =
     return out[["station_id", "dt", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]]
 
 
-def _invoke_endpoint_batch(endpoint: str, batch_rows: List[list]) -> list:
-    """
-    Send a single batch to the real-time endpoint and return a list of predictions.
-    This assumes the model follows the MLflow pyfunc/pandas "dataframe_split" schema
-    and returns either {"predictions":[...]} or a raw list.
-    """
-    rt = _smr()
-    payload = {
-        "inputs": {
-            "dataframe_split": {
-                "columns": FEATURE_COLUMNS,
-                "data": batch_rows,  # a list of float rows
-            }
-        }
-    }
-    resp = rt.invoke_endpoint(
-        EndpointName=endpoint,
-        ContentType="application/json",
-        Accept="application/json",
-        Body=json.dumps(payload).encode("utf-8"),
-    )
-    body = resp["Body"].read().decode("utf-8", errors="ignore")
-    out = json.loads(body) if body.strip().startswith("{") or body.strip().startswith("[") else body
+# def _invoke_endpoint_batch(endpoint: str, batch_rows: List[list]) -> list:
+#     """
+#     Send a single batch to the real-time endpoint and return a list of predictions.
+#     This assumes the model follows the MLflow pyfunc/pandas "dataframe_split" schema
+#     and returns either {"predictions":[...]} or a raw list.
+#     """
+#     rt = _smr()
+#     payload = {
+#         "inputs": {
+#             "dataframe_split": {
+#                 "columns": FEATURE_COLUMNS,
+#                 "data": batch_rows,  # a list of float rows
+#             }
+#         }
+#     }
+#     resp = rt.invoke_endpoint(
+#         EndpointName=endpoint,
+#         ContentType="application/json",
+#         Accept="application/json",
+#         Body=json.dumps(payload).encode("utf-8"),
+#     )
+#     body = resp["Body"].read().decode("utf-8", errors="ignore")
+#     out = json.loads(body) if body.strip().startswith("{") or body.strip().startswith("[") else body
 
-    # Normalize common shapes
-    preds = out.get("predictions", out) if isinstance(out, dict) else out
-    if not isinstance(preds, list):
-        raise RuntimeError(f"Unexpected model output: {str(out)[:400]}")
-    return preds
+#     # Normalize common shapes
+#     preds = out.get("predictions", out) if isinstance(out, dict) else out
+#     if not isinstance(preds, list):
+#         raise RuntimeError(f"Unexpected model output: {str(out)[:400]}")
+#     return preds
 
 
-def _predict_in_batches(endpoint: str, X: pd.DataFrame, batch_size: int = 256) -> pd.DataFrame:
-    """
-    Do batched inference for the entire city slice (latest dt).
-    - Builds inferenceId = f"{dt}_{station_id}" deterministically.
-    - Uses 'batch_size' to control payload size; tune 128~512 based on endpoint latency.
-    """
-    # Extract model features as floats (order must match FEATURE_COLUMNS)
-    feats = X[FEATURE_COLUMNS].astype("float64")
-    rows = feats.values.tolist()
+# def _predict_in_batches(endpoint: str, X: pd.DataFrame, batch_size: int = 256) -> pd.DataFrame:
+#     """
+#     Do batched inference for the entire city slice (latest dt).
+#     - Builds inferenceId = f"{dt}_{station_id}" deterministically.
+#     - Uses 'batch_size' to control payload size; tune 128~512 based on endpoint latency.
+#     """
+#     # Extract model features as floats (order must match FEATURE_COLUMNS)
+#     feats = X[FEATURE_COLUMNS].astype("float64")
+#     rows = feats.values.tolist()
 
-    preds_all = []
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i : i + batch_size]
-        preds_all.extend(_invoke_endpoint_batch(endpoint, batch))
+#     preds_all = []
+#     for i in range(0, len(rows), batch_size):
+#         batch = rows[i : i + batch_size]
+#         preds_all.extend(_invoke_endpoint_batch(endpoint, batch))
 
-    # Normalize per-row predictions to scalars
-    def _to_scalar(v):
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, list) and len(v) == 1 and isinstance(v[0], (int, float)):
-            return float(v[0])
-        if isinstance(v, dict) and "yhat" in v:
-            return float(v["yhat"])
-        # Fallback: try numeric cast
-        try:
-            return float(v)
-        except Exception:
-            return float("nan")
+#     # Normalize per-row predictions to scalars
+#     def _to_scalar(v):
+#         if isinstance(v, (int, float)):
+#             return float(v)
+#         if isinstance(v, list) and len(v) == 1 and isinstance(v[0], (int, float)):
+#             return float(v[0])
+#         if isinstance(v, dict) and "yhat" in v:
+#             return float(v["yhat"])
+#         # Fallback: try numeric cast
+#         try:
+#             return float(v)
+#         except Exception:
+#             return float("nan")
 
-    yhat = [_to_scalar(p) for p in preds_all]
+#     yhat = [_to_scalar(p) for p in preds_all]
 
-    out = X[["city", "dt", "station_id"]].copy()
-    out["yhat_bikes"] = yhat
-    # If your model is regression-to-bikes, keep a conservative binary. Tune threshold in monitoring job.
-    out["yhat_bikes_bin"] = (out["yhat_bikes"] >= 0.15).astype("float64")
-    out["inferenceId"] = out["dt"].astype(str) + "_" + out["station_id"].astype(str)
+#     out = X[["city", "dt", "station_id"]].copy()
+#     out["yhat_bikes"] = yhat
+#     # If your model is regression-to-bikes, keep a conservative binary. Tune threshold in monitoring job.
+#     out["yhat_bikes_bin"] = (out["yhat_bikes"] >= 0.15).astype("float64")
+#     out["inferenceId"] = out["dt"].astype(str) + "_" + out["station_id"].astype(str)
 
-    # Retain the raw response for auditing (as a compact JSON list; optional)
-    out["raw"] = json.dumps(preds_all, ensure_ascii=False)
+#     # Retain the raw response for auditing (as a compact JSON list; optional)
+#     out["raw"] = json.dumps(preds_all, ensure_ascii=False)
 
-    return out[["station_id", "dt", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]]
+#     return out[["station_id", "dt", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]]
 
 
 # ---------- Main entry ----------
