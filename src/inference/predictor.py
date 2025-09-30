@@ -18,6 +18,7 @@ import io
 import json
 import os
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 import boto3
@@ -63,6 +64,78 @@ def _prediction_key(city: str, dt: str) -> str:
 
 
 # ---------- Inference (BATCH) ----------
+def _invoke_endpoint_one(endpoint: str, feature_row: list, inference_id: str) -> float:
+    """
+    Invoke the endpoint ONCE with a single-row payload and an explicit InferenceId.
+    Returns a scalar prediction.
+    """
+    rt = _smr()
+    # Build single-row dataframe_split payload
+    payload = {
+        "inputs": {
+            "dataframe_split": {
+                "columns": FEATURE_COLUMNS,
+                "data": [feature_row],  # single row
+            }
+        }
+    }
+    resp = rt.invoke_endpoint(
+        EndpointName=endpoint,
+        ContentType="application/json",
+        Accept="application/json",
+        Body=json.dumps(payload).encode("utf-8"),
+        # This is the KEY: attach the per-row InferenceId so DataCapture records it
+        InferenceId=inference_id,
+    )
+    body = resp["Body"].read().decode("utf-8", errors="ignore")
+    out = json.loads(body) if body.strip().startswith(("{", "[")) else body
+    preds = out.get("predictions", out) if isinstance(out, dict) else out
+
+    # Normalize output to a scalar float
+    if isinstance(preds, list):
+        v = preds[0] if len(preds) == 1 else preds
+    else:
+        v = preds
+    if isinstance(v, list) and len(v) == 1 and isinstance(v[0], (int, float)):
+        v = v[0]
+    try:
+        return float(v if not isinstance(v, dict) else v.get("yhat", "nan"))
+    except Exception:
+        return float("nan")
+
+
+def _predict_rowwise_threaded(endpoint: str, X: pd.DataFrame, max_workers: int = 16) -> pd.DataFrame:
+    """
+    Row-wise inference with per-row InferenceId and concurrency.
+    - inferenceId format: f"{dt}_{station_id}"
+    - max_workers controls parallelism; tune per endpoint capacity and CPS limits.
+    """
+    # Prepare feature matrix (order must match FEATURE_COLUMNS)
+    feats = X[FEATURE_COLUMNS].astype("float64").values.tolist()
+
+    # Precompute the per-row inferenceId (this is also what we'll write to parquet)
+    ids = (X["dt"].astype(str) + "_" + X["station_id"].astype(str)).tolist()
+
+    yhat = [None] * len(feats)
+
+    # Threaded dispatch
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_invoke_endpoint_one, endpoint, feats[i], ids[i]): i for i in range(len(feats))}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                yhat[idx] = fut.result()
+            except Exception:
+                # On failure, mark NaN; you can also collect errors if needed
+                yhat[idx] = float("nan")
+
+    out = X[["city", "dt", "station_id"]].copy()
+    out["yhat_bikes"] = yhat
+    out["yhat_bikes_bin"] = (out["yhat_bikes"] >= 0.15).astype("float64")
+    out["inferenceId"] = ids
+    # Keep a tiny JSON string per row if you like; here we omit raw batch responses
+    out["raw"] = ""  # optional: leave empty or store per-row if you want
+    return out[["station_id", "dt", "yhat_bikes", "yhat_bikes_bin", "inferenceId", "raw"]]
 
 
 def _invoke_endpoint_batch(endpoint: str, batch_rows: List[list]) -> list:
@@ -154,7 +227,8 @@ def main():
     latest_dt = str(X["dt"].iloc[0])
 
     # 3) Batch inference
-    preds = _predict_in_batches(endpoint, X, batch_size=512)
+    # preds = _predict_in_batches(endpoint, X, batch_size=512)
+    preds = _predict_rowwise_threaded(endpoint, X, max_workers=16)
 
     # 4) Write the single parquet shard for this dt
     key = _prediction_key(city, latest_dt)
