@@ -1,0 +1,21 @@
+# Use AWS Lambda Python 3.11 runtime image
+FROM public.ecr.aws/lambda/python:3.11
+
+# Set working dir for Lambda runtime
+WORKDIR /var/task
+
+# Copy the minimal dependency list (for Lambda inference only)
+COPY requirements-lambda.txt ./requirements-lambda.txt
+
+# Install only what inference needs (includes scikit-learn)
+RUN pip install --upgrade pip && \
+    pip install -r requirements-lambda.txt
+
+# Copy the rest of your repo (source code, env.json, etc.)
+COPY . .
+
+# Make sure Python can find your "src" package
+ENV PYTHONPATH="/var/task"
+
+# Lambda handler entrypoint
+CMD ["src.inference.lambda_handler.handler"]

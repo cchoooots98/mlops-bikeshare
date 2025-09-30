@@ -1,0 +1,18 @@
+﻿# Ignore local venvs, git, caches, datasets, notebooks, build outputs
+.venv/
+env/
+__pycache__/
+*.ipynb
+*.parquet
+*.csv
+*.log
+dist/
+build/
+.git/
+.aws/
+.aws-sam/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.idea/
+**/.vscode/
