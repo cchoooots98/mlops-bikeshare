@@ -19,7 +19,7 @@ sm = boto3.client("sagemaker", region_name=region)
 reports_prefix = f"s3://{bucket}/monitoring/reports"
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor_model.py"
-print(f"Image URI: {image_uri}")
+
 # capture_prefix = get_capture_prefix(endpoint_name) #
 # Image URI: 536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer
 
