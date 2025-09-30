@@ -1,0 +1,43 @@
+# Exclude development and build artifacts from Docker context
+.git
+.github
+.venv
+.venv*/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.vscode/
+*.log
+*.tmp
+
+# Documentation and non-essential files
+docs/
+reports/
+*.md
+*.pdf
+
+# Test files
+test/
+
+# Build artifacts
+build/
+dist/
+mlruns/
+model_dir/
+
+# Terraform files
+infra/terraform/.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+
+# Development requirements
+requirements-dev.txt
+requirements-dev.in
