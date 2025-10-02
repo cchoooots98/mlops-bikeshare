@@ -170,7 +170,10 @@ def main():
 
             lines.append(
                 {
-                    "groundTruthData": {"data": str(label_int), "encoding": "CSV"},
+                    "groundTruthData": {
+                        "data": str(int(label_int)),
+                        "encoding": "CSV",
+                    },  # Nested structure for compatibility
                     "eventMetadata": {"eventId": inference_id},  # directly use inferenceId
                     "eventVersion": "0",
                 }

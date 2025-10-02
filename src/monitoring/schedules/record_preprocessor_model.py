@@ -78,6 +78,31 @@ def _extract_prediction_scalar(resp_payload: dict):
     return None
 
 
+def _is_number(v) -> bool:
+    """Return True if v looks like a finite number."""
+    return isinstance(v, (int, float)) and not (isinstance(v, float) and (v != v))
+
+
+# ---- add this small helper near the top of the file ----
+def _attach_event_meta(rec: dict, inference_record) -> dict:
+    """
+    Attach event metadata/version to the output record so that the analyzer
+    can join with ground-truth on eventId.
+    """
+    # Some containers expose 'event_metadata' and 'event_version' attributes.
+    meta = getattr(inference_record, "event_metadata", None)
+    ver = getattr(inference_record, "event_version", None)
+
+    # Only attach if they are present and of the right types.
+    if isinstance(meta, dict):
+        # Must include eventId inside this dict for the join to work.
+        rec["eventMetadata"] = meta
+    if ver is not None:
+        # Keep it as string for consistency.
+        rec["eventVersion"] = str(ver)
+    return rec
+
+
 def preprocess_handler(inference_record):
     """
     Parameters
@@ -91,61 +116,78 @@ def preprocess_handler(inference_record):
         A flat mapping or a list of flat mappings. Each mapping MUST include
         a scalar "predictions" key so that ProbabilityAttribute="predictions" works.
     """
-    # 1) Only handle JSON input; skip otherwise gracefully.
-    in_enc = getattr(inference_record.endpoint_input, "encoding", None)
-    in_raw = getattr(inference_record.endpoint_input, "data", "") or ""
-    in_raw = in_raw.rstrip("\n")
 
-    if in_enc != "JSON" or not in_raw:
-        # No usable input; return empty to skip this record.
-        return []
-
-    # 2) Parse request payload and extract dataframe_split
-    in_payload = _safe_json_loads(in_raw)
-    cols, rows = _extract_rows_from_dataframe_split(in_payload)
-    if not cols or not rows:
-        # Unexpected request shape; skip
-        return []
-
-    # 3) Parse response payload and extract a scalar probability
+    # Parse endpoint_output first (works for output-only merged datasets)
     out_enc = getattr(inference_record.endpoint_output, "encoding", None)
     out_raw = getattr(inference_record.endpoint_output, "data", "") or ""
     out_raw = out_raw.rstrip("\n")
     pred_scalar = None
-    pred_series = None  # optional per-row predictions
-
+    pred_series = None
+    out_payload = None
     if out_enc == "JSON" and out_raw:
         out_payload = _safe_json_loads(out_raw)
+        if isinstance(out_payload, dict) and "predictions" in out_payload:
+            preds = out_payload["predictions"]
+            if isinstance(preds, list):
+                # Prefer vector if all numeric
+                if all(_is_number(x) for x in preds):
+                    pred_series = [float(x) for x in preds]
+            if pred_series is None:
+                pred_scalar = _extract_prediction_scalar(out_payload)
 
-        # If predictions is a vector and length matches number of rows,
-        # we can keep it as a per-row list; otherwise fall back to scalar.
-        if (
-            isinstance(out_payload, dict)
-            and "predictions" in out_payload
-            and isinstance(out_payload["predictions"], list)
-        ):
-            if len(out_payload["predictions"]) == len(rows) and all(
-                isinstance(x, (int, float)) for x in out_payload["predictions"]
-            ):
-                pred_series = [float(x) for x in out_payload["predictions"]]
+    # Try to parse endpoint_input (optional; may be absent with endpointOutput-only merge)
+    in_enc = getattr(inference_record.endpoint_input, "encoding", None)
+    in_raw = getattr(inference_record.endpoint_input, "data", "") or ""
+    in_raw = in_raw.rstrip("\n")
+    cols, rows = [], []
+    if in_enc == "JSON" and in_raw:
+        in_payload = _safe_json_loads(in_raw)
+        cols, rows = _extract_rows_from_dataframe_split(in_payload)
 
-        # Always try to produce a scalar fallback
-        if pred_series is None:
-            pred_scalar = _extract_prediction_scalar(out_payload)
-
-    # 4) Build output record(s)
+    # Build output records
     results = []
-    for idx, r in enumerate(rows):
-        # Map features
-        rec = {c: r[i] for i, c in enumerate(cols)}
 
-        # Attach prediction as scalar
-        if pred_series is not None:
-            rec["predictions"] = pred_series[idx] if idx < len(pred_series) else None
-        else:
-            rec["predictions"] = pred_scalar
+    # Case A: we have input rows (features). Attach predictions per-row if available.
+    if rows:
+        for idx, r in enumerate(rows):
+            rec = {c: r[i] for i, c in enumerate(cols)}
+            val = None
+            if pred_series is not None and idx < len(pred_series):
+                val = pred_series[idx]
+            elif pred_scalar is not None:
+                val = pred_scalar
 
-        results.append(rec)
+            if _is_number(val):
+                valf = float(val)
+                # Emit both keys to accommodate analyzer expectations
+                rec["predictions"] = valf
+                rec["endpointOutput_predictions"] = valf
+                rec = _attach_event_meta(rec, inference_record)
+                results.append(rec)
+        if not results:
+            return []
+        return results[0] if len(results) == 1 else results
 
-    # If only one row, return dict; otherwise, a list of dicts
-    return results[0] if len(results) == 1 else results
+    # Case B: no input rows (output-only). Emit records from output payload.
+    if pred_series is not None and len(pred_series) > 0:
+        for v in pred_series:
+            if _is_number(v):
+                valf = float(v)
+                results.append(
+                    _attach_event_meta(
+                        {
+                            "predictions": valf,
+                            "endpointOutput_predictions": valf,
+                        },
+                        inference_record,
+                    )  # <-- attach meta
+                )
+        return results  # may be multi-record
+
+    if _is_number(pred_scalar):
+        valf = float(pred_scalar)
+        out = {"predictions": valf, "endpointOutput_predictions": valf}
+        return _attach_event_meta(out, inference_record)
+
+    # Nothing usable; skip
+    return []

@@ -44,6 +44,34 @@ def _env(name: str, default: str = None) -> str:
     return val
 
 
+def put_freshness_metric(bucket: str, latest_dt_iso: str):
+    """
+    Publish 'DataFreshnessAgeSeconds' to CloudWatch so we can alarm on data delay.
+    bucket: S3 bucket name used for raw/feature data.
+    latest_dt_iso: ISO string of latest partition timestamp you just repaired.
+    """
+    # Parse latest_dt_iso to epoch seconds
+    from datetime import datetime, timezone
+
+    latest = datetime.fromisoformat(latest_dt_iso.replace("Z", "")).replace(tzinfo=timezone.utc)
+    age_seconds = int(time.time() - latest.timestamp())
+
+    cw = boto3.client("cloudwatch")
+    cw.put_metric_data(
+        Namespace="Bikeshare/Pipeline",
+        MetricData=[
+            {
+                "MetricName": "DataFreshnessAgeSeconds",
+                "Dimensions": [{"Name": "Bucket", "Value": bucket}],
+                "Timestamp": datetime.now(timezone.utc),
+                "Value": age_seconds,
+                "Unit": "Seconds",
+                "StorageResolution": 60,  # high-resolution, 1-min granularity
+            }
+        ],
+    )
+
+
 def _floor_to_5min(ts: dt.datetime) -> dt.datetime:
     """Floor a UTC timestamp to the nearest lower 5-minute boundary."""
     # Ensure UTC and remove seconds/microseconds
@@ -137,7 +165,7 @@ def run_once(now_utc: dt.datetime = None) -> dict:
     region = _env("REGION")
     workgroup = _env("ATHENA_WORKGROUP")
     output_s3 = _env("ATHENA_OUTPUT")
-    db = _env("DB")  # <-- we will pass this down
+    db = _env("DB")
     city = _env("CITY")
     bucket = _env("BUCKET")
 
@@ -151,6 +179,7 @@ def run_once(now_utc: dt.datetime = None) -> dict:
 
     if now_utc is None:
         now_utc = dt.datetime.now(dt.timezone.utc)
+    latest_dt = _floor_to_5min(now_utc)
 
     windows = _last_4_windows(now_utc)
     sql_batch = _build_sql_batch(
@@ -159,6 +188,10 @@ def run_once(now_utc: dt.datetime = None) -> dict:
 
     # Pass db here so QueryExecutionContext is not empty
     _athena_run(sql_batch, region=region, workgroup=workgroup, output_s3=output_s3, db=db)
+
+    latest_dt_iso = latest_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    put_freshness_metric(bucket=os.environ["BUCKET"], latest_dt_iso=latest_dt_iso)
+
     return {"added_or_ensured": [(city, w) for w in windows]}
 
 

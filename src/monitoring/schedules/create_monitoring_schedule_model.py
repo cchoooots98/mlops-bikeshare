@@ -8,12 +8,8 @@ bucket = "mlops-bikeshare-387706002632-ca-central-1"
 endpoint_name = "bikeshare-staging"
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"
 
+# Set up session with profile
 sm = boto3.client("sagemaker", region_name=region)
-
-
-# def get_capture_prefix(endpoint):
-#     ep = sm.describe_endpoint(EndpointName=endpoint)
-#     return ep["DataCaptureConfig"]["DestinationS3Uri"]
 
 
 reports_prefix = f"s3://{bucket}/monitoring/reports"
@@ -50,8 +46,8 @@ sm.create_model_quality_job_definition(
             "S3InputMode": "File",
             "ProbabilityAttribute": "predictions",
             "ProbabilityThresholdAttribute": 0.15,
-            "StartTimeOffset": "-PT4H",
-            "EndTimeOffset": "-PT2H",
+            "StartTimeOffset": "-PT8H",
+            "EndTimeOffset": "-PT1H",
         },
         "GroundTruthS3Input": {"S3Uri": f"s3://{bucket}/monitoring/ground-truth"},
     },
@@ -66,7 +62,7 @@ sm.create_model_quality_job_definition(
             }
         ]
     },
-    JobResources={"ClusterConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.large", "VolumeSizeInGB": 30}},
+    JobResources={"ClusterConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.xlarge", "VolumeSizeInGB": 30}},
     NetworkConfig={"EnableNetworkIsolation": False},
     RoleArn=role_arn,
     StoppingCondition={"MaxRuntimeInSeconds": 3300},
@@ -78,7 +74,9 @@ sm.create_monitoring_schedule(
     MonitoringScheduleName="bikeshare-model-quality",
     MonitoringScheduleConfig={
         "ScheduleConfig": {
-            "ScheduleExpression": "cron(0 0/2 ? * * *)",
+            "ScheduleExpression": "NOW",  # "cron(0 0/2 ? * * *)"
+            "DataAnalysisEndTime": "-PT1H",  # Reduced window: only 1 hour of data
+            "DataAnalysisStartTime": "-PT8H",  # Start 2h ago, end 1h ago = 1h window
         },
         "MonitoringJobDefinitionName": "bikeshare-model-quality-jd",
         "MonitoringType": "ModelQuality",
