@@ -3,7 +3,7 @@ name: Build Ground Truth (every 30m)
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # Runs every 30 minutes (UTC)
+    - cron: "*/20 * * * *"   # Runs every 20 minutes (UTC)
   workflow_dispatch:          # Allow manual trigger from the Actions tab
 
 concurrency:
@@ -78,3 +78,12 @@ jobs:
           python src/monitoring/schedules/build_GroundTruth_from_parquet.py \
             --start "$START" \
             --end "$END"
+      
+      - name: Publish backfill heartbeat to CloudWatch
+        shell: bash
+        run: |
+          # Emit a single heartbeat metric = 1 for this run.
+          # Use dimensions so you can alert per environment and per city.
+          aws cloudwatch put-metric-data \
+            --namespace "Bikeshare/Backfill" \
+            --metric-data "MetricName=Heartbeat,Value=1,Unit=Count,Dimensions=[{Name=City,Value=nyc},{Name=Env,Value=staging}]"

@@ -1,0 +1,58 @@
+{
+  "Rules": [
+    {
+      "ID": "athena-results-1d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "athena_results/" },
+      "Expiration": { "Days": 1 }
+    },
+    {
+      "ID": "athena-dash-1d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "athena-results/" },
+      "Expiration": { "Days": 1 }
+    },
+    {
+      "ID": "datacapture-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "datacapture/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    },
+    {
+      "ID": "features-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "features/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    },
+    {
+      "ID": "inference-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "inference/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    },
+    {
+      "ID": "mon-gt-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "monitoring/ground-truth/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    },
+    {
+      "ID": "mon-reports-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "monitoring/reports/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    },
+    {
+      "ID": "mon-quality-4d-glacier-10d-expire",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "monitoring/quality/" },
+      "Transitions": [ { "Days": 4, "StorageClass": "GLACIER_IR" } ],
+      "Expiration": { "Days": 10 }
+    }
+  ]
+}

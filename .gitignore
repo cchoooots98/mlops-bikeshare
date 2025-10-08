@@ -28,3 +28,4 @@ src/package/
 # temporary JSON dumps
 *.log
 *.tmp
+.streamlit/
