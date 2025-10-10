@@ -89,8 +89,8 @@ jobs:
 
       - name: Run admission gate (24h window on staging)
         run: |
-          # English: This script must exist in the repo under tools/check_gate.py.
-          python tools/check_gate.py \
+          # English: This script must exist in the repo under test/check_gate.py.
+          python test/check_gate.py \
             --endpoint "${{ github.event.inputs.staging_endpoint }}" \
             --city "${{ github.event.inputs.city }}" \
             --region "${{ env.AWS_REGION }}"
