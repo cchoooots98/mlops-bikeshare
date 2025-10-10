@@ -7,31 +7,97 @@ on:
         description: "Optional S3 model.tar.gz to promote (leave blank to reuse staging model)"
         required: false
         default: ""
+      city:
+        description: "City dimension for custom metrics (used by the gate)"
+        required: true
+        default: "nyc"
+      staging_endpoint:
+        description: "Staging endpoint to gate on (24h KPIs)"
+        required: true
+        default: "bikeshare-staging"
+      ab_strategy:
+        description: "Traffic strategy: bluegreen | dual-variant | ramp-weights"
+        required: true
+        default: "bluegreen"
+      baseline_model_name:
+        description: "(dual-variant) Existing baseline SageMaker Model name"
+        required: false
+        default: ""
+      candidate_model_name:
+        description: "(dual-variant) Existing candidate SageMaker Model name (optional; will be created by SDK if left blank and you run blue/green first)"
+        required: false
+        default: ""
+      baseline_weight:
+        description: "(dual-variant) Initial baseline weight (0.0-1.0)"
+        required: false
+        default: "0.9"
+      candidate_weight:
+        description: "(dual-variant) Initial candidate weight (0.0-1.0)"
+        required: false
+        default: "0.1"
+      ramp_schedule:
+        description: "(ramp-weights) Comma-separated weights for Candidate, e.g. 0.1,0.25,0.5,1.0"
+        required: false
+        default: "0.1,0.25,0.5,1.0"
 
 permissions:
-  id-token: write                 # REQUIRED for GitHub OIDC → AWS
+  id-token: write           # GitHub OIDC → AWS
   contents: read
 
 env:
   # ---- Non-secret configuration pulled from repo Variables ----
   AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., ca-central-1
   ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}           # e.g., bikeshare-prod
-  INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}           # e.g., ml.m5.large (or larger)
+  INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}           # e.g., ml.m5.large
   ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}           # e.g., .../mlflow-pyfunc:3.3.2-v5
   DEFAULT_S3_MODEL_TAR: ${{ vars.S3_MODEL_TAR }}     # default model tar if no override
+
   # ---- Secrets ----
   SM_EXECUTION_ROLE_Arn: ${{ secrets.SM_EXECUTION_ROLE_Arn }}
-  MLFLOW_TRACKING_URI: sqlite:///${{ github.workspace }}/model_dir/mlflow.db
-  
-
 
 concurrency:
   group: prod-deploy
   cancel-in-progress: false
 
 jobs:
+  gate:
+    name: Admission Gate (24h KPIs on staging)
+    runs-on: ubuntu-latest
+    environment: production  # Optional: keep approvals on this env if desired
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: gha-gate-${{ github.run_id }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install gate deps
+        run: |
+          # English: Install boto3 for the admission gate script.
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: Run admission gate (24h window on staging)
+        run: |
+          # English: This script must exist in the repo under tools/check_gate.py.
+          python tools/check_gate.py \
+            --endpoint "${{ github.event.inputs.staging_endpoint }}" \
+            --city "${{ github.event.inputs.city }}" \
+            --region "${{ env.AWS_REGION }}"
+
   promote:
     name: Deploy to SageMaker (prod)
+    needs: gate
     runs-on: ubuntu-latest
     environment: production   # Protect this environment in GitHub for approvals
 
@@ -47,9 +113,6 @@ jobs:
           role-session-name: gha-${{ github.run_id }}
 
       - name: Verify AWS identity
-        run: aws sts get-caller-identity
-      
-      - name: WhoAmI (debug)
         run: aws sts get-caller-identity
 
       - name: Setup Python
@@ -73,6 +136,7 @@ jobs:
         id: resolve
         shell: bash
         run: |
+          # English: Use override if provided, else fall back to repo variable DEFAULT_S3_MODEL_TAR.
           if [ -n "${{ github.event.inputs.override_model_tar }}" ]; then
             echo "model_tar=${{ github.event.inputs.override_model_tar }}" >> "$GITHUB_OUTPUT"
             echo "Using override model tar"
@@ -90,26 +154,95 @@ jobs:
           echo "prev_config=$PREV_CFG" >> "$GITHUB_OUTPUT"
           echo "PreviousConfig=$PREV_CFG"
 
-      - name: Deploy prod (blue/green)
+      - name: Deploy prod (blue/green default)
+        if: ${{ github.event.inputs.ab_strategy == 'bluegreen' || github.event.inputs.ab_strategy == '' }}
         run: |
+          # English: Blue/green replaces the endpoint config with a single-variant config.
           python pipelines/deploy_via_sagemaker_sdk.py \
             --endpoint-name "${ENDPOINT_NAME}" \
-            --role-arn  "${SM_EXECUTION_ROLE_Arn}"\
+            --role-arn  "${SM_EXECUTION_ROLE_Arn}" \
             --image-uri "${ECR_IMAGE_URI}" \
             --model-data "${{ steps.resolve.outputs.model_tar }}" \
             --instance-type "${INSTANCE_TYPE}" \
             --region "${AWS_REGION}"
 
-      - name: Smoke test prod (use repo script to match schema exactly)
+      - name: Create/Update prod as dual-variant (A/B)
+        if: ${{ github.event.inputs.ab_strategy == 'dual-variant' }}
+        shell: bash
         run: |
           set -euo pipefail
+          # English: Build a new EndpointConfig with two variants on the SAME endpoint.
+          # Requirements:
+          #  - baseline_model_name must exist (a registered SageMaker Model).
+          #  - candidate_model_name must exist, OR you deploy blue/green first which creates it.
+          # Notes:
+          #  - If you let your SDK script generate a new Model, pass that model name into candidate_model_name.
+          #  - Initial weights come from workflow_dispatch inputs.
+
+          if [ -z "${{ github.event.inputs.baseline_model_name }}" ]; then
+            echo "baseline_model_name is required for dual-variant." >&2
+            exit 1
+          fi
+
+          # Fallback: if candidate is empty, we create a candidate Model inline using provided ECR image and S3 tar.
+          CAND="${{ github.event.inputs.candidate_model_name }}"
+          if [ -z "$CAND" ]; then
+            CAND="bikeshare-candidate-$(date +%Y%m%d%H%M%S)"
+            aws sagemaker create-model \
+              --model-name "$CAND" \
+              --primary-container "Image=${ECR_IMAGE_URI},ModelDataUrl=${{ steps.resolve.outputs.model_tar }}" \
+              --execution-role-arn "${SM_EXECUTION_ROLE_Arn}" \
+              --region "${AWS_REGION}"
+          fi
+
+          CFG="bikeshare-prod-ab-$(date +%Y%m%d%H%M%S)"
+          aws sagemaker create-endpoint-config \
+            --endpoint-config-name "$CFG" \
+            --production-variants \
+              "VariantName=Baseline,ModelName=${{ github.event.inputs.baseline_model_name }},InitialInstanceCount=1,InstanceType=${INSTANCE_TYPE},InitialVariantWeight=${{ github.event.inputs.baseline_weight }}" \
+              "VariantName=Candidate,ModelName=$CAND,InitialInstanceCount=1,InstanceType=${INSTANCE_TYPE},InitialVariantWeight=${{ github.event.inputs.candidate_weight }}" \
+            --region "${AWS_REGION}"
+
+          if aws sagemaker describe-endpoint --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}" >/dev/null 2>&1; then
+            aws sagemaker update-endpoint --endpoint-name "${ENDPOINT_NAME}" --endpoint-config-name "$CFG" --region "${AWS_REGION}"
+          else
+            aws sagemaker create-endpoint --endpoint-name "${ENDPOINT_NAME}" --endpoint-config-name "$CFG" --region "${AWS_REGION}"
+          fi
+          aws sagemaker wait endpoint-in-service --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+
+      - name: Ramp weights (progressive canary)
+        if: ${{ github.event.inputs.ab_strategy == 'ramp-weights' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # English: Increase Candidate weight along the sequence, keeping Baseline weight = 1 - Candidate.
+          IFS=',' read -ra STEPS <<< "${{ github.event.inputs.ramp_schedule }}"
+          for w in "${STEPS[@]}"; do
+            echo "Ramping Candidate weight to $w ..."
+            aws sagemaker update-endpoint-weights-and-capacities \
+              --endpoint-name "${ENDPOINT_NAME}" \
+              --desired-weights-and-capacities "VariantName=Candidate,DesiredWeight=$w" "VariantName=Baseline,DesiredWeight=$(python - <<PY
+                w=${w}
+                print(max(0.0, 1.0-float(w)))
+                PY
+                )" \
+              --region "${AWS_REGION}"
+            # English: Wait a few minutes between ramps to observe stability (adjust as needed).
+            sleep 120
+          done
+
+      - name: Smoke test prod (schema-level)
+        run: |
+          # English: Quick end-to-end invoke check against prod endpoint.
+          set -euo pipefail
           python test/smoke_invoke.py --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
-        
+
       - name: Tail CloudWatch logs (10m)
         run: |
-          aws logs tail "/aws/sagemaker/Endpoints/bikeshare-prod" \
+          aws logs tail "/aws/sagemaker/Endpoints/${{ env.ENDPOINT_NAME }}" \
             --since 10m --region ${{ env.AWS_REGION }} --max-items 100 || true
 
+      # --- Rollback block: only runs when any previous step in this job fails ---
       - name: Configure AWS (OIDC) for rollback
         if: failure()
         uses: aws-actions/configure-aws-credentials@v4
@@ -118,19 +251,20 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           role-session-name: gh-actions-prod-rollback
 
-
       - name: Rollback on failure
         if: failure() && steps.prev.outputs.prev_config != 'NONE'
         run: |
-          echo "Smoke test failed — rolling back prod."
+          echo "Smoke test failed — rolling back prod to previous EndpointConfig."
           aws sagemaker update-endpoint \
             --endpoint-name "${ENDPOINT_NAME}" \
             --endpoint-config-name "${{ steps.prev.outputs.prev_config }}" \
             --region "${AWS_REGION}"
-      
+          aws sagemaker wait endpoint-in-service --endpoint-name "${ENDPOINT_NAME}" --region "${AWS_REGION}"
+
       - name: Capture S3 object version (if bucket versioning enabled)
         id: s3ver
         run: |
+          # English: This helps you reproduce exactly which artifact went to prod.
           BUCKET=$(echo "${{ vars.S3_MODEL_TAR }}" | awk -F'/' '{print $3}')
           KEY=$(echo "${{ vars.S3_MODEL_TAR }}" | cut -d'/' -f4-)
           VID=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" \
@@ -140,6 +274,8 @@ jobs:
       - name: Publish release manifest
         run: |
           echo "### Production Release" >> $GITHUB_STEP_SUMMARY
-          echo "- S3: ${{ vars.S3_MODEL_TAR }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Endpoint: ${{ env.ENDPOINT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Strategy: ${{ github.event.inputs.ab_strategy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 model.tar.gz: ${{ steps.resolve.outputs.model_tar }}" >> $GITHUB_STEP_SUMMARY
           echo "- S3 VersionId: ${{ steps.s3ver.outputs.version_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ECR Image: 387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5" >> $GITHUB_STEP_SUMMARY
+          echo "- ECR Image: ${{ env.ECR_IMAGE_URI }}" >> $GITHUB_STEP_SUMMARY
