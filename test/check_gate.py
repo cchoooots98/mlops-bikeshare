@@ -5,36 +5,42 @@
 import argparse
 import sys
 from datetime import datetime, timedelta, timezone
+
 import boto3
 
 # ---- Admission thresholds (tune to your SLOs) ----
-AUC_MIN = 0.70           # PR-AUC >= 0.70 over the last 24h (Average)
-F1_MIN = 0.55            # F1 >= 0.55 over the last 24h (Average)
-PSI_WARN = 0.20          # PSI should stay below 0.20 (optional gate; warn/fail as you prefer)
-P95_LATENCY_MAX_US = 200_000   # 200 ms in microseconds (SageMaker ModelLatency unit is µs)
-FIVE_XX_MAX = 0          # No 5xx errors allowed over the window
-HEARTBEAT_MIN = 6*10    # Expect ~6 batches/hour (10-min cadence) => 144 in 24h
+AUC_MIN = 0.70  # PR-AUC >= 0.70 over the last 24h (Average)
+F1_MIN = 0.55  # F1 >= 0.55 over the last 24h (Average)
+PSI_WARN = 0.20  # PSI should stay below 0.20 (optional gate; warn/fail as you prefer)
+P95_LATENCY_MAX_US = 200_000  # 200 ms in microseconds (SageMaker ModelLatency unit is µs)
+FIVE_XX_MAX = 0  # No 5xx errors allowed over the window
+HEARTBEAT_MIN = 6 * 10  # Expect ~6 batches/hour (10-min cadence) => 144 in 24h
 
-def get_series(cw, namespace, metric, dims, minutes=24*60, stat="Average", period=300):
+
+def get_series(cw, namespace, metric, dims, minutes=24 * 60, stat="Average", period=300):
     """Query CloudWatch metric as a time series."""
     end = datetime.now(timezone.utc)
     start = end - timedelta(minutes=minutes)
     d = [{"Name": k, "Value": v} for k, v in dims.items()]
-    q = [{
-        "Id": "m1",
-        "MetricStat": {
-            "Metric": {"Namespace": namespace, "MetricName": metric, "Dimensions": d},
-            "Period": period,  # 300s matches your 5-min cadence and lowers API cost
-            "Stat": stat
-        },
-        "ReturnData": True
-    }]
+    q = [
+        {
+            "Id": "m1",
+            "MetricStat": {
+                "Metric": {"Namespace": namespace, "MetricName": metric, "Dimensions": d},
+                "Period": period,  # 300s matches your 5-min cadence and lowers API cost
+                "Stat": stat,
+            },
+            "ReturnData": True,
+        }
+    ]
     resp = cw.get_metric_data(StartTime=start, EndTime=end, MetricDataQueries=q, ScanBy="TimestampAscending")
     r = resp["MetricDataResults"][0]
     return list(zip(r.get("Timestamps", []), r.get("Values", [])))
 
+
 def avg(values):
-    return sum(values)/len(values) if values else None
+    return sum(values) / len(values) if values else None
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -102,6 +108,7 @@ def main():
         sys.exit(1)
     else:
         print("✅ Admission gate PASSED: all thresholds satisfied for the last 24h.")
+
 
 if __name__ == "__main__":
     main()

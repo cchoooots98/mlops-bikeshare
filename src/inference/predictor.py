@@ -140,15 +140,14 @@ def _predict_rowwise_threaded(endpoint: str, X: pd.DataFrame, max_workers: int =
 def publish_heartbeat(endpoint_name: str, city: str):
     cloudwatch.put_metric_data(
         Namespace="Bikeshare/Model",
-        MetricData=[{
-            "MetricName": "PredictionHeartbeat",
-            "Value": 1,
-            "Unit": "Count",
-            "Dimensions": [
-                {"Name": "EndpointName", "Value": endpoint_name},
-                {"Name": "City", "Value": city}
-            ]
-        }]
+        MetricData=[
+            {
+                "MetricName": "PredictionHeartbeat",
+                "Value": 1,
+                "Unit": "Count",
+                "Dimensions": [{"Name": "EndpointName", "Value": endpoint_name}, {"Name": "City", "Value": city}],
+            }
+        ],
     )
 
 
