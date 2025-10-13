@@ -8,7 +8,7 @@
 #
 # Expected environment / config:
 #   - Reuse read_env()/athena_conn() from your existing codebase (build_features.py).
-#   - SM_ENDPOINT comes from environment variable (default "bikeshare-staging").
+#   - SM_ENDPOINT comes from environment variable (default "bikeshare-prod").
 #
 # Notes:
 #   - This file is intentionally lean: no backfill, no actuals, no quality join.
@@ -159,7 +159,7 @@ def main():
     cfg = read_env()
     city = cfg["city"]
     bucket = cfg["bucket"]
-    endpoint = os.environ.get("SM_ENDPOINT", "bikeshare-staging")
+    endpoint = os.environ.get("SM_ENDPOINT", "bikeshare-prod")
 
     # 2) Build ONLINE features for the latest 5-min snapshot (city-wide)
     X = build_online_features(city)

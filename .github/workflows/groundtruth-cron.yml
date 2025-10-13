@@ -86,4 +86,4 @@ jobs:
           # Use dimensions so you can alert per environment and per city.
           aws cloudwatch put-metric-data \
             --namespace "Bikeshare/Backfill" \
-            --metric-data "MetricName=Heartbeat,Value=1,Unit=Count,Dimensions=[{Name=City,Value=nyc},{Name=Env,Value=staging}]"
+            --metric-data "MetricName=Heartbeat,Value=1,Unit=Count,Dimensions=[{Name=City,Value=nyc},{Name=Env,Value=prod}]"

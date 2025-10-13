@@ -1,9 +1,10 @@
 name: CD_Staging
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  # push:
+  #   branches: [main]
+  
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}                  # e.g., ca-central-1

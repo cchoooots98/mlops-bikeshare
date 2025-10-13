@@ -11,7 +11,7 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}  
-  SM_ENDPOINT: ${{ vars.ENDPOINT_STAGING }}         
+  SM_ENDPOINT: ${{ vars.ENDPOINT_PROD }}         
 
 jobs:
   run:

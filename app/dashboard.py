@@ -38,7 +38,7 @@ CITY = st.secrets.get("city", "nyc")
 AWS_PROFILE = st.secrets.get("aws_profile", "default")
 
 CW_NS = st.secrets.get("cw_custom_ns", "Bikeshare/Model")
-SM_ENDPOINT = st.secrets.get("sm_endpoint", "bikeshare-staging")
+SM_ENDPOINT = st.secrets.get("sm_endpoint", "bikeshare-prod")
 
 # View / table names (can be overridden in secrets.toml)
 VIEW_INFO = st.secrets.get("view_station_info_latest", "v_station_information")
@@ -633,7 +633,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'MetricName': 'PR-AUC-24h',
                 'Value': 0.85,  # Your calculated PR-AUC value
                 'Dimensions': [
-                    {'Name': 'EndpointName', 'Value': 'bikeshare-staging'},
+                    {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
                     {'Name': 'City', 'Value': 'nyc'}
                 ]
             },
@@ -641,7 +641,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'MetricName': 'F1-24h', 
                 'Value': 0.78,  # Your calculated F1 score
                 'Dimensions': [
-                    {'Name': 'EndpointName', 'Value': 'bikeshare-staging'},
+                    {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
                     {'Name': 'City', 'Value': 'nyc'}
                 ]
             },
@@ -649,7 +649,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'MetricName': 'PredictionHeartbeat',
                 'Value': 1,  # 1 for success, 0 for failure
                 'Dimensions': [
-                    {'Name': 'EndpointName', 'Value': 'bikeshare-staging'},
+                    {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
                     {'Name': 'City', 'Value': 'nyc'}
                 ]
             }

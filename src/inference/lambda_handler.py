@@ -33,7 +33,7 @@ def handler(event, context):
         predictor.main()
         return {
             "ok": True,
-            "endpoint": os.environ.get("SM_ENDPOINT", "bikeshare-staging"),
+            "endpoint": os.environ.get("SM_ENDPOINT", "bikeshare-prod"),
             "message": "predictor finished one cycle",
         }
     except Exception as e:
