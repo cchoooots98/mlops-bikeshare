@@ -8,13 +8,13 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 
-# ---- Admission thresholds (tune to your SLOs) ----
+# ---- Admission thresholds (tune to your SLOs) ----S
 AUC_MIN = 0.70  # PR-AUC >= 0.70 over the last 24h (Average)
 F1_MIN = 0.55  # F1 >= 0.55 over the last 24h (Average)
 PSI_WARN = 0.20  # PSI should stay below 0.20 (optional gate; warn/fail as you prefer)
 P95_LATENCY_MAX_US = 200_000  # 200 ms in microseconds (SageMaker ModelLatency unit is µs)
 FIVE_XX_MAX = 0  # No 5xx errors allowed over the window
-HEARTBEAT_MIN = 6 * 10  # Expect ~6 batches/hour (10-min cadence) => 144 in 24h
+HEARTBEAT_MIN = 6 * 24  # Expect ~6 batches/hour (10-min cadence) => 144 in 24h
 
 
 def get_series(cw, namespace, metric, dims, minutes=24 * 60, stat="Average", period=300):
