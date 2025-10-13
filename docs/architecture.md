@@ -1,114 +1,177 @@
-# System Architecture and Data Flow 
+# System Architecture and Data Flow (Final)
 
-This document updates **docs/architecture.md** to capture the **implemented Business Dashboard (Step 9)**: its pages, data sources, metrics mapping, IAM, and performance/cost considerations. It complements the existing architecture sections (ingestion, training, deployment, monitoring) and is meant to be read alongside `docs/ops_sla.md` and `docs/monitoring_runbook.md`.
+This document captures the implemented architecture for the Bikeshare project: ingestion to inference, monitoring, the Business Dashboard (Step 9), and the Step 10 promotion and rollback flow. It complements `docs/ops_sla.md` and the runbook.
 
----
-
-## 2.2 Business Dashboard (Step 9) — Implemented
-
-### Pages & Interactions
-- **1) City Map** (Folium / OpenStreetMap)
-  - Color by **risk = max(P_bikeout, P_dockout)**.
-  - Click a station ⇒ sidebar shows **station info** and **2‑hour forecast trajectory** (minutes ahead vs probability).
-  - Optional **radius filter** (Haversine) to restrict the map and ranking to a neighborhood.
-- **2) Top‑N Risk Stations**
-  - Sort by `risk` and filter by radius; display a simple **rebalancing suggestion**: 
-    [`suggest_move` = round(β × capacity × risk)], default β = 0.3.
-- **3) Model Health**
-  - Time‑series: **PR‑AUC‑24h**, **F1‑24h**, **ThresholdHitRate‑24h**, **Samples‑24h**, **PSI** (CloudWatch custom metrics).
-  - Status badges: endpoint InService, existence of required custom metrics.
-- **4) System Health**
-  - Time‑series: **ModelLatency** (avg ≈ p50 proxy), **OverheadLatency** (avg used as **p95 proxy**), **Invocation4XXErrors**, **Invocation5XXErrors** (CloudWatch AWS/SageMaker namespace).
-  -  Batch success: **PredictionHeartbeat** custom metric (1 per successful batch) or **LambdaSuccessRate**.
-- **5) Data Freshness**
-  - Table of latest partition timestamps and **delay (min)** across: `station_status_raw`, `station_information_raw`, `weather_hourly_raw`, `features_offline`, `inference`, `monitoring_quality`.
-
-> **Acceptance (implemented):** Page load under ~3s on warm cache; all tiles render without blanks; filters and map clicks remain responsive.
+> Region: `ca-central-1` • City: `nyc` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
 
 ---
 
-### Data & Metric Sources (authoritative mapping)
-
-#### Athena (SQL / Views)
-- **`v_station_information`** → one row per station: `station_id, name, capacity, lat, lon` (latest).
-- **`v_predictions`** → 0–120‑minute horizon window for the dashboard, expected columns: 
-  `station_id, dt (ISO), horizon_min, p_bikeout, p_dockout`.
-- **`v_quality`** (optional) → 24h join for quality/labels to enrich model‑health views.
-
-> **Tables referenced for freshness:** `station_status_raw`, `station_information_raw`, `weather_hourly_raw`, `features_offline`, `inference`, `monitoring_quality`.
-
-#### CloudWatch (Metrics)
-- **Custom (namespace `Bikeshare/Model`)** — dimensions: `{ EndpointName, City }`
-  - `PR-AUC-24h` (Average), `F1-24h` (Average), `ThresholdHitRate-24h` (Average), `Samples-24h` (Sum or Average), `PredictionHeartbeat` (Sum).
-- **AWS/SageMaker** — dimensions: `{ EndpointName, VariantName=AllTraffic }`
-  - `ModelLatency` (Average ~ p50 proxy), `OverheadLatency` (Average ~ p95 proxy), `Invocation4XXErrors` (Sum), `Invocation5XXErrors` (Sum).
-
-> **Note on p95:** For strict p95 latency, the app can query `ModelLatency` with `Stat = p95` in `GetMetricData`. The current implementation uses `ModelLatency (avg)` and `OverheadLatency (avg)` as light‑weight proxies to reduce call volume and keep the page under 3s.
+## Table of Contents
+- [High-level Diagram](#high-level-diagram)
+- [Components](#components)
+- [Data Flow](#data-flow)
+- [Business Dashboard (Step 9)](#business-dashboard-step-9)
+- [Metrics and Monitoring](#metrics-and-monitoring)
+- [IAM (Least Privilege)](#iam-least-privilege)
+- [Step 10: Prod Admission and Cutover](#step-10-prod-admission-and-cutover)
+- [Performance and Cost Notes](#performance-and-cost-notes)
+- [Appendix: View SQL Skeletons](#appendix-view-sql-skeletons)
 
 ---
 
-### Streamlit App Architecture (high‑level)
+## High-level Diagram
 
-- **Config** via `.streamlit/secrets.toml`:
-  ```toml
-  aws_profile = "Shirley"
-  region = "ca-central-1"
-  db = "mlops_bikeshare"
-  workgroup = "primary"
-  athena_output = "s3://mlops-bikeshare-387706002632-ca-central-1/athena_results/"
-  city = "nyc"
-
-  cw_custom_ns = "Bikeshare/Model"
-  sm_endpoint = "bikeshare-staging"
-
-  view_station_info_latest = "v_station_information"
-  view_predictions         = "v_predictions"
-  view_quality             = "v_quality"        # optional
-
-  tbl_station_info_raw     = "station_information_raw"
-  tbl_station_status_raw   = "station_status_raw"
-  tbl_weather_hourly_raw   = "weather_hourly_raw"
-  tbl_features             = "features_offline"
-  tbl_inference            = "inference"
-  tbl_monitoring_quality   = "monitoring_quality"
-  ```
-- **Caching for performance**
-  - `@st.cache_resource` for **Athena** and **CloudWatch** clients.
-  - `@st.cache_data(ttl=60)` for common SQL queries and metric pulls.
-  - CloudWatch `GetMetricData` period = **300s** to match 5‑min cadence and minimize API calls.
-- **Latency targets**
-  - First warm load ≲ 3s; chart interactions ≲ 500ms; Athena views constrained to 2h (pred) and 24h (quality).
+```
+[Sources]
+  ├─ GBFS (station info/status)
+  ├─ Weather API
+  └─ Labels (actual stock/dock events)
+        |
+        v
+[S3 Raw / Bronze]  --->  [ETL / Features (Batch)]  --->  [Training & Registry]
+        |                          |                              |
+        |                          v                              v
+        |                   [Features Offline]            [Model Artifacts]
+        |                          |                              |
+        v                          |                              |
+[Online Inference (SageMaker Endpoint: staging/prod)] <------------+
+        |
+        +--> Predictions (S3/Athena)
+        +--> DataCapture (optional)
+        +--> Custom Metrics (CloudWatch, namespace Bikeshare/Model)
+        |
+        v
+[Monitoring and Alarms (CloudWatch)]  --->  [Runbook / On-call]
+        |
+        v
+[Business Dashboard (Streamlit + Athena + CloudWatch)]
+```
 
 ---
 
-### IAM for Dashboard (least privilege)
+## Components
 
-Grant the Streamlit runtime identity **read‑only** access:
-- **Athena/Glue (DB‑scoped)**: `athena:GetQueryResults`, `athena:StartQueryExecution`, `glue:Get*` for the `mlops_bikeshare` DB; S3 read to `athena_results/` and data prefixes (`raw/`, `features/`, `inference/`, `monitoring/`).
-- **CloudWatch**: `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics`, `cloudwatch:GetMetricStatistics`.
-
-(Optional) If deploying Streamlit on EC2 or ECS, attach the role via instance/task profile; for local usage, rely on your AWS profile/SSO.
-
----
-
-### Known Deviations & TODOs (tracked)
-- **PSI/KS visualization**: Alarms exist for feature drift (PSI) but the dashboard currently shows only model‑level KPIs. Add a small chart from `Bikeshare/Model → PSI` (24h) and/or surface the latest Model Monitor drift report (statistic/constraints JSON) with a green/amber/red badge.
-- **Batch success chart**: If not shown, plot `PredictionHeartbeat` (Sum or Average) to visualize 10‑min predict cadence; retain the `stg-batch-success-rate-crit` alarm as the gate.
-- **Feature freshness**: `features_offline` can show stale (by design) unless rebuilt. Keep it informational; it does not block online inference. Consider weekly rebuild or hide from freshness if not maintained.
-- **Top‑N table units**: Display `risk` consistently as fraction (0–1) or percent (0–100%); the app currently labels `risk_pct` — ensure formatting and column name match.
-- **Strict p95**: Optionally switch System Health to true p95 via `Stat = "p95"` for `ModelLatency`.
+- **Ingestion and ETL**: fetch GBFS feeds and weather, write to S3 raw; batch ETL builds feature tables.
+- **Model Training**: builds model artifacts and registers versions (details in training docs).
+- **Online Inference**: SageMaker endpoint (`bikeshare-staging` or `bikeshare-prod`) serves predictions; batch driver emits one heartbeat per 10-min batch.
+- **Monitoring**: CloudWatch service metrics plus custom metrics under `Bikeshare/Model` with `{EndpointName, City}`.
+- **Dashboard**: Streamlit app reads Athena views and CloudWatch metrics to render business and system health.
 
 ---
 
-### How this section aligns to SLOs & Runbook
-- Model KPIs (PR‑AUC/F1/ThresholdHitRate/Samples) ↔ **quality SLOs**; 
-- Endpoint latency/error metrics ↔ **system SLOs** (p50/p95, 4xx/5xx); 
-- Freshness table ↔ **data SLO** and backfill checks; 
-- All graphs use 24h windows for at‑a‑glance triage; alarms route per `monitoring_runbook.md`.
+## Data Flow
+
+1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_hourly_raw` in S3.  
+2) **Feature build**: `features_offline` for training and reference.  
+3) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
+4) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), cadence (`PredictionHeartbeat`), and batch success rate are published to CloudWatch.  
+5) **Dashboard**: queries the latest 2 hours of predictions and the last 24 hours of metrics to present the city map, top-N, model/system health, and freshness.
 
 ---
 
-## Appendix: Quick SQL skeletons (for reproducibility)
+## Business Dashboard (Step 9)
+
+### Pages and Interactions
+- **City Map**: colored by risk = max(P_bikeout, P_dockout); clicking a station shows details and a 2-hour trajectory.
+- **Top-N Risk Stations**: ranking with a simple "suggest move" column (proportional to risk and capacity).
+- **Model Health**: time series of `PR-AUC-24h`, `F1-24h`, samples, and PSI.
+- **System Health**: `ModelLatency` (avg) and `OverheadLatency` (avg as p95 proxy), 4xx/5xx counts.
+- **Data Freshness**: per-table latest timestamps and delay in minutes.
+
+### Data and Metric Sources
+
+**Athena views used by the app**
+- `v_station_information`: one row per station with latest info
+- `v_predictions`: 0–120 minutes ahead window for the map and charts
+- `v_quality` (optional): last 24 hours of quality and labels
+
+**CloudWatch metrics**
+- **Custom (`Bikeshare/Model`)** with `{EndpointName, City}`: `PR-AUC-24h`, `F1-24h`, `PSI`, `PredictionHeartbeat`, `BatchSuccessRate`
+- **AWS/SageMaker** with `{EndpointName, VariantName=AllTraffic}`: `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`
+
+> Note: If you prefer strict p95 in charts, query `ModelLatency` with `Stat = "p95"` via `GetMetricData`.
+
+### App Configuration (secrets)
+
+```toml
+region = "ca-central-1"
+city = "nyc"
+cw_custom_ns = "Bikeshare/Model"
+sm_endpoint = "bikeshare-staging"   # switch to "bikeshare-prod" after cutover
+
+aws_profile = "Shirley"
+db = "mlops_bikeshare"
+workgroup = "primary"
+athena_output = "s3://mlops-bikeshare-387706002632-ca-central-1/athena_results/"
+
+view_station_info_latest = "v_station_information"
+view_predictions         = "v_predictions"
+view_quality             = "v_quality"
+```
+
+### Caching and Performance
+
+- Cache AWS clients with `st.cache_resource` and data with `st.cache_data(ttl=60)`.
+- Use 5-min periods for `GetMetricData` to align with posting cadence and keep API calls low.
+- Keep Athena windows small: predictions 2h, quality 24h; dashboard warm load under 3 seconds.
+
+---
+
+## Metrics and Monitoring
+
+- **Batch-level customs**: publish one `PredictionHeartbeat` and one `BatchSuccessRate` per 10-min batch.
+- **Quality**: compute and post `PR-AUC-24h` and `F1-24h` on the same 10-min cadence.
+- **Drift**: compute and post `PSI` hourly (warn 0.20, critical 0.30).
+- **Errors/Latency**: rely on SageMaker metrics for `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`.
+- **Alarm catalog** lives in `docs/ops_sla.md` (prod names and thresholds).
+
+---
+
+## IAM (Least Privilege)
+
+**Dashboard identity** (local profile or instance profile) needs read-only:
+- Athena/Glue read on the `mlops_bikeshare` database and the S3 prefixes it queries
+- CloudWatch `GetMetricData`, `ListMetrics`, `GetMetricStatistics`
+
+**CI/CD role** for promotion needs:
+- SageMaker: `CreateEndpoint`, `CreateEndpointConfig`, `UpdateEndpoint`, `UpdateEndpointWeightsAndCapacities`, `Describe*`, `List*`
+- CloudWatch read for the gate script
+- S3 read for model artifacts, configs
+
+---
+
+## Step 10: Prod Admission and Cutover
+
+**Admission gate (tools/check_gate.py)** checks the last 24 hours before promotion:
+- `PR-AUC-24h >= 0.70`, `F1-24h >= 0.55`
+- `ModelLatency p95 <= 200 ms`, `Invocation5XXErrors = 0`
+- `PredictionHeartbeat >= 144`
+- `PSI < 0.20` (waiver required if exceeded)
+
+**Promotion (GitHub Actions)**:
+- Workflow `promote_prod.yml` runs the gate, creates a fresh EndpointConfig, and updates or creates `bikeshare-prod`, waiting for `InService`.
+- For A/B, maintain two variants on the same endpoint and adjust weights with `UpdateEndpointWeightsAndCapacities`.
+
+**Rollback**:
+- A/B: set `Baseline=1.0, Candidate=0.0`
+- Blue/green: update endpoint back to the previous EndpointConfig
+- File an incident and attach CloudWatch graphs; refresh baselines if the candidate is rejected
+
+**Post-cutover tasks**:
+- Switch `.streamlit/secrets.toml` to `sm_endpoint = "bikeshare-prod"`
+- Disable or downsize staging; verify all prod alarms are green
+
+---
+
+## Performance and Cost Notes
+
+- Prefer 5-min periods and batch-level custom metrics to reduce CloudWatch charges.
+- Apply S3 lifecycle to data capture, monitoring outputs, and Athena results.
+- Downsize or stop staging when prod is stable; keep prod instance at the smallest size that meets SLO.
+
+---
+
+## Appendix: View SQL Skeletons
 
 ```sql
 -- Latest station info (one row per station)
@@ -123,7 +186,7 @@ FROM info_latest WHERE rn = 1;
 ```
 
 ```sql
--- Predictions window (≤ 2h ahead for the dashboard)
+-- Predictions window (<= 2h ahead for the dashboard)
 CREATE OR REPLACE VIEW mlops_bikeshare.v_predictions AS
 SELECT station_id, dt, horizon_min,
        CAST(p_bikeout AS double) AS p_bikeout,
@@ -141,9 +204,3 @@ FROM mlops_bikeshare.monitoring_quality
 WHERE city='nyc'
   AND from_iso8601_timestamp(dt) >= current_timestamp - INTERVAL '24' hour;
 ```
-
----
-
-## Revision Log (Step 9)
-- Added **2.2 Business Dashboard (Step 9) — Implemented** with: page definitions, data/metric mappings, Streamlit app architecture, IAM, performance notes, and known deviations.
-- Included SQL skeletons to reproduce the views used by the dashboard.

@@ -1,131 +1,106 @@
-# Operational SLOs & Alerting — mlops-bikeshare
+# Operations SLO/SLA and Runbook 
 
-_Last updated: 2025-10-02 • Region: **ca-central-1** • City: **nyc**_  
-_Endpoints: **bikeshare-staging**, **bikeshare-prod**_  
-_Routing: SNS **sm-alerts** → Slack + Email (Step-8 drill verified; MTTA = **2.6 min** on 2025-10-02)_
+_Last updated: 2025-10-14 • Region: **ca-central-1** • City: **nyc**_
 
-This document defines **SLOs** (targets), **SLIs** (how we measure), and **alert thresholds** (when to page). It aligns with the Step-8 acceptance criteria:
-- **Drift/Quality/System** alerts can trigger and route (verified by forced-ALARM drill).
-- Dashboard shows **24–72h** trends (quality, latency, errors, heartbeat).
-- **MTTA ≤ 10 min** (drill measured **2.6 min**).
+This document defines service targets, alert thresholds, admission gates for promotion to **prod**, rollback policy, owners, and reporting cadence.
 
 ---
 
-## 1) Service Level Objectives (SLOs) & SLIs
+## 1) SLOs and SLIs
 
-> **Windows:** Unless specified, SLOs are evaluated over a **rolling 30-day** window.  
-> **Dashboards:** The operations dashboard exposes **1d/3d/1w** (24–72h) trend views used for on-call triage and weekly review.
-
-### 1.1 Data Layer
-| SLO | SLI (measurement) | Target | Notes |
+| Area | SLI (namespace • metric • dims) | Target | Notes |
 |---|---|---|---|
-| **Ingestion frequency** | New raw batch (GBFS/weather) every **5 min** | **≥ 95%** on-time | Measured by custom freshness metric / partitions. |
-| **Data lake latency (p95)** | Time from source fetch → S3/Glue partition visible | **≤ 3 min** | Athena/Glue partition freshness checks. |
-| **Validation pass rate** | % batches passing schema/quality checks | **≥ 99%** | From ingestion Lambda logs/metrics. |
-
-### 1.2 Model Layer
-| SLO | SLI (measurement) | Target | Notes |
-|---|---|---|---|
-| **PR-AUC (staging gate)** | `PR-AUC-24h` (Bikeshare/Model) | **≥ 0.70** | Rolling 24h; used for promotion gate. |
-| **F1 (stockout)** | `F1-24h` (Bikeshare/Model) | **≥ 0.55** | Rolling 24h at current threshold. |
-| **Overfitting check** | Train–valid metric gap | **≤ 0.10** | Evaluated at training time; logged in MLflow. |
-
-### 1.3 Service Layer (Online)
-| SLO | SLI (measurement) | Target | Notes |
-|---|---|---|---|
-| **Endpoint availability (prod)** | 1 − `Invocation5XXErrors/Invocations` | **≥ 99.9%** | CloudWatch (AWS/SageMaker). Error budget ≈ 43m 49s / month. |
-| **Endpoint latency p95** | `ModelLatency` p95 (5-min bins) | **≤ 300 ms** | Internal target **200 ms**; SLO 300 ms. |
-| **Inference batch success** | Success ratio of scheduled runs | **≥ 99%** | Lambda/GitHub Actions success history. |
-| **Daily error rate** | `InvocationErrorRate` | **< 1%** | 4xx + 5xx, excluding client errors if noisy. |
-
-### 1.4 Monitoring Layer
-| SLO | SLI (measurement) | Target | Notes |
-|---|---|---|---|
-| **Data drift (PSI)** | Feature PSI vs baseline | **Warn ≥ 0.2**, **Crit ≥ 0.3** | Baseline frozen at promotion; see §4.2. |
-| **Model quality regression** | Δ(24h PR-AUC/F1) vs baseline | **Warn > 5%**, **Crit > 10%** | Baseline defined in §4.2. |
-| **System availability** | Uptime of inference pipeline components | **≥ 99.5%** | Non-endpoint infra (Schedulers, Monitors). |
-| **MTTA** | Alarm → first human view | **≤ 10 min** | Drill on 2025-10-02 = **2.6 min**. |
-| **MTTR** | Alarm → full recovery | **≤ 60 min (Sev-2)**; **≤ 4 h (Sev-3)** | See runbook for bypass options. |
+| **Endpoint latency p95** | AWS/SageMaker • `ModelLatency` (5-min bins) • `{EndpointName, VariantName=AllTraffic}` | **Target ≤ 200 ms**, **SLO ≤ 300 ms** | Prod alarms use 200/300 ms thresholds. Unit: microseconds. |
+| **5xx error count** | AWS/SageMaker • `Invocation5XXErrors` | **0** | Any 5xx is critical. |
+| **4xx error rate** | Math: `Invocation4XXErrors / Invocations` | **< 1%** | Warn only (operator action; not always model fault). |
+| **Model quality – PR-AUC (24h)** | Bikeshare/Model • `PR-AUC-24h` • `{EndpointName, City}` | **≥ 0.70 target** | Current prod warn is absolute; see §2. |
+| **Model quality – F1 (24h)** | Bikeshare/Model • `F1-24h` • `{EndpointName, City}` | **≥ 0.55 target** | Current prod warn is absolute; see §2. |
+| **Feature drift (PSI)** | Bikeshare/Model • `PSI` • `{EndpointName, City}` | **Warn ≥ 0.20, Crit ≥ 0.30** | Hourly. |
+| **Batch success rate** | Bikeshare/Model • `BatchSuccessRate` | **≥ 0.99** | One datapoint per 10-min prediction batch. |
+| **Prediction cadence (heartbeat)** | Bikeshare/Model • `PredictionHeartbeat` | **≥ 144 per 24h** | 10-min cadence × 24h. |
 
 ---
 
-## 2) Alerting Thresholds (Warning vs Critical)
+## 2) Alert thresholds (warning vs critical) — **prod**
 
-> **Philosophy:** SLOs represent steady-state targets. **Alerts** fire earlier to preserve the error budget.
+These names match your CloudWatch alarms.
 
-| Category | Metric | Warning | Critical | Alarm Name(s) / Source |
-|---|---|---:|---:|---|
-| **Data Ingestion** | Freshness / latency | > **3 min** | > **5 min** | Custom freshness alarm (Athena/Glue) |
-|  | Validation failure rate | > **1% / h** | > **5% / h** | Ingestion Lambda metric |
-| **Endpoint** | p95 latency | > **800 ms** | > **1.5 s** | `sm-prod-avg-latency`, `sm-prod-latency` (AWS/SageMaker) |
-|  | Invocation error rate | > **0.5%** | > **1%** | `sm-prod-5XX` (+4XX if desired) |
-| **Model Drift** | PSI | ≥ **0.2** | ≥ **0.3** | (Add feature-level PSI alarms as needed) |
-|  | Feature missing rate | > **1%** | > **5%** | Data-quality monitor or custom metric |
-| **Model Quality** | PR-AUC@24h drop | > **5%** vs baseline | > **10%** vs baseline | `staging-prauc-low` (recommended) |
-|  | F1@24h drop | > **5%** vs baseline | > **10%** vs baseline | `staging-f1-low` (exists) |
-| **System** | Endpoint availability (monthly) | < **99.5%** | < **99%** | Composite or daily roll-up |
-|  | Batch job failure rate | > **1%** | > **5%** | `bikeshare-infer-Errors-gt0`, duration alarms |
-| **Monitors** | Drift/quality job status | — | **Failed** | `bikeshare-data-drift-failed`, `bikeshare-data-quality-failed` |
+| Group | Condition | Level | Alarm name | Period / Evaluation |
+|---|---|---|---|---|
+| Latency p95 | `> 200 ms` | Warn | `prod-endpoint-latency-p95-warn` | 5-min · 3/3 |
+| Latency p95 | `> 300 ms` | Crit | `prod-endpoint-latency-p95-crit` | 5-min · 5/5 |
+| 5xx errors | `> 0` | Crit | `prod-endpoint-5xx-crit` | 5-min · 1/1 |
+| 4xx rate | `> 1%` | Warn | `prod-endpoint-4xx-warn` | 5-min · 2/2 |
+| Latency anomaly | Outside band (width 2.5) | Warn | `prod-latency-anomaly` | 5-min · 3/3 |
+| Low traffic (24h) | `Invocations ≤ 30/h` | Warn | `prod-low-traffic-24h` | 1-h · 24/24 |
+| Short-window zero | `Invocations == 0` | Crit | `prod-20m-zero` | 5-min · 4/4 |
+| Invoke-zero composite | Children in ALARM | Crit | `prod-endpoint-invoke-zero` | Composite (short-window zero + low-traffic) |
+| Batch success | `< 0.99` | Crit | `prod-batch-success-rate-crit` | 10-min · 2/2 (within 3 days) |
+| PR-AUC (24h) | `< 0.851` | Warn | `prod-quality-prauc-24h-warn` | 30-min · 3/3 |
+| F1 (24h) | `< 0.753` | Warn | `prod-quality-f1-24h-warn` | 30-min · 3/3 |
+| PSI | `≥ 0.20` (warn) / `≥ 0.30` (crit) | Warn/Crit | `prod-feature-drift-warn` / `prod-feature-drift-crit` | 1-h · 1/1 |
 
-> **Note:** Your Step-8 drill also validated routing for all above via SNS **sm-alerts**.
-
----
-
-## 3) Error Budgets & Burn Policy
-
-### 3.1 Budgets
-- **Endpoint availability 99.9% (monthly)** → **43m 49s** of downtime.  
-- **System availability 99.5% (monthly)** → **3h 39m** of downtime.
-
-### 3.2 Burn policy
-- **> 25%** budget consumed in a week → pause risky changes; prioritize reliability fixes.  
-- **> 50%** consumed → freeze promotions; only mitigations/rollbacks allowed.  
-- **> 100%** consumed → post-mortem + prevention plan; track to closure.
+> **Note:** PR-AUC/F1 absolute thresholds are pinned to the current baseline. Refresh them when a new baseline is approved (see §4).
 
 ---
 
-## 4) Baselines, Degradations & Promotions
+## 3) Error budget and burn policy
 
-### 4.1 Quality SLI windows
-- **24h rolling** metrics are used for PR-AUC/F1 alarms.  
-- **Samples-24h** and **ThresholdHitRate-24h** provide context for low-sample or threshold shifts.
-
-### 4.2 Baseline definition
-- For each model **promotion**, capture a **baseline** from the **previous 7–14 days** of stable prod/staging runs.  
-- Baseline values (PR-AUC, F1, PSI distributions) are stored with the model version (MLflow/registry notes).  
-- **Degradation** is computed as relative drop vs that frozen baseline (e.g., PR-AUC↓ > 10%).
+- **Availability SLO:** 99.5% monthly for inference (p95 latency SLO + 5xx=0).  
+- **Fast burn:** if 5xx>0 **or** p95>300 ms for ≥15 min, page immediately and start rollback (§8).  
+- **Slow burn:** if PR-AUC/F1 warn persists >2 h, create incident, restrict traffic if needed, schedule model triage.
 
 ---
 
-## 5) Ownership, Escalation & Evidence
+## 4) Baselines, degradations, promotions
 
-### 5.1 On-call & escalation
-- **Critical alerts:** Page via Slack + Email (24/7). Primary: DS on duty; Secondary: MLOps.  
-- **Warning alerts:** Visible in dashboards; reviewed in daily stand-up.  
-- **Sev-1 impact:** Immediate rollback/traffic shift per runbook; notify stakeholders.
-
-### 5.2 Step-8 evidence (kept for audits)
-- **Routing proof:** SNS publish test → Slack/email delivered.  
-- **Alarm drill:** Forced alarms across drift/quality/system on **2025-10-02**.  
-- **MTTA:** **2.6 min** (ALARM → first human view).  
-- **Dashboard:** 24–72h trends present for all critical signals.
-
-### 5.3 Runbook
-See **`docs/monitoring_runbook.md`** for troubleshooting trees, Athena/Glue queries, Lambda checks, and bypass/rollback commands.
+- Baseline values (PR-AUC, F1, PSI) are stored with the model version (registry notes).  
+- When promoting a new model, **synchronize** alarm thresholds to the refreshed baseline.  
+- Degradation requires: incident doc, RCA, action items, and—if applicable—baseline refresh PR.
 
 ---
 
-## 6) Current Targets vs Observed (as of 2025-10-02)
+## 5) Ownership, escalation, evidence
 
-- **Endpoint p95 latency:** Observed **~24–112 ms** (CloudWatch), **within SLO (≤ 300 ms)**.  
-- **Model quality (staging):** 24h PR-AUC / F1 healthy and above gates.  
-- **MTTA:** **2.6 min** drill (≤ 10 min SLO).  
-- **Routing & alarms:** Verified end-to-end.
+- **Owner:** MLOps (primary) and Data Science (secondary).  
+- **Escalation path:** On-call → Tech Lead → Product.  
+- **Evidence:** CloudWatch dashboard screenshots, alarm timelines, Athena queries, and model evaluation logs.
 
 ---
 
-## 7) Reporting Cadence
+## 6) Current targets vs observed
 
-- **Weekly:** SLO dashboard review (availability, latency p95, batch success, monitor status, drift/quality).  
-- **Monthly:** Error-budget report, post-mortems, and threshold tuning; confirm baselines for any new model promotions.
+See the “Business Dashboard” and “System Health” sections for the last 24–72 h.
 
+---
+
+## 7) Reporting cadence
+
+- Weekly: quality and drift review.  
+- Monthly: cost vs budget, SLO compliance, incident summary.
+
+---
+
+## 8) Prod admission gate & rollback (Step-10)
+
+**Admission gate (pre-promote, 24 h window):**
+1. `PR-AUC-24h ≥ 0.70` and `F1-24h ≥ 0.55` (Bikeshare/Model, dims `{EndpointName, City}`).
+2. `ModelLatency p95 ≤ 200 ms` and `Invocation5XXErrors = 0` (AWS/SageMaker).
+3. `PredictionHeartbeat ≥ 144` (10-min batches × 24h).
+4. `PSI < 0.20` (if ≥0.20, require explicit waiver).
+
+**Implementation:** run `tools/check_gate.py` in CI. If it fails, promotion is blocked.
+
+**Rollback:**
+- **A/B:** `UpdateEndpointWeightsAndCapacities` to restore `Baseline=1.0, Candidate=0.0`.  
+- **Blue/green:** `UpdateEndpoint` back to the previous EndpointConfig.  
+- Create an incident record and attach graphs; refresh baselines if the new model is rejected.
+
+---
+
+## 9) Cost guardrails
+
+- Stop or downsize **staging** after prod is stable.  
+- Emit custom metrics per **batch** (not per request); keep **5-min** periods.  
+- S3 lifecycle for `datacapture/`, `monitoring/`, `athena_results/`.  
+- Athena: partitions + compression to reduce scanned bytes.
