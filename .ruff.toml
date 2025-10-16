@@ -5,7 +5,7 @@ target-version = "py311"
 line-length = 120
 
 # Tell Ruff where your first-party code lives
-src = ["src", "pipelines", "tests", "app"]
+src = ["src", "pipelines", "test", "app"]
 
 # Do not lint virtualenvs, build outputs, or vendored packages
 extend-exclude = [

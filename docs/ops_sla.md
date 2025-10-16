@@ -16,7 +16,6 @@ This document defines service targets, alert thresholds, admission gates for pro
 | **Model quality – PR-AUC (24h)** | Bikeshare/Model • `PR-AUC-24h` • `{EndpointName, City}` | **≥ 0.70 target** | Current prod warn is absolute; see §2. |
 | **Model quality – F1 (24h)** | Bikeshare/Model • `F1-24h` • `{EndpointName, City}` | **≥ 0.55 target** | Current prod warn is absolute; see §2. |
 | **Feature drift (PSI)** | Bikeshare/Model • `PSI` • `{EndpointName, City}` | **Warn ≥ 0.20, Crit ≥ 0.30** | Hourly. |
-| **Batch success rate** | Bikeshare/Model • `BatchSuccessRate` | **≥ 0.99** | One datapoint per 10-min prediction batch. |
 | **Prediction cadence (heartbeat)** | Bikeshare/Model • `PredictionHeartbeat` | **≥ 144 per 24h** | 10-min cadence × 24h. |
 
 ---
@@ -35,7 +34,6 @@ These names match your CloudWatch alarms.
 | Low traffic (24h) | `Invocations ≤ 30/h` | Warn | `prod-low-traffic-24h` | 1-h · 24/24 |
 | Short-window zero | `Invocations == 0` | Crit | `prod-20m-zero` | 5-min · 4/4 |
 | Invoke-zero composite | Children in ALARM | Crit | `prod-endpoint-invoke-zero` | Composite (short-window zero + low-traffic) |
-| Batch success | `< 0.99` | Crit | `prod-batch-success-rate-crit` | 10-min · 2/2 (within 3 days) |
 | PR-AUC (24h) | `< 0.851` | Warn | `prod-quality-prauc-24h-warn` | 30-min · 3/3 |
 | F1 (24h) | `< 0.753` | Warn | `prod-quality-f1-24h-warn` | 30-min · 3/3 |
 | PSI | `≥ 0.20` (warn) / `≥ 0.30` (crit) | Warn/Crit | `prod-feature-drift-warn` / `prod-feature-drift-crit` | 1-h · 1/1 |

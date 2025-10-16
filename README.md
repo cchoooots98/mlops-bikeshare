@@ -7,18 +7,20 @@ This repository implements data ingestion, feature engineering, training, real-t
 ---
 
 ## Table of Contents
-- [Prerequisites](#prerequisites)
-- [Quickstart](#quickstart)
-- [Configuration](#configuration)
-- [Run the Dashboard Locally](#run-the-dashboard-locally)
-- [Monitoring and Alarms](#monitoring-and-alarms)
-- [Admission Gate (Step 10)](#admission-gate-step-10)
-- [Promote to Prod (Step 10)](#promote-to-prod-step-10)
-- [Rollback](#rollback)
-- [Cost Control](#cost-control)
-- [Public vs Private App](#public-vs-private-app)
-- [Repository Layout (high level)](#repository-layout-high-level)
-- [License](#license)
+- [MLOps – Bikeshare (End-to-End)](#mlops--bikeshare-end-to-end)
+  - [Table of Contents](#table-of-contents)
+  - [Prerequisites](#prerequisites)
+  - [Quickstart](#quickstart)
+  - [Configuration](#configuration)
+  - [Run the Dashboard Locally](#run-the-dashboard-locally)
+  - [Monitoring and Alarms](#monitoring-and-alarms)
+  - [Admission Gate (Step 10)](#admission-gate-step-10)
+  - [Promote to Prod (Step 10)](#promote-to-prod-step-10)
+  - [Rollback](#rollback)
+  - [Cost Control](#cost-control)
+  - [Public vs Private App](#public-vs-private-app)
+  - [Repository Layout (high level)](#repository-layout-high-level)
+  - [License](#license)
 
 ---
 
@@ -89,7 +91,7 @@ sm_endpoint = "bikeshare-prod"
 
 ## Monitoring and Alarms
 
-- **Custom metrics (namespace `Bikeshare/Model`)** with `{EndpointName, City}`: `PR-AUC-24h`, `F1-24h`, `PSI`, `PredictionHeartbeat`, `BatchSuccessRate`.
+- **Custom metrics (namespace `Bikeshare/Model`)** with `{EndpointName, City}`: `PR-AUC-24h`, `F1-24h`, `PSI`, `PredictionHeartbeat`.
 - **SageMaker metrics (`AWS/SageMaker`)** with `{EndpointName, VariantName=AllTraffic}`: `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`.
 - Prod alarm names and thresholds are documented in `docs/ops_sla.md` (final).
 
@@ -97,7 +99,7 @@ sm_endpoint = "bikeshare-prod"
 
 ## Admission Gate (Step 10)
 
-The promotion gate is enforced by `tools/check_gate.py`. It queries the last 24 hours and fails the pipeline if any condition is violated:
+The promotion gate is enforced by `test/check_gate.py`. It queries the last 24 hours and fails the pipeline if any condition is violated:
 
 - `PR-AUC-24h >= 0.70`
 - `F1-24h >= 0.55`
@@ -109,7 +111,7 @@ The promotion gate is enforced by `tools/check_gate.py`. It queries the last 24 
 Example local run:
 
 ```powershell
-python tools/check_gate.py `
+python test/check_gate.py `
   --endpoint bikeshare-staging `
   --city nyc `
   --region ca-central-1
@@ -163,9 +165,9 @@ The app runs locally by default. To publish, host it on a small EC2/ALB or on St
 
 ```
 app/                     # Streamlit dashboard
-docs/                    # ops_sla.md, architecture.md, runbook, cost notes
+docs/                    # ops_sla.md, architecture.md, runbook, cost 
 src/                     # pipelines, monitoring, metrics publishers, utilities
-tools/                   # check_gate.py and helpers
+test/                   # check_gate.py and helpers
 .github/workflows/       # CI/CD (promote_prod.yml)
 ```
 

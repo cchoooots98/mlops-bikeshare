@@ -18,6 +18,7 @@ Usage:
 """
 
 from __future__ import annotations
+
 import math
 import os
 import time
@@ -60,7 +61,7 @@ def _put_with_retry(metric_data: List[Dict], namespace: str = CW_NAMESPACE, max_
         try:
             _CW.put_metric_data(Namespace=namespace, MetricData=metric_data)
             return
-        except ClientError as e:
+        except ClientError:
             attempt += 1
             if attempt >= max_attempts:
                 raise
@@ -86,12 +87,14 @@ def put_metric(
     if not _is_finite_number(value):
         return
 
-    md = [{
-        "MetricName": name,
-        "Value": float(value),
-        "Unit": unit,
-        "Dimensions": _dims(endpoint, city),
-    }]
+    md = [
+        {
+            "MetricName": name,
+            "Value": float(value),
+            "Unit": unit,
+            "Dimensions": _dims(endpoint, city),
+        }
+    ]
     if timestamp is not None:
         md[0]["Timestamp"] = timestamp
     _put_with_retry(md)
@@ -116,7 +119,7 @@ def put_metrics_bulk(
     """
     md: List[Dict] = []
     dims = _dims(endpoint, city)
-    for (name, value, unit) in items:
+    for name, value, unit in items:
         if not _is_finite_number(value):
             continue
         item = {
@@ -139,4 +142,3 @@ def publish_heartbeat(*, endpoint: Optional[str] = None, city: Optional[str] = N
     Call this after each successful prediction batch (or once per 10–15 min).
     """
     put_metric("PredictionHeartbeat", 1, "Count", endpoint=endpoint, city=city)
-

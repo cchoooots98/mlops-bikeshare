@@ -8,13 +8,12 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-
-
 import boto3
 import numpy as np
 import pandas as pd
 
 from src.monitoring.metrics.metrics_helper import put_metrics_bulk
+
 # ---------- Metric helpers (no heavy sklearn dependency) ----------
 
 
@@ -180,12 +179,16 @@ def main():
         f"HitRate@{args.threshold}={hit_rate:.4f}, N={samples}"
     )
 
-    put_metrics_bulk([
-        ("PR-AUC-24h", pr_auc, "None"),
-        ("F1-24h", f1, "None"),
-        ("ThresholdHitRate-24h", hit_rate, "None"),
-        ("Samples-24h", samples, "Count"),
-        ], endpoint=args.endpoint, city=args.city_dimension)
+    put_metrics_bulk(
+        [
+            ("PR-AUC-24h", pr_auc, "None"),
+            ("F1-24h", f1, "None"),
+            ("ThresholdHitRate-24h", hit_rate, "None"),
+            ("Samples-24h", samples, "Count"),
+        ],
+        endpoint=args.endpoint,
+        city=args.city_dimension,
+    )
 
     # Build CloudWatch dimensions
     dims = [{"Name": "EndpointName", "Value": args.endpoint}]

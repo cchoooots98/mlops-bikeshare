@@ -64,7 +64,7 @@ This document captures the implemented architecture for the Bikeshare project: i
 1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_hourly_raw` in S3.  
 2) **Feature build**: `features_offline` for training and reference.  
 3) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
-4) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), cadence (`PredictionHeartbeat`), and batch success rate are published to CloudWatch.  
+4) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), and cadence (`PredictionHeartbeat`) are published to CloudWatch.  
 5) **Dashboard**: queries the latest 2 hours of predictions and the last 24 hours of metrics to present the city map, top-N, model/system health, and freshness.
 
 ---
@@ -86,7 +86,7 @@ This document captures the implemented architecture for the Bikeshare project: i
 - `v_quality` (optional): last 24 hours of quality and labels
 
 **CloudWatch metrics**
-- **Custom (`Bikeshare/Model`)** with `{EndpointName, City}`: `PR-AUC-24h`, `F1-24h`, `PSI`, `PredictionHeartbeat`, `BatchSuccessRate`
+- **Custom (`Bikeshare/Model`)** with `{EndpointName, City}`: `PR-AUC-24h`, `F1-24h`, `PSI`, `PredictionHeartbeat`
 - **AWS/SageMaker** with `{EndpointName, VariantName=AllTraffic}`: `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`
 
 > Note: If you prefer strict p95 in charts, query `ModelLatency` with `Stat = "p95"` via `GetMetricData`.
@@ -119,7 +119,7 @@ view_quality             = "v_quality"
 
 ## Metrics and Monitoring
 
-- **Batch-level customs**: publish one `PredictionHeartbeat` and one `BatchSuccessRate` per 10-min batch.
+- **Batch-level customs**: publish one `PredictionHeartbeat` per 10-min batch.
 - **Quality**: compute and post `PR-AUC-24h` and `F1-24h` on the same 10-min cadence.
 - **Drift**: compute and post `PSI` hourly (warn 0.20, critical 0.30).
 - **Errors/Latency**: rely on SageMaker metrics for `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`.
