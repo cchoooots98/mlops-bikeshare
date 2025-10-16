@@ -1,24 +1,34 @@
-name: Publish Custom Model Metrics
+name: Publish Custom Model Metrics (improved)
 
 on:
+  # English: Run every 30 minutes + allow manual trigger.
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes
+    - cron: "*/30 * * * *"
   workflow_dispatch: {}
 
 permissions:
-  id-token: write
+  id-token: write       # English: Required for GitHub OIDC → AWS
   contents: read
+
+# English: Do not overlap runs if a previous one is still running.
+concurrency:
+  group: publish-metrics
+  cancel-in-progress: true
 
 jobs:
   publish:
+    if: ${{ vars.METRICS_ENABLED != 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 8
+
     env:
-      AWS_REGION: ca-central-1
-      BUCKET: mlops-bikeshare-387706002632-ca-central-1
-      ENDPOINT: bikeshare-prod
-      QUALITY_PREFIX: monitoring/quality/city=nyc   
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ENDPOINT:   ${{ vars.ENDPOINT_PROD }}
+      CITY:       ${{ vars.CITY }}
+      DATA_BUCKET: ${{ vars.DATA_BUCKET }}
       THRESHOLD: "0.15"
-      CITY: "nyc"
+      QUALITY_PREFIX: monitoring/quality/city=${{ vars.CITY }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,21 +40,54 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           role-session-name: gha-${{ github.run_id }}
 
-      - name: Set up Python
+      - name: Setup Python (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
 
-      - name: Install deps
+      - name: Install minimal deps
+        # English: If your publisher only needs boto3/pandas/pyarrow/s3fs you can install them directly.
+        #          Keeping requirements.txt is also fine; cached above for speed.
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Skip if endpoint is not InService
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=$(aws sagemaker describe-endpoint \
+            --endpoint-name "$ENDPOINT" \
+            --region "$AWS_REGION" \
+            --query 'EndpointStatus' --output text 2>/dev/null || echo "MISSING")
+          echo "EndpointStatus=$STATUS"
+          if [ "$STATUS" != "InService" ]; then
+            echo "Endpoint not ready → skip metrics publish for this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish metrics to CloudWatch
+        if: steps.guard.outputs.skip == 'false'
         run: |
           python src/monitoring/metrics/publish_custom_metrics.py \
-            --bucket "$BUCKET" \
+            --bucket "$DATA_BUCKET" \
             --quality-prefix "$QUALITY_PREFIX" \
             --endpoint "$ENDPOINT" \
             --region "$AWS_REGION" \
             --threshold "$THRESHOLD" \
             --city-dimension "$CITY"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Metrics Job Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Region: \`$AWS_REGION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Endpoint: \`$ENDPOINT\`" >> $GITHUB_STEP_SUMMARY
+          echo "- City: \`$CITY\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Quality prefix: \`$QUALITY_PREFIX\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Skipped: \`${{ steps.guard.outputs.skip || 'n/a' }}\`" >> $GITHUB_STEP_SUMMARY
