@@ -61,7 +61,7 @@ class DataConfig:
     athena_database: str
     athena_workgroup: str = "primary"
     athena_output: Optional[str] = None
-    region: str = "ca-central-1"
+    region: str = "eu-west-3"
 
 
 @dataclass
@@ -294,7 +294,7 @@ def main():
     parser.add_argument("--database", default="mlops_bikeshare", help="Athena database name")
     parser.add_argument("--workgroup", default="primary", help="Athena workgroup")
     parser.add_argument("--athena-output", default=None, help="Optional S3 path for Athena staging")
-    parser.add_argument("--region", default="ca-central-1", help="AWS region")
+    parser.add_argument("--region", default="eu-west-3", help="AWS region")
 
     # Training options
     parser.add_argument(

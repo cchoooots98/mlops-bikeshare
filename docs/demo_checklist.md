@@ -11,7 +11,7 @@
    ```powershell
    # Comment: Set profile/region/endpoint shown in the dashboard.
    $env:AWS_PROFILE="Shirley"
-   $env:AWS_REGION="ca-central-1"
+   $env:AWS_REGION="eu-west-3"
    $env:SM_ENDPOINT="bikeshare-prod"
 
    # Comment: Quick sanity checks
@@ -66,7 +66,7 @@
   ```
 - **Central config file**: `src/utils/config.py` must contain:
   ```python
-  REGION="ca-central-1"; CITY="nyc"; SM_ENDPOINT="bikeshare-prod"; CW_NAMESPACE="Bikeshare/Model"
+  REGION="eu-west-3"; CITY="nyc"; SM_ENDPOINT="bikeshare-prod"; CW_NAMESPACE="Bikeshare/Model"
   ```
 
 ---
@@ -87,7 +87,7 @@ aws apprunner pause-service --service-arn <YOUR_APP_RUNNER_ARN> --region $env:AW
 
 ### 2.3 Disable EventBridge rules (ingest/infer/psi)
 ```powershell
-$REGION = $env:AWS_REGION; if (-not $REGION) { $REGION = "ca-central-1" }
+$REGION = $env:AWS_REGION; if (-not $REGION) { $REGION = "eu-west-3" }
 $env:AWS_PAGER = ""
 $names = aws events list-rules --region $REGION --name-prefix bikeshare- --query 'Rules[].Name' --output json | ConvertFrom-Json
 $names | % { if ($_ -and $_.Trim()) { Write-Host "Disabling $_ ..."; aws events disable-rule --region $REGION --name $_ | Out-Null } }

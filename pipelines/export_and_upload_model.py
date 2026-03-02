@@ -18,8 +18,8 @@
 #   python pipelines/export_and_upload_model.py `
 #     --mlflow-db "E:/算法自学/End2EndProject/mlops-bikeshare/mlflow.db" `
 #     --model-name bikeshare_risk `
-#     --s3-uri s3://mlflow-sagemaker-ca-central-1-387706002632/export/bikeshare_risk/model.tar.gz `
-#     --region ca-central-1
+#     --s3-uri s3://mlflow-sagemaker-eu-west-3-387706002632/export/bikeshare_risk/model.tar.gz `
+#     --region eu-west-3
 
 import argparse
 import os
@@ -75,7 +75,7 @@ def main():
     ap.add_argument("--model-name", required=True, help="Registered model name.")
     ap.add_argument("--stage", default="Staging", help="Stage to pick (default: Staging).")
     ap.add_argument("--s3-uri", required=True, help="Destination S3 URI for model.tar.gz.")
-    ap.add_argument("--region", default="ca-central-1", help="AWS region.")
+    ap.add_argument("--region", default="eu-west-3", help="AWS region.")
     ap.add_argument("--model-dir", help="Explicit MLflow model directory (with MLmodel file)")
     args = ap.parse_args()
 

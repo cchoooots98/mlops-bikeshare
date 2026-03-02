@@ -143,7 +143,7 @@ def main():
         help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=nyc",
     )
     parser.add_argument("--endpoint", required=True, help="Endpoint name as a metric dimension")
-    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "ca-central-1"))
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "eu-west-3"))
     parser.add_argument("--threshold", type=float, default=0.15, help="Probability threshold for F1/hit-rate")
     parser.add_argument("--namespace", default="Bikeshare/Model")
     parser.add_argument("--city-dimension", default="nyc", help="Optional extra CloudWatch dimension City=<value>")

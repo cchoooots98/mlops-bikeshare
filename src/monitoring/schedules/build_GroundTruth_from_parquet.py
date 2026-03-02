@@ -29,7 +29,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # -------------------- Configuration --------------------
-BUCKET = "mlops-bikeshare-387706002632-ca-central-1"  # S3 bucket name
+BUCKET = "mlops-bikeshare-387706002632-eu-west-3"  # S3 bucket name
 QUALITY_PREFIX = "monitoring/quality/city=nyc"  # where parquet lives
 GROUNDTRUTH_PREFIX = "monitoring/ground-truth"  # where JSONL will be written
 

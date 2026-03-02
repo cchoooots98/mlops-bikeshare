@@ -1,6 +1,6 @@
 # Monitoring Runbook — mlops-bikeshare
 
-_Last updated: 2025-10-02 • Region: **ca-central-1** • City: **nyc**_  
+_Last updated: 2025-10-02 • Region: **eu-west-3** • City: **nyc**_  
 _Endpoints: **bikeshare-staging**, **bikeshare-prod**_  
 _Routing: SNS topic **sm-alerts** → Email + Slack (verified)_
 

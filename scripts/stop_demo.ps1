@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Comment: Sensible defaults.
-if (-not $Region -or $Region -eq "") { $Region = "ca-central-1" }
+if (-not $Region -or $Region -eq "") { $Region = "eu-west-3" }
 if (-not $Endpoint -or $Endpoint -eq "") {
   Write-Host "ERROR: Set SM_ENDPOINT env or pass -Endpoint bikeshare-prod"
   exit 1

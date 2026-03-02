@@ -4,7 +4,7 @@
       "type": "metric",
       "x": 0, "y": 0, "width": 12, "height": 6,
       "properties": {
-        "region": "ca-central-1",
+        "region": "eu-west-3",
         "title": "Quality (staging, nyc) — PR-AUC & F1 (24h rolling)",
         "view": "timeSeries",
         "period": 300,
@@ -18,7 +18,7 @@
       "type": "metric",
       "x": 12, "y": 0, "width": 12, "height": 6,
       "properties": {
-        "region": "ca-central-1",
+        "region": "eu-west-3",
         "title": "Hit-Rate & Samples (staging, nyc) — 24h rolling",
         "view": "timeSeries",
         "period": 300,

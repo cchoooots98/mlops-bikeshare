@@ -7,13 +7,13 @@
 #>
 
 param(
-  [string]$Region        = $env:AWS_REGION,          # e.g., ca-central-1
+  [string]$Region        = $env:AWS_REGION,          # e.g., eu-west-3
   [string]$EndpointName  = $(if ($env:SM_ENDPOINT) { $env:SM_ENDPOINT } else { $env:ENDPOINT_NAME }),  # prefer SM_ENDPOINT, else ENDPOINT_NAME
   [string]$City          = $env:CITY                 # e.g., nyc
 )
 
 $ErrorActionPreference = "Stop"
-if (-not $Region -or $Region -eq "") { $Region = "ca-central-1" }
+if (-not $Region -or $Region -eq "") { $Region = "eu-west-3" }
 if (-not $EndpointName -or $EndpointName -eq "") { $EndpointName = "bikeshare-prod" }
 if (-not $City -or $City -eq "") { $City = "nyc" }
 $env:AWS_PAGER = ""

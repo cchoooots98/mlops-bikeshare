@@ -6,8 +6,8 @@ import boto3
 import botocore
 from sagemaker import image_uris
 
-region = "ca-central-1"
-bucket = "mlops-bikeshare-387706002632-ca-central-1"  # EDIT
+region = "eu-west-3"
+bucket = "mlops-bikeshare-387706002632-eu-west-3"  # EDIT
 endpoint_name = "bikeshare-staging"  # EDIT
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # EDIT
 
@@ -19,7 +19,7 @@ baseline_statistics = f"s3://{bucket}/monitoring/baseline/city=nyc/statistics.js
 reports_prefix = f"s3://{bucket}/monitoring/reports"
 
 image_uri = image_uris.retrieve(framework="model-monitor", region=region)
-# image_uri = "536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+# image_uri = "536280801234.dkr.ecr.eu-west-3.amazonaws.com/sagemaker-model-monitor-analyzer"
 
 preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor.py"
 

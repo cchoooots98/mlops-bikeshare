@@ -3,8 +3,8 @@ from time import sleep
 import boto3
 from sagemaker import image_uris
 
-region = "ca-central-1"
-bucket = "mlops-bikeshare-387706002632-ca-central-1"
+region = "eu-west-3"
+bucket = "mlops-bikeshare-387706002632-eu-west-3"
 endpoint_name = "bikeshare-staging"
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"
 
@@ -17,7 +17,7 @@ image_uri = image_uris.retrieve(framework="model-monitor", region=region)
 preprocessor_uri = f"s3://{bucket}/monitoring/code/record_preprocessor_model.py"
 
 # capture_prefix = get_capture_prefix(endpoint_name) #
-# Image URI: 536280801234.dkr.ecr.ca-central-1.amazonaws.com/sagemaker-model-monitor-analyzer
+# Image URI: 536280801234.dkr.ecr.eu-west-3.amazonaws.com/sagemaker-model-monitor-analyzer
 
 try:
     sm.delete_monitoring_schedule(MonitoringScheduleName="bikeshare-model-quality")

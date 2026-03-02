@@ -27,14 +27,14 @@ def parse_args():
     p.add_argument("--image-uri", required=True, help="ECR image URI for inference container")
     p.add_argument("--model-data", required=True, help="S3 URI to model.tar.gz")
     p.add_argument("--instance-type", required=True, help="e.g., ml.m5.large")
-    p.add_argument("--region", required=True, help="AWS region, e.g., ca-central-1")
+    p.add_argument("--region", required=True, help="AWS region, e.g., eu-west-3")
     return p.parse_args()
 
 
 def assert_image_region_matches(image_uri: str, region: str):
     """
     Basic guard: ECR image must be from the same region as the endpoint.
-    Example image: 3877....dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2-v5
+    Example image: 3877....dkr.ecr.eu-west-3.amazonaws.com/mlflow-pyfunc:3.3.2-v5
     """
     m = re.search(r"\.ecr\.([a-z0-9-]+)\.amazonaws\.com/", image_uri)
     if not m:
@@ -92,8 +92,8 @@ def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, insta
                 # 100 = capture all requests; reduce if traffic is high
                 "InitialSamplingPercentage": 100,
                 # Send captured payloads to this S3 prefix
-                # >>> EDIT to your bucket <<< e.g. mlops-bikeshare-...-ca-central-1
-                "DestinationS3Uri": f"s3://mlops-bikeshare-387706002632-ca-central-1/datacapture/endpoint={endpoint_config_name}/",
+                # >>> EDIT to your bucket <<< e.g. mlops-bikeshare-...-eu-west-3
+                "DestinationS3Uri": f"s3://mlops-bikeshare-387706002632-eu-west-3/datacapture/endpoint={endpoint_config_name}/",
                 # Capture both request (inputs) and response (outputs)
                 "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
                 # Tell SageMaker which content-types to capture

@@ -2,7 +2,7 @@
 
 This document captures the implemented architecture for the Bikeshare project: ingestion to inference, monitoring, the Business Dashboard (Step 9), and the Step 10 promotion and rollback flow. It complements `docs/ops_sla.md` and the runbook.
 
-> Region: `ca-central-1` • City: `nyc` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
+> Region: `eu-west-3` • City: `nyc` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
 
 ---
 
@@ -94,7 +94,7 @@ This document captures the implemented architecture for the Bikeshare project: i
 ### App Configuration (secrets)
 
 ```toml
-region = "ca-central-1"
+region = "eu-west-3"
 city = "nyc"
 cw_custom_ns = "Bikeshare/Model"
 sm_endpoint = "bikeshare-staging"   # switch to "bikeshare-prod" after cutover
@@ -102,7 +102,7 @@ sm_endpoint = "bikeshare-staging"   # switch to "bikeshare-prod" after cutover
 aws_profile = "Shirley"
 db = "mlops_bikeshare"
 workgroup = "primary"
-athena_output = "s3://mlops-bikeshare-387706002632-ca-central-1/athena_results/"
+athena_output = "s3://mlops-bikeshare-387706002632-eu-west-3/athena_results/"
 
 view_station_info_latest = "v_station_information"
 view_predictions         = "v_predictions"

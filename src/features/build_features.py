@@ -29,7 +29,7 @@ def read_env() -> dict:
         "city": v.get("CITY") or v.get("city"),
         "athena_output": v.get("ATHENA_OUTPUT") or v.get("athena_output"),
         "athena_workgroup": v.get("ATHENA_WORKGROUP") or v.get("athena_workgroup") or "primary",
-        "region": v.get("REGION") or v.get("region") or "ca-central-1",
+        "region": v.get("REGION") or v.get("region") or "eu-west-3",
         "athena_database": v.get("ATHENA_DATABASE") or v.get("athena_database") or "default",
     }
 
@@ -429,7 +429,7 @@ def create_table_if_not_exists(cnx, bucket: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--city", required=True)
-    ap.add_argument("--region", default="ca-central-1")
+    ap.add_argument("--region", default="eu-west-3")
     ap.add_argument("--bucket", required=False)  # 默认从 env.json 取
     ap.add_argument("--start", required=False)  # 'YYYY-MM-DD HH:MM' UTC
     ap.add_argument("--end", required=False)
