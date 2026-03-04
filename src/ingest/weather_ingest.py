@@ -22,10 +22,10 @@ CITY = os.getenv("CITY", "paris")
 # Provider selection: official | rapidapi
 METEOSTAT_PROVIDER = os.getenv("METEOSTAT_PROVIDER", "rapidapi").lower().strip()
 API_KEY = os.getenv("METEOSTAT_API_KEY", "").strip()
+METEOSTAT_ALT = os.getenv("METEOSTAT_ALT", "35").strip()
 
 # City latitude and longitude (expandable)
 CITY_COORDS = {
-    "paris": (40.7128, -74.0060),
     "paris": (48.8566, 2.3522),
 }
 
@@ -53,6 +53,7 @@ def _fetch_meteostat(lat: float, lon: float, start: datetime, end: datetime) -> 
     params = {
         "lat": f"{lat:.4f}",
         "lon": f"{lon:.4f}",
+        "alt": METEOSTAT_ALT,
         "tz": "UTC",
     }
 
@@ -166,7 +167,10 @@ def handler(event, context):
     if not BUCKET:
         raise RuntimeError("Env BUCKET is required, e.g. BUCKET=mlops-bikeshare-...")
 
-    lat, lon = CITY_COORDS[CITY]
+    coords = CITY_COORDS.get(CITY)
+    if not coords:
+        raise RuntimeError(f"Unsupported CITY={CITY!r}. Configure CITY_COORDS in src/ingest/weather_ingest.py")
+    lat, lon = coords
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=2)
     end = now

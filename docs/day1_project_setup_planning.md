@@ -240,51 +240,64 @@ Record key fields into `docs/day1_notes.md`.
 
 ---
 
-## 4) You cannot find trip datasets? Use snapshot learning dataset instead (60–75 min)
+## 4) Check weather ingestion pipeline (60–75 min)
 
-If historical trip data is unavailable, you can still build a strong model for:
+Before modeling, make sure weather ingestion works end-to-end because your feature set depends on it.
 
-- **Target**: station will be short of bikes in the next 30 minutes.
-- **Inputs**: `station_information` + `station_status` + weather data.
+### Step 4.1: Confirm weather provider mode and credentials
 
-This is a standard time-series classification setup.
+In this repo, weather ingest supports Meteostat (`official` or `rapidapi`) with Open-Meteo fallback.
 
-### Step 4.1: Define the label clearly
+Set env vars (PowerShell example):
 
-For each station at time **t**, create:
+```powershell
+$env:BUCKET = "<your-s3-bucket>"
+$env:CITY = "paris"
+$env:METEOSTAT_PROVIDER = "rapidapi"
+$env:METEOSTAT_API_KEY = "<your-rapidapi-key>"
+$env:METEOSTAT_ALT = "35"
+```
 
-- `bike_shortage_30m = 1` if `num_bikes_available(t + 30min) <= shortage_threshold`
-- else `bike_shortage_30m = 0`
+### Step 4.2: Validate RapidAPI call manually (connectivity test)
 
-Typical threshold choices:
+Your command style is correct. For a quick API connectivity check in PowerShell:
 
-- fixed threshold: `<= 2 bikes`
-- dynamic threshold: `<= 10% of capacity`
+```powershell
+$headers = @{}
+$headers.Add("x-rapidapi-key", "<your-rapidapi-key>")
+$headers.Add("x-rapidapi-host", "meteostat.p.rapidapi.com")
+$response = Invoke-WebRequest -Uri 'https://meteostat.p.rapidapi.com/point/monthly?lat=48.8566&lon=2.3522&alt=35&start=2020-01-01&end=2020-12-31' -Method GET -Headers $headers
+$response.StatusCode
+```
 
-### Step 4.2: Build training rows from snapshots
+If `StatusCode = 200`, API/auth/network are OK.
 
-At each 5-minute snapshot (already supported by your ingest):
+### Step 4.3: Run repo weather ingestion locally
 
-- key: `(station_id, observed_at)`
-- current features: bikes/docks, renting/returning flags
-- station features: capacity, location
-- temporal features: hour, day_of_week, weekend
-- weather features: temp, rain, wind, humidity
-- future label at `t+30min`
+```bash
+# from repo root
+python -m src.ingest.weather_ingest
+```
 
-### Step 4.3: Keep a small starter data dictionary
+Expected behavior:
 
-Add this to `docs/day1_notes.md`:
+- It fetches Meteostat data for `CITY=paris` (or falls back to Open-Meteo if Meteostat fails).
+- It validates and normalizes rows.
+- It writes gzip JSON to S3 key pattern:
+  - `raw/weather_hourly/city=paris/dt=YYYY-MM-DD-HH-MM/data.json.gz`
 
-- source field
-- model field
-- type
-- example
-- missing-value rule
+### Step 4.4: Verify data landed in S3
 
-### Step 4.4: (Optional) If trip data appears later
+```bash
+aws s3 ls s3://<your-s3-bucket>/raw/weather_hourly/city=paris/ --recursive | tail -n 5
+```
 
-You can add trip-based demand features later, but it is **not required** for Day 1/Day 2 baseline modeling.
+### Step 4.5: If weather ingest fails, check these first
+
+1. `METEOSTAT_API_KEY` missing or invalid.
+2. Wrong provider mode (`METEOSTAT_PROVIDER=official` without official API key).
+3. `CITY` not configured in `CITY_COORDS` in `src/ingest/weather_ingest.py`.
+4. S3 bucket permissions (`s3:PutObject`) missing for runtime identity.
 
 ---
 
@@ -484,6 +497,7 @@ airflow connections add 'velib_dw' \
 - [ ] Dependencies installed successfully.
 - [ ] GBFS endpoints validated (`station_information`, `station_status`).
 - [ ] Sample GBFS JSON saved in `data/samples/velib/`.
+- [ ] Weather ingestion run once and S3 output verified.
 - [ ] Snapshot label definition decided (`bike_shortage_30m`).
 - [ ] Feature mapping drafted in `docs/day1_notes.md`.
 - [ ] Star schema diagram created and saved in `docs/diagrams/`.
