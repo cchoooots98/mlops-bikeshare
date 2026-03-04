@@ -30,7 +30,7 @@ COPY src/ /app/src/
 
 # Default envs (override in App Runner or docker run -e ...)
 ENV PORT=8080 \
-    AWS_REGION=eu-west-3 \
+    AWS_REGION=ca-central-1 \
     CITY=nyc \
     SM_ENDPOINT=bikeshare-prod \
     CW_NS=Bikeshare/Model \

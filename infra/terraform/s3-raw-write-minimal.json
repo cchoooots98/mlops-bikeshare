@@ -8,7 +8,7 @@
         "s3:ListBucket",
         "s3:ListBucketMultipartUploads"
       ],
-      "Resource": "arn:aws:s3:::mlops-bikeshare-387706002632-eu-west-3",
+      "Resource": "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1",
       "Condition": {
         "StringLike": {
           "s3:prefix": [
@@ -27,8 +27,8 @@
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::mlops-bikeshare-387706002632-eu-west-3/raw/*",
-        "arn:aws:s3:::mlops-bikeshare-387706002632-eu-west-3/ingest_errors/*"
+        "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1/raw/*",
+        "arn:aws:s3:::mlops-bikeshare-387706002632-ca-central-1/ingest_errors/*"
       ]
     }
   ]

@@ -1,6 +1,6 @@
 variable "aws_region" {
   type    = string
-  default = "eu-west-3"
+  default = "ca-central-1"
 }
 
 variable "aws_profile" {
@@ -39,7 +39,7 @@ variable "env" {
 # 下面三项虽然当前 backend.tf 没有引用，但保留做参数化也可以。
 variable "tf_state_bucket" {
   type    = string
-  default = "mlops-tfstate-387706002632-eu-west-3"
+  default = "mlops-tfstate-387706002632-ca-central-1"
 }
 
 variable "tf_lock_table" {

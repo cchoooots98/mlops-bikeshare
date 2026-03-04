@@ -29,7 +29,7 @@ from src.features.schema import FEATURE_COLUMNS  # defined in your project's sch
 def main():
     parser = argparse.ArgumentParser(description="Invoke SageMaker endpoint.")
     parser.add_argument("--endpoint-name", required=True, help="Endpoint name.")
-    parser.add_argument("--region", required=True, help="AWS region, e.g., eu-west-3.")
+    parser.add_argument("--region", required=True, help="AWS region, e.g., ca-central-1.")
     args = parser.parse_args()
 
     smrt = boto3.client("sagemaker-runtime", region_name=args.region)

@@ -65,7 +65,7 @@ def main():
     #   app_name="bikeshare-prod",
     #   model_uri=f"models:/{args.model_name}/{args.to_stage}",
     #   mode="create",
-    #   region_name="eu-west-3",
+    #   region_name="ca-central-1",
     #   execution_role_arn="arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec",
     #   instance_type="ml.m5.large",
     #   timeout_seconds=600,

@@ -149,13 +149,13 @@ N/A
 aws sagemaker describe-endpoint `
   --endpoint-name bikeshare-staging `
   --query "EndpointConfigName" --output text `
-  --region eu-west-3
+  --region ca-central-1
 
 # Update to a known-good previous config
 aws sagemaker update-endpoint `
   --endpoint-name bikeshare-staging `
   --endpoint-config-name bikeshare-staging-previous-config-name `
-  --region eu-west-3
+  --region ca-central-1
 
 ```
 ### 4) View endpoint logs
@@ -164,7 +164,7 @@ aws sagemaker update-endpoint `
 
 # Tail CloudWatch logs for the endpoint (last 30 minutes)
 aws logs tail "/aws/sagemaker/Endpoints/bikeshare-staging" `
-  --since 30m --follow --region eu-west-3
+  --since 30m --follow --region ca-central-1
 
 ```
 ### 5) Invoke endpoint for a quick smoke test (CLI)
@@ -181,7 +181,7 @@ aws sagemaker-runtime invoke-endpoint `
   --content-type "application/json" `
   --body $payload `
   --cli-binary-format raw-in-base64-out `
-  --region eu-west-3 `
+  --region ca-central-1 `
   >(cat)
 
 ```
@@ -196,7 +196,7 @@ import argparse, json, boto3
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--endpoint-name", required=True, help="Endpoint to call")
-    p.add_argument("--region", required=True, help="AWS region, e.g. eu-west-3")
+    p.add_argument("--region", required=True, help="AWS region, e.g. ca-central-1")
     args = p.parse_args()
     smrt = boto3.client("sagemaker-runtime", region_name=args.region)
     payload = {"inputs":{"dataframe_split":{"columns":["station_id","hour","temp_c","dow"],"data":[["72",8,20.5,2]]}}}
@@ -302,7 +302,7 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: eu-west-3
+  AWS_REGION: ca-central-1
   AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
 
 jobs:
@@ -435,7 +435,7 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}                  # e.g., eu-west-3
+  AWS_REGION: ${{ vars.AWS_REGION }}                  # e.g., ca-central-1
   ENDPOINT_NAME: ${{ vars.ENDPOINT_STAGING }}         # e.g., bikeshare-staging
   INSTANCE_TYPE: ${{ vars.INSTANCE_STAGING }}         # e.g., ml.m5.large
   ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}            # e.g., .../mlflow-pyfunc:3.3.2-v5
@@ -563,7 +563,7 @@ permissions:
 
 env:
   # ---- Non-secret configuration pulled from repo Variables ----
-  AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., eu-west-3
+  AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., ca-central-1
   ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}           # e.g., bikeshare-prod
   INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}           # e.g., ml.m5.large (or larger)
   ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}           # e.g., .../mlflow-pyfunc:3.3.2-v5

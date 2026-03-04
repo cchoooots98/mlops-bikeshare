@@ -88,8 +88,8 @@ def collect_ids(uri: str, label: str):
 
 def main():
     # === Replace with your two paths ===
-    capture_uri = "s3://mlops-bikeshare-387706002632-eu-west-3/datacapture/endpoint=bikeshare-staging-config-20250923-043944/bikeshare-staging/AllTraffic/2025/09/23/05/02-45-884-3d05d4c6-29d2-4962-ad4c-353f51225ac6.jsonl"
-    gt_uri = "https://mlops-bikeshare-387706002632-eu-west-3.s3.eu-west-3.amazonaws.com/monitoring/ground-truth/2025/09/23/04/labels-2025092304.jsonl"
+    capture_uri = "s3://mlops-bikeshare-387706002632-ca-central-1/datacapture/endpoint=bikeshare-staging-config-20250923-043944/bikeshare-staging/AllTraffic/2025/09/23/05/02-45-884-3d05d4c6-29d2-4962-ad4c-353f51225ac6.jsonl"
+    gt_uri = "https://mlops-bikeshare-387706002632-ca-central-1.s3.ca-central-1.amazonaws.com/monitoring/ground-truth/2025/09/23/04/labels-2025092304.jsonl"
 
     cap_ids = collect_ids(capture_uri, "capture")
     gt_ids = collect_ids(gt_uri, "ground-truth")

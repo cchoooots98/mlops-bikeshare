@@ -1,6 +1,6 @@
 # test/check_gate.py
 # Purpose: Gate for Prod promotion. Fetch last 24h metrics from CloudWatch and enforce admission thresholds.
-# Run: python test/check_gate.py --endpoint bikeshare-staging --city nyc --region eu-west-3
+# Run: python test/check_gate.py --endpoint bikeshare-staging --city nyc --region ca-central-1
 
 import argparse
 import sys
@@ -46,7 +46,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--endpoint", required=True, help="EndpointName, e.g., bikeshare-staging")
     ap.add_argument("--city", required=True, help="City dim for custom metrics, e.g., nyc")
-    ap.add_argument("--region", required=True, help="AWS region, e.g., eu-west-3")
+    ap.add_argument("--region", required=True, help="AWS region, e.g., ca-central-1")
     args = ap.parse_args()
 
     cw = boto3.client("cloudwatch", region_name=args.region)

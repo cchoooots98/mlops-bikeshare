@@ -64,7 +64,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 s3 = boto3.client("s3")
-cw = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "eu-west-3"))
+cw = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "ca-central-1"))
 
 
 def _parse_s3_uri(uri: str):

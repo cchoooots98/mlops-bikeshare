@@ -46,7 +46,7 @@ permissions:
 
 env:
   # ---- Non-secret configuration pulled from repo Variables ----
-  AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., eu-west-3
+  AWS_REGION: ${{ vars.AWS_REGION }}                 # e.g., ca-central-1
   ENDPOINT_NAME: ${{ vars.ENDPOINT_PROD }}           # e.g., bikeshare-prod
   INSTANCE_TYPE: ${{ vars.INSTANCE_PROD }}           # e.g., ml.m5.large
   ECR_IMAGE_URI: ${{ vars.ECR_IMAGE_URI }}           # e.g., .../mlflow-pyfunc:3.3.2-v5

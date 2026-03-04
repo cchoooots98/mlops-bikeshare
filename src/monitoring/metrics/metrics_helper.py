@@ -28,7 +28,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 # ---- Centralized configuration (keeps staging/prod flips simple) ----
-AWS_REGION = os.getenv("AWS_REGION", "eu-west-3")
+AWS_REGION = os.getenv("AWS_REGION", "ca-central-1")
 CW_NAMESPACE = os.getenv("CW_NS", "Bikeshare/Model")
 DEFAULT_ENDPOINT = os.getenv("SM_ENDPOINT", "bikeshare-prod")
 DEFAULT_CITY = os.getenv("CITY", "nyc")
