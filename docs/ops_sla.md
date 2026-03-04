@@ -1,6 +1,6 @@
 # Operations SLO/SLA and Runbook 
 
-_Last updated: 2025-10-14 • Region: **ca-central-1** • City: **nyc**_
+_Last updated: 2025-10-14 • Region: **eu-west-3** • City: **paris**_
 
 This document defines service targets, alert thresholds, admission gates for promotion to **prod**, rollback policy, owners, and reporting cadence.
 

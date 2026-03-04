@@ -7,7 +7,7 @@
 - **Date**: 2025-09-14 07:07:37Z
 
 ## Data
-- **City**: nyc
+- **City**: paris
 - **Time window (UTC)**: 2025-08-31 00:00 → 2025-09-13 00:00
 - **Sample sizes**: train=2349468, valid=567732
 - **Feature source**: `features_offline` (Athena external table; partitioned by `city`, `dt`)

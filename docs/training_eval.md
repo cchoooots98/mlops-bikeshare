@@ -103,13 +103,13 @@
 
 # Run training (XGBoost + bikes label; using src/ package layout)
 python -m src.training.train `
-  --city nyc `
+  --city paris `
   --start "2025-08-18 00:00" `
   --end   "2025-08-25 23:55" `
   --database mlops_bikeshare `
   --workgroup primary `
-  --athena-output "s3://mlops-bikeshare-387706002632-ca-central-1/athena/results/" `
-  --region ca-central-1 `
+  --athena-output "s3://mlops-bikeshare-387706002632-eu-west-3/athena/results/" `
+  --region eu-west-3 `
   --label y_stockout_bikes_30 `
   --model-type xgboost `
   --valid-ratio 0.2 `

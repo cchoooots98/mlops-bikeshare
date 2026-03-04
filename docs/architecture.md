@@ -2,7 +2,7 @@
 
 This document captures the implemented architecture for the Bikeshare project: ingestion to inference, monitoring, the Business Dashboard (Step 9), and the Step 10 promotion and rollback flow. It complements `docs/ops_sla.md` and the runbook.
 
-> Region: `ca-central-1` • City: `nyc` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
+> Region: `eu-west-3` • City: `paris` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
 
 ---
 
@@ -94,15 +94,15 @@ This document captures the implemented architecture for the Bikeshare project: i
 ### App Configuration (secrets)
 
 ```toml
-region = "ca-central-1"
-city = "nyc"
+region = "eu-west-3"
+city = "paris"
 cw_custom_ns = "Bikeshare/Model"
 sm_endpoint = "bikeshare-staging"   # switch to "bikeshare-prod" after cutover
 
 aws_profile = "Shirley"
 db = "mlops_bikeshare"
 workgroup = "primary"
-athena_output = "s3://mlops-bikeshare-387706002632-ca-central-1/athena_results/"
+athena_output = "s3://mlops-bikeshare-387706002632-eu-west-3/athena_results/"
 
 view_station_info_latest = "v_station_information"
 view_predictions         = "v_predictions"
@@ -192,7 +192,7 @@ SELECT station_id, dt, horizon_min,
        CAST(p_bikeout AS double) AS p_bikeout,
        CAST(p_dockout AS double) AS p_dockout
 FROM mlops_bikeshare.inference
-WHERE city='nyc'
+WHERE city='paris'
   AND from_iso8601_timestamp(dt) <= current_timestamp + INTERVAL '2' hour;
 ```
 
@@ -201,6 +201,6 @@ WHERE city='nyc'
 CREATE OR REPLACE VIEW mlops_bikeshare.v_quality AS
 SELECT *
 FROM mlops_bikeshare.monitoring_quality
-WHERE city='nyc'
+WHERE city='paris'
   AND from_iso8601_timestamp(dt) >= current_timestamp - INTERVAL '24' hour;
 ```

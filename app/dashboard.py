@@ -34,7 +34,7 @@ REGION = st.secrets["region"]
 DB = st.secrets["db"]
 WG = st.secrets["workgroup"]
 ATH_OUT = st.secrets["athena_output"]
-CITY = st.secrets.get("city", "nyc")
+CITY = st.secrets.get("city", "paris")
 AWS_PROFILE = st.secrets.get("aws_profile", "default")
 
 CW_NS = st.secrets.get("cw_custom_ns", "Bikeshare/Model")
@@ -634,7 +634,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'Value': 0.85,  # Your calculated PR-AUC value
                 'Dimensions': [
                     {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
-                    {'Name': 'City', 'Value': 'nyc'}
+                    {'Name': 'City', 'Value': 'paris'}
                 ]
             },
             {
@@ -642,7 +642,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'Value': 0.78,  # Your calculated F1 score
                 'Dimensions': [
                     {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
-                    {'Name': 'City', 'Value': 'nyc'}
+                    {'Name': 'City', 'Value': 'paris'}
                 ]
             },
             {
@@ -650,7 +650,7 @@ with st.expander("💡 How to Publish CloudWatch Metrics"):
                 'Value': 1,  # 1 for success, 0 for failure
                 'Dimensions': [
                     {'Name': 'EndpointName', 'Value': 'bikeshare-prod'},
-                    {'Name': 'City', 'Value': 'nyc'}
+                    {'Name': 'City', 'Value': 'paris'}
                 ]
             }
         ]

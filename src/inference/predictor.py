@@ -31,7 +31,7 @@ from src.features.schema import FEATURE_COLUMNS
 from src.inference.featurize_online import build_online_features
 
 warnings.filterwarnings("ignore", message="pandas only supports SQLAlchemy")
-cloudwatch = boto3.client("cloudwatch", region_name="ca-central-1")
+cloudwatch = boto3.client("cloudwatch", region_name="eu-west-3")
 # ---------- AWS clients ----------
 
 

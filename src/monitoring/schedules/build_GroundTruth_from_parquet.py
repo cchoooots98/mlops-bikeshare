@@ -5,7 +5,7 @@
 Build Ground Truth JSONL per hour by rewriting rows from quality parquet.
 
 - Input parquet location (per minute parts):
-    s3://<bucket>/monitoring/quality/city=nyc/ds=YYYY-MM-DD/part-YYYY-MM-DD-HH-mm.parquet
+    s3://<bucket>/monitoring/quality/city=paris/ds=YYYY-MM-DD/part-YYYY-MM-DD-HH-mm.parquet
 - Output JSONL per hour:
     s3://<bucket>/monitoring/ground-truth/YYYY/MM/DD/HH/labels-YYYYMMDDHH.jsonl
 
@@ -29,8 +29,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # -------------------- Configuration --------------------
-BUCKET = "mlops-bikeshare-387706002632-ca-central-1"  # S3 bucket name
-QUALITY_PREFIX = "monitoring/quality/city=nyc"  # where parquet lives
+BUCKET = "mlops-bikeshare-387706002632-eu-west-3"  # S3 bucket name
+QUALITY_PREFIX = "monitoring/quality/city=paris"  # where parquet lives
 GROUNDTRUTH_PREFIX = "monitoring/ground-truth"  # where JSONL will be written
 
 # Match keys like: .../ds=2025-09-29/part-2025-09-29-06-15.parquet

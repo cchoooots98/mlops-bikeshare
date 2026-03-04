@@ -9,12 +9,12 @@ Designed to replace expensive 'MSCK REPAIR TABLE' calls.
 - Locally for ad-hoc repair: `python -m src.features.update_partitions`
 
 Environment variables (configure in Lambda console or PowerShell):
-  REGION=ca-central-1
+  REGION=eu-west-3
   ATHENA_WORKGROUP=primary
   ATHENA_OUTPUT=s3://<bucket>/athena_results/
   DB=mlops_bikeshare
-  CITY=nyc
-  BUCKET=mlops-bikeshare-...-ca-central-1
+  CITY=paris
+  BUCKET=mlops-bikeshare-...-eu-west-3
 
   # Table names in Glue/Athena:
   TBL_STATUS=station_status_raw

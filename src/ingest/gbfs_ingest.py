@@ -18,10 +18,10 @@ def floor_to_5min(ts: datetime) -> datetime:
 
 
 BUCKET = os.getenv("BUCKET")
-CITY = os.getenv("CITY", "nyc")
+CITY = os.getenv("CITY", "paris")
 
 GBFS_ROOT = {
-    "nyc": "https://gbfs.citibikenyc.com/gbfs/en",
+    "paris": "https://gbfs.citibikeparis.com/gbfs/en",
     "paris": "https://velib-metropole-opendata.smoove.pro/gbfs/gbfs.json",
 }
 
@@ -58,8 +58,8 @@ def _put_json(obj: dict, key: str):
 
 def handler(event, context):
     root = GBFS_ROOT[CITY]
-    # NYC 直接给 en 路径；其他城市可能需要先读 gbfs.json 解析子链接
-    if CITY == "nyc":
+    # paris 直接给 en 路径；其他城市可能需要先读 gbfs.json 解析子链接
+    if CITY == "paris":
         status_url = f"{root}/station_status.json"
         info_url = f"{root}/station_information.json"
     else:
@@ -99,7 +99,7 @@ def handler(event, context):
 if __name__ == "__main__":
 
     BUCKET = os.getenv("BUCKET")
-    CITY = os.getenv("CITY", "nyc")
+    CITY = os.getenv("CITY", "paris")
     if not BUCKET:
         raise RuntimeError("Env BUCKET is required, e.g. BUCKET=mlops-bikeshare-...")
 

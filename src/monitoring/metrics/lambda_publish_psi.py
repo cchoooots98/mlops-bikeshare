@@ -42,7 +42,7 @@
 #   MONITOR_OUTPUT_PREFIX    -> e.g. s3://.../monitoring/data-quality/
 #   BASELINE_STATISTICS_URI  -> e.g. s3://.../monitoring/data-quality/baseline/statistics.json
 #   ENDPOINT_NAME            -> e.g. bikeshare-prod
-#   CITY                     -> e.g. nyc
+#   CITY                     -> e.g. paris
 #   AGGREGATOR               -> "max" (default) or "mean"
 #   LOG_TOPK                 -> optional, top-K features by PSI to log (default 5)
 #
@@ -64,7 +64,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 s3 = boto3.client("s3")
-cw = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "ca-central-1"))
+cw = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "eu-west-3"))
 
 
 def _parse_s3_uri(uri: str):
@@ -205,7 +205,7 @@ def handler(event, context):
     monitor_prefix = os.getenv("MONITOR_OUTPUT_PREFIX")  # s3://.../monitoring/data-quality/
     baseline_uri = os.getenv("BASELINE_STATISTICS_URI")  # s3://.../baseline/statistics.json
     endpoint_name = os.getenv("ENDPOINT_NAME", "bikeshare-prod")
-    city = os.getenv("CITY", "nyc")
+    city = os.getenv("CITY", "paris")
     aggregator = os.getenv("AGGREGATOR", "max").lower()  # "max" or "mean"
     log_topk = int(os.getenv("LOG_TOPK", "5"))
 

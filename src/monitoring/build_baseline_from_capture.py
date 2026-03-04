@@ -7,13 +7,13 @@ from sagemaker.model_monitor import (
     DefaultModelMonitor,
 )
 
-region = "ca-central-1"  # keep your region
-bucket = "mlops-bikeshare-387706002632-ca-central-1"  # your bucket
-baseline_prefix = "monitoring/baseline/city=nyc"  # SAME prefix your JD reads from
+region = "eu-west-3"  # keep your region
+bucket = "mlops-bikeshare-387706002632-eu-west-3"  # your bucket
+baseline_prefix = "monitoring/baseline/city=paris"  # SAME prefix your JD reads from
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # your exec role
 
 # This file should be a SageMaker data-capture JSONL sample (one JSON object per line).
-baseline_s3 = "s3://mlops-bikeshare-387706002632-ca-central-1/monitoring/baseline-inputs/baseline_flat.json"
+baseline_s3 = "s3://mlops-bikeshare-387706002632-eu-west-3/monitoring/baseline-inputs/baseline_flat.json"
 
 
 monitor = DefaultModelMonitor(
@@ -27,7 +27,7 @@ monitor = DefaultModelMonitor(
 monitor.suggest_baseline(
     baseline_dataset=baseline_s3,
     dataset_format=DatasetFormat.json(lines=True),  # 关键！改成扁平 JSONL
-    output_s3_uri="s3://mlops-bikeshare-387706002632-ca-central-1/monitoring/baseline/city=nyc",
+    output_s3_uri="s3://mlops-bikeshare-387706002632-eu-west-3/monitoring/baseline/city=paris",
     wait=True,
     logs=True,
 )

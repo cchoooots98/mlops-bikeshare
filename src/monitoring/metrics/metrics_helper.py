@@ -28,10 +28,10 @@ import boto3
 from botocore.exceptions import ClientError
 
 # ---- Centralized configuration (keeps staging/prod flips simple) ----
-AWS_REGION = os.getenv("AWS_REGION", "ca-central-1")
+AWS_REGION = os.getenv("AWS_REGION", "eu-west-3")
 CW_NAMESPACE = os.getenv("CW_NS", "Bikeshare/Model")
 DEFAULT_ENDPOINT = os.getenv("SM_ENDPOINT", "bikeshare-prod")
-DEFAULT_CITY = os.getenv("CITY", "nyc")
+DEFAULT_CITY = os.getenv("CITY", "paris")
 
 # Create one global client (boto3 is thread-safe for simple use cases).
 _CW = boto3.client("cloudwatch", region_name=AWS_REGION)

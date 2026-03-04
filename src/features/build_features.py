@@ -29,7 +29,7 @@ def read_env() -> dict:
         "city": v.get("CITY") or v.get("city"),
         "athena_output": v.get("ATHENA_OUTPUT") or v.get("athena_output"),
         "athena_workgroup": v.get("ATHENA_WORKGROUP") or v.get("athena_workgroup") or "primary",
-        "region": v.get("REGION") or v.get("region") or "ca-central-1",
+        "region": v.get("REGION") or v.get("region") or "eu-west-3",
         "athena_database": v.get("ATHENA_DATABASE") or v.get("athena_database") or "default",
     }
 
@@ -174,13 +174,13 @@ def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.
 
 def _city_timezone(city: str) -> str:
     city = (city or "").lower()
-    if city in ("nyc", "new_york", "new-york", "new york", "newyork"):
+    if city in ("paris", "new_york", "new-york", "new york", "newyork"):
         return "America/New_York"
     # add more cities here if you expand the project
     return "UTC"
 
 
-def align_weather_5min(weather_df, start_ts, end_ts, city="nyc") -> pd.DataFrame:
+def align_weather_5min(weather_df, start_ts, end_ts, city="paris") -> pd.DataFrame:
     """
     Align hourly weather (in the local time zone) to a UTC 5-minute grid,
       using merge_asof to backfill and avoid alignment holes caused by resample+reindex.
@@ -240,12 +240,12 @@ def add_time_features(df: pd.DataFrame, city: str) -> pd.DataFrame:
     df["dow"] = ts.dt.dayofweek.astype(float)
     df["is_weekend"] = (df["dow"] >= 5).astype(float)
     years = list(sorted(set(ts.dt.year.tolist())))
-    holiday = US(years=years) if city.lower() in {"nyc", "new_york"} else FR(years=years)
+    holiday = US(years=years) if city.lower() in {"paris", "new_york"} else FR(years=years)
     df["is_holiday"] = ts.dt.date.map(lambda d: float(d in holiday))
     return df
 
 
-def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="nyc") -> pd.DataFrame:
+def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="paris") -> pd.DataFrame:
     # --- base join ---
     df = status.merge(info, on="station_id", how="left")
     if "city" not in df.columns:
@@ -429,7 +429,7 @@ def create_table_if_not_exists(cnx, bucket: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--city", required=True)
-    ap.add_argument("--region", default="ca-central-1")
+    ap.add_argument("--region", default="eu-west-3")
     ap.add_argument("--bucket", required=False)  # 默认从 env.json 取
     ap.add_argument("--start", required=False)  # 'YYYY-MM-DD HH:MM' UTC
     ap.add_argument("--end", required=False)

@@ -82,7 +82,7 @@ def compute_threshold_hit_rate(y_score: np.ndarray, thr: float) -> float:
 def list_parquet_keys_for_last_24h(s3, bucket: str, prefix_root: str) -> List[str]:
     """
     List object keys under prefix_root limited to partitions for the last 24h.
-    Example prefix_root: monitoring/quality/city=nyc
+    Example prefix_root: monitoring/quality/city=paris
     We include 'ds=<today>' and 'ds=<yesterday>'.
     """
     now = datetime.now(timezone.utc)
@@ -140,13 +140,13 @@ def main():
     parser.add_argument(
         "--quality-prefix",
         required=True,
-        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=nyc",
+        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=paris",
     )
     parser.add_argument("--endpoint", required=True, help="Endpoint name as a metric dimension")
-    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "ca-central-1"))
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "eu-west-3"))
     parser.add_argument("--threshold", type=float, default=0.15, help="Probability threshold for F1/hit-rate")
     parser.add_argument("--namespace", default="Bikeshare/Model")
-    parser.add_argument("--city-dimension", default="nyc", help="Optional extra CloudWatch dimension City=<value>")
+    parser.add_argument("--city-dimension", default="paris", help="Optional extra CloudWatch dimension City=<value>")
     args = parser.parse_args()
 
     # Load data (use 'dt' as the time column)

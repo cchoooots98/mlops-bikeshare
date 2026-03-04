@@ -17,7 +17,7 @@ def floor_to_5min(ts: datetime) -> datetime:
 
 
 BUCKET = os.getenv("BUCKET")
-CITY = os.getenv("CITY", "nyc")
+CITY = os.getenv("CITY", "paris")
 
 # Provider selection: official | rapidapi
 METEOSTAT_PROVIDER = os.getenv("METEOSTAT_PROVIDER", "rapidapi").lower().strip()
@@ -25,7 +25,7 @@ API_KEY = os.getenv("METEOSTAT_API_KEY", "").strip()
 
 # City latitude and longitude (expandable)
 CITY_COORDS = {
-    "nyc": (40.7128, -74.0060),
+    "paris": (40.7128, -74.0060),
     "paris": (48.8566, 2.3522),
 }
 

@@ -2,9 +2,9 @@
 
 ## Accounts & Roles
 - **AWS Account**: 387706002632 (example)
-- **Region**: ca-central-1
+- **Region**: eu-west-3
 - **Terraform Backend**
-  - S3: `mlops-tfstate-387706002632-ca-central-1` (versioning + SSE-S3)
+  - S3: `mlops-tfstate-387706002632-eu-west-3` (versioning + SSE-S3)
   - DynamoDB: `mlops-tflock`
 - **GitHub OIDC**
   - OIDC Provider: `token.actions.githubusercontent.com`

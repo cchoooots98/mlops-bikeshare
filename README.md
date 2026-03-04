@@ -2,7 +2,7 @@
 
 This repository implements data ingestion, feature engineering, training, real-time inference on Amazon SageMaker, monitoring (CloudWatch + custom metrics), and a Streamlit business dashboard. It reflects the final Step 10 state: a live prod endpoint with promotion gates, rollback, and updated documentation.
 
-> Region: `ca-central-1` • City: `nyc` • Custom metrics namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
+> Region: `eu-west-3` • City: `paris` • Custom metrics namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
 
 ---
 
@@ -52,8 +52,8 @@ The dashboard and utilities read settings from `.streamlit/secrets.toml`:
 
 ```toml
 # .streamlit/secrets.toml
-region = "ca-central-1"
-city = "nyc"
+region = "eu-west-3"
+city = "paris"
 cw_custom_ns = "Bikeshare/Model"
 
 # IMPORTANT: Start with staging, switch to prod after Step 10 cutover
@@ -63,7 +63,7 @@ sm_endpoint = "bikeshare-staging"
 aws_profile = "Shirley"           # optional for local runs
 db = "mlops_bikeshare"
 workgroup = "primary"
-athena_output = "s3://mlops-bikeshare-387706002632-ca-central-1/athena_results/"
+athena_output = "s3://mlops-bikeshare-387706002632-eu-west-3/athena_results/"
 
 # View names used by the app
 view_station_info_latest = "v_station_information"
@@ -113,8 +113,8 @@ Example local run:
 ```powershell
 python test/check_gate.py `
   --endpoint bikeshare-staging `
-  --city nyc `
-  --region ca-central-1
+  --city paris `
+  --region eu-west-3
 ```
 
 On CI, the gate runs as the first job in `.github/workflows/promote_prod.yml`.
@@ -125,7 +125,7 @@ On CI, the gate runs as the first job in `.github/workflows/promote_prod.yml`.
 
 Use the GitHub Actions workflow **"Promote to Prod"**. Inputs:
 
-- `region=ca-central-1`, `city=nyc`
+- `region=eu-west-3`, `city=paris`
 - `staging_endpoint=bikeshare-staging`
 - `prod_endpoint=bikeshare-prod`
 - `model_name=<your-trained-model>`

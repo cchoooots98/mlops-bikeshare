@@ -132,10 +132,10 @@ terraform apply                       # 应用更改
 ---
 
 # 最近14天 + 报告
-python src/features/build_features.py --city nyc --eda
+python src/features/build_features.py --city paris --eda
 
 # 只回填窗口
-python src/features/build_features.py --city nyc --start "2025-08-18 00:00" --end "2025-08-22 00:00"
+python src/features/build_features.py --city paris --start "2025-08-18 00:00" --end "2025-08-22 00:00"
 
 # Athena 修分区
 MSCK REPAIR TABLE features_offline;

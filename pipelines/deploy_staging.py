@@ -36,13 +36,13 @@ def main():
     )
     parser.add_argument("--role-arn", required=True, help="IAM execution role ARN for SageMaker.")
     parser.add_argument("--instance-type", default="ml.m5.large", help="Instance type (cost/perf tradeoff).")
-    parser.add_argument("--region", default="ca-central-1", help="AWS region, e.g., 'ca-central-1'.")
+    parser.add_argument("--region", default="eu-west-3", help="AWS region, e.g., 'eu-west-3'.")
     parser.add_argument("--timeout", default=600, type=int, help="Timeout in seconds for deployment.")
     parser.add_argument(
         "--image-url",
         default=None,
         help="Optional ECR image URI to pin, e.g., "
-        "'387706002632.dkr.ecr.ca-central-1.amazonaws.com/mlflow-pyfunc:3.3.2'.",
+        "'387706002632.dkr.ecr.eu-west-3.amazonaws.com/mlflow-pyfunc:3.3.2'.",
     )
     args = parser.parse_args()
 

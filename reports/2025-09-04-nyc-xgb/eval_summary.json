@@ -38,7 +38,7 @@
   "best_recall": 0.9615634690407122,
   "best_fbeta": 0.921781281014916,
   "beta": 2.0,
-  "city": "nyc",
+  "city": "paris",
   "time_start": "2025-09-02 00:00",
   "time_end": "2025-09-04 07:50",
   "run_id": "90020e98005b46fe8f57ddbef398346d"

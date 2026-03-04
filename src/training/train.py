@@ -61,7 +61,7 @@ class DataConfig:
     athena_database: str
     athena_workgroup: str = "primary"
     athena_output: Optional[str] = None
-    region: str = "ca-central-1"
+    region: str = "eu-west-3"
 
 
 @dataclass
@@ -288,13 +288,13 @@ def log_feature_importance(model, feature_names: List[str], out_dir_featimp: str
 def main():
     parser = argparse.ArgumentParser()
     # Data slice
-    parser.add_argument("--city", required=True, help="City partition, e.g., nyc")
+    parser.add_argument("--city", required=True, help="City partition, e.g., paris")
     parser.add_argument("--start", required=True, help="UTC start 'YYYY-MM-DD HH:MM'")
     parser.add_argument("--end", required=True, help="UTC end 'YYYY-MM-DD HH:MM'")
     parser.add_argument("--database", default="mlops_bikeshare", help="Athena database name")
     parser.add_argument("--workgroup", default="primary", help="Athena workgroup")
     parser.add_argument("--athena-output", default=None, help="Optional S3 path for Athena staging")
-    parser.add_argument("--region", default="ca-central-1", help="AWS region")
+    parser.add_argument("--region", default="eu-west-3", help="AWS region")
 
     # Training options
     parser.add_argument(
@@ -365,16 +365,16 @@ def main():
     # --------------------------
     # Unified artifact namespaces
     # --------------------------
-    task_id = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}"  # e.g., nyc_y_stockout_bikes_30_xgboost
+    task_id = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}"  # e.g., paris_y_stockout_bikes_30_xgboost
 
     DIR_PLOTS = f"artifacts/{task_id}/plots"  # curves, confusion matrices
     DIR_EVAL = f"artifacts/{task_id}/eval"  # eval json, metrics
     DIR_FEATIMP = f"artifacts/{task_id}/feature_importance"
 
     MODEL_NAME_BASE = (
-        f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., nyc_y_stockout_bikes_30_xgboost__base_sklearn
+        f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., paris_y_stockout_bikes_30_xgboost__base_sklearn
     )
-    MODEL_NAME_PROBA = f"{task_id}__model_proba"  # e.g., nyc_y_stockout_bikes_30_xgboost__model_proba
+    MODEL_NAME_PROBA = f"{task_id}__model_proba"  # e.g., paris_y_stockout_bikes_30_xgboost__model_proba
 
     # Get the distinct dt’s in the window (lightweight)
     dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)

@@ -1,6 +1,6 @@
 # Monitoring Runbook — mlops-bikeshare
 
-_Last updated: 2025-10-02 • Region: **ca-central-1** • City: **nyc**_  
+_Last updated: 2025-10-02 • Region: **eu-west-3** • City: **paris**_  
 _Endpoints: **bikeshare-staging**, **bikeshare-prod**_  
 _Routing: SNS topic **sm-alerts** → Email + Slack (verified)_
 
@@ -62,7 +62,7 @@ It also documents **bypass/rollback** strategies to restore service quickly whil
 ### Quick Triage
 1) **Lambda logs:** check last run for timeout/network/validation failures.  
 2) **S3 error drops:** browse `ingest_errors/` for payload + error summaries.  
-3) **Manual re-run:** invoke Lambda test with `{ "city": "nyc" }`.  
+3) **Manual re-run:** invoke Lambda test with `{ "city": "paris" }`.  
 4) **Infra checks:** S3 `PutObject` permissions; EventBridge rule enabled and last trigger time.
 
 ### Common Causes & Fix
