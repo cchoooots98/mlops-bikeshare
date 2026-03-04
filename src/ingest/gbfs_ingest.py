@@ -21,8 +21,8 @@ BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "paris")
 
 GBFS_ROOT = {
-    "paris": "https://gbfs.citibikeparis.com/gbfs/en",
-    "paris": "https://velib-metropole-opendata.smoove.pro/gbfs/gbfs.json",
+    # Official Vélib' GBFS entrypoint (feed discovery JSON)
+    "paris": "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
 }
 
 s3 = boto3.client("s3")
@@ -56,25 +56,56 @@ def _put_json(obj: dict, key: str):
     s3.put_object(Bucket=BUCKET, Key=key, Body=gzbuf.getvalue(), ContentType="application/json", ContentEncoding="gzip")
 
 
+def _get_json(url: str) -> dict:
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _find_feed_url(gbfs_payload: dict, feed_name: str) -> str | None:
+    # GBFS spec usually stores feeds under data.<lang>.feeds
+    data = gbfs_payload.get("data", {})
+    for lang_payload in data.values():
+        feeds = lang_payload.get("feeds", []) if isinstance(lang_payload, dict) else []
+        for f in feeds:
+            if f.get("name") == feed_name and f.get("url"):
+                return f["url"]
+    return None
+
+
+def _last_updated_epoch(payload: dict) -> int:
+    # Some providers expose GBFS-compliant `last_updated`, others add `lastUpdatedOther`.
+    # Prefer GBFS key and gracefully fallback.
+    for key in ("last_updated", "lastUpdatedOther"):
+        v = payload.get(key)
+        if isinstance(v, int) and v > 0:
+            return v
+        if isinstance(v, str) and v.isdigit():
+            return int(v)
+    raise ValueError("Missing valid last_updated / lastUpdatedOther in GBFS payload")
+
+
 def handler(event, context):
     root = GBFS_ROOT[CITY]
-    # paris 直接给 en 路径；其他城市可能需要先读 gbfs.json 解析子链接
-    if CITY == "paris":
-        status_url = f"{root}/station_status.json"
-        info_url = f"{root}/station_information.json"
-    else:
-        # 简化：直接拼典型文件名；必要时先 requests.get(root) 再解析 feeds
-        status_url = root.replace("gbfs.json", "en/station_status.json")
-        info_url = root.replace("gbfs.json", "en/station_information.json")
+    # Prefer feed discovery via gbfs.json (works even if language path changes).
+    gbfs = _get_json(root)
+    status_url = _find_feed_url(gbfs, "station_status")
+    info_url = _find_feed_url(gbfs, "station_information")
 
-    status = requests.get(status_url, timeout=10).json()
-    info = requests.get(info_url, timeout=10).json()
+    if not status_url or not info_url:
+        base = root.replace("/gbfs.json", "")
+        status_url = status_url or f"{base}/station_status.json"
+        info_url = info_url or f"{base}/station_information.json"
+
+    status = _get_json(status_url)
+    info = _get_json(info_url)
 
     # 校验（失败抛异常 -> 被捕获 -> 写错误日志）
     validate_station_status(status)
     validate_station_info(info)
 
-    dt_prefix = _dt_prefix_from_epoch(status["last_updated"])
+    source_ts = _last_updated_epoch(status)
+    dt_prefix = _dt_prefix_from_epoch(source_ts)
     status_key = f"raw/station_status/city={CITY}/{dt_prefix}/data.json.gz"
     info_key = f"raw/station_information/city={CITY}/{dt_prefix}/data.json.gz"
 
@@ -86,11 +117,11 @@ def handler(event, context):
     _put_json(info, info_key)
     # 各自目录写 manifest（可选）
     _put_json(
-        {"city": CITY, "source_ts": status["last_updated"], "ingested_utc": int(time.time())},
+        {"city": CITY, "source_ts": source_ts, "ingested_utc": int(time.time())},
         f"raw/station_status/city={CITY}/{dt_prefix}/_manifest.json.gz",
     )
     _put_json(
-        {"city": CITY, "source_ts": status["last_updated"], "ingested_utc": int(time.time())},
+        {"city": CITY, "source_ts": source_ts, "ingested_utc": int(time.time())},
         f"raw/station_information/city={CITY}/{dt_prefix}/_manifest.json.gz",
     )
     return {"ok": True, "prefix": dt_prefix}

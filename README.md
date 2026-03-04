@@ -21,6 +21,7 @@ This repository implements data ingestion, feature engineering, training, real-t
   - [Public vs Private App](#public-vs-private-app)
   - [Repository Layout (high level)](#repository-layout-high-level)
   - [License](#license)
+- [Day 1 Setup & Planning Guide (Beginner + AWS Free Tier)](#day-1-setup--planning-guide-beginner--aws-free-tier)
 
 ---
 
@@ -170,6 +171,18 @@ src/                     # pipelines, monitoring, metrics publishers, utilities
 test/                   # check_gate.py and helpers
 .github/workflows/       # CI/CD (promote_prod.yml)
 ```
+
+---
+
+
+## Day 1 Setup & Planning Guide (Beginner + AWS Free Tier)
+
+If you are just starting the project, follow the step-by-step Day 1 guide:
+
+- `docs/day1_project_setup_planning.md`
+- SQL starter schema: `docs/sql/day1_star_schema.sql`
+
+This guide covers repository review, Python setup, Vélib’ GBFS endpoint validation, historical data exploration, star schema planning, and local/AWS PostgreSQL warehouse setup.
 
 ---
 

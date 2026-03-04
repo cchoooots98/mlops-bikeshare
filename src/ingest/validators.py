@@ -35,7 +35,10 @@ def validate_station_status(
 
     last_updated = _as_int(payload.get("last_updated"), -1)
     if last_updated <= 0:
-        raise ValueError("status.last_updated invalid")
+        # Some providers expose this legacy key instead of GBFS `last_updated`
+        last_updated = _as_int(payload.get("lastUpdatedOther"), -1)
+    if last_updated <= 0:
+        raise ValueError("status.last_updated/lastUpdatedOther invalid")
 
     seen = set()
     bad_lag = 0
