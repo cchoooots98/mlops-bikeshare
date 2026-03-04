@@ -4,22 +4,6 @@ This guide walks you through **exactly** what to do in your first ~5 hours.
 
 ---
 
-
-## Glossary (very important for beginners)
-
-- `dim` = **dimension table** (维度表).
-  - Stores relatively stable descriptive attributes (e.g., station name, coordinates, date parts).
-  - Example: `dim_station`, `dim_date`, `dim_time`, `dim_weather`.
-- `fact` = **fact table** (事实表).
-  - Stores event/measurement records over time (e.g., each station status snapshot).
-  - Example: `fact_station_status`.
-
-Simple memory trick:
-- **dim = describe** (who/where/when)
-- **fact = measure** (what happened/how many)
-
----
-
 ## 0) What you will finish by end of Day 1
 
 By the end of this session, you should have:
