@@ -1,5 +1,9 @@
--- Snapshot-based warehouse schema for 30-minute bike-shortage forecasting
--- This design does not require historical trip datasets.
+
+DROP TABLE IF EXISTS fact_station_status CASCADE;
+DROP TABLE IF EXISTS dim_weather CASCADE;
+DROP TABLE IF EXISTS dim_time CASCADE;
+DROP TABLE IF EXISTS dim_date CASCADE;
+DROP TABLE IF EXISTS dim_station CASCADE;
 
 CREATE TABLE IF NOT EXISTS dim_station (
   station_id      TEXT PRIMARY KEY,
@@ -9,12 +13,15 @@ CREATE TABLE IF NOT EXISTS dim_station (
   capacity        INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS dim_date (
+CREATE TABLE IF NOT EXISTS  dim_date (
   date_id         INTEGER PRIMARY KEY,
   date            DATE UNIQUE,
   day_of_week     SMALLINT,
   month           SMALLINT,
-  year            SMALLINT
+  year            SMALLINT,
+  is_weekend      BOOLEAN,
+  is_holiday      BOOLEAN,
+  holiday_name    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS dim_time (
