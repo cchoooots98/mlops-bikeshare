@@ -1,4 +1,4 @@
-﻿services:
+services:
   airflow-postgres:
     image: postgres:15
     environment:
@@ -42,11 +42,15 @@
       GBFS_BASE_URL: "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json"
       GBFS_CITY: "paris"
       DW_CONN_ID: "velib_dw"
+      AWS_DEFAULT_REGION: eu-west-3
+      AWS_PROFILE: Shirley-fr
+      AWS_SDK_LOAD_CONFIG: "1"
     volumes: &airflow-volumes
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/logs:/opt/airflow/logs
       - ./src:/opt/airflow/src
+      - ${USERPROFILE}/.aws:/home/airflow/.aws:ro
     command: >
       bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true"
 
