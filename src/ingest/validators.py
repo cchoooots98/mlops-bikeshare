@@ -35,7 +35,9 @@ def validate_station_status(
 
     last_updated = _as_int(payload.get("last_updated"), -1)
     if last_updated <= 0:
-        raise ValueError("status.last_updated invalid")
+        last_updated = _as_int(payload.get("lastUpdatedOther"), -1)
+    if last_updated <= 0:
+        raise ValueError("status.last_updated/lastUpdatedOther invalid")
 
     seen = set()
     bad_lag = 0
@@ -47,8 +49,9 @@ def validate_station_status(
             raise ValueError(f"status: duplicated station_id {sid}")
         seen.add(sid)
 
-        nb = _as_int(s.get("num_bikes_available"), -1)
-        nd = _as_int(s.get("num_docks_available"), -1)
+        # Support both GBFS snake_case and provider camelCase variants
+        nb = _as_int(s.get("num_bikes_available", s.get("numBikesAvailable")), -1)
+        nd = _as_int(s.get("num_docks_available", s.get("numDocksAvailable")), -1)
         lr = _as_int(s.get("last_reported"), 0)
 
         if not (0 <= nb <= max_count and 0 <= nd <= max_count):
@@ -121,6 +124,7 @@ def validate_weather(
         # 字段存在即可，数值允许缺失，但若给了就做范围校验
         for key, lo, hi in [
             ("temp", *temp_range),
+            ("dwpt", -80.0, 50.0),
             ("wnd", *wind_range),
             ("prcp", *prcp_range),
             ("rhum", 0.0, 100.0),  # %
@@ -128,6 +132,7 @@ def validate_weather(
             ("wdir", 0.0, 360.0),  # deg
             ("wpgt", 0.0, 200.0),  # m/s or km/h，后面视图里统一单位即可
             ("snow", 0.0, 500.0),
+            ("tsun", 0.0, 60.0),
         ]:
             v = r.get(key, None)
             if v is None:

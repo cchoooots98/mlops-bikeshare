@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
+import botocore
 import requests
 
 from .validators import validate_weather
@@ -14,6 +15,10 @@ from .validators import validate_weather
 def floor_to_5min(ts: datetime) -> datetime:
     ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
     return ts.replace(minute=(ts.minute // 5) * 5)
+
+def floor_to_hour(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    return ts
 
 
 BUCKET = os.getenv("BUCKET")
@@ -25,12 +30,18 @@ API_KEY = os.getenv("METEOSTAT_API_KEY", "").strip()
 
 # City latitude and longitude (expandable)
 CITY_COORDS = {
-    "paris": (40.7128, -74.0060),
+    "nyc": (40.7128, -74.0060),
     "paris": (48.8566, 2.3522),
 }
 
 s3 = boto3.client("s3")
 
+def _exists(key: str) -> bool:
+    try:
+        s3.head_object(Bucket=BUCKET, Key=key)
+        return True
+    except botocore.exceptions.ClientError:
+        return False
 
 def _put_json(obj: dict, key: str):
     buf = io.BytesIO()
@@ -102,6 +113,7 @@ def _fetch_meteostat(lat: float, lon: float, start: datetime, end: datetime) -> 
             {
                 "time": t,  # 'YYYY-MM-DD HH:MM'
                 "temp": row.get("temp") or row.get("temperature"),
+                "dwpt": row.get("dwpt") or row.get("dew_point"),
                 "prcp": row.get("prcp") or row.get("precipitation"),
                 "wnd": row.get("wspd") or row.get("wind_speed") or row.get("wind"),
                 "rhum": row.get("rhum") or row.get("humidity"),
@@ -109,6 +121,7 @@ def _fetch_meteostat(lat: float, lon: float, start: datetime, end: datetime) -> 
                 "wdir": row.get("wdir") or row.get("wind_direction"),
                 "wpgt": row.get("wpgt") or row.get("wind_gust"),
                 "snow": row.get("snow"),
+                "tsun": row.get("tsun") or row.get("sunshine"),
                 "coco": row.get("coco") or row.get("weather_code"),
             }
         )
@@ -147,6 +160,7 @@ def _fetch_open_meteo(lat: float, lon: float, start: datetime, end: datetime) ->
             {
                 "time": ts.replace("T", " "),
                 "temp": temps[i] if i < len(temps) else None,
+                "dwpt": None,
                 "prcp": prcps[i] if i < len(prcps) else None,
                 "wnd": winds[i] if i < len(winds) else None,
                 "rhum": rhums[i] if i < len(rhums) else None,
@@ -154,6 +168,7 @@ def _fetch_open_meteo(lat: float, lon: float, start: datetime, end: datetime) ->
                 "wdir": wdirs[i] if i < len(wdirs) else None,
                 "wpgt": gusts[i] if i < len(gusts) else None,
                 "snow": None,
+                "tsun": None,
                 "coco": None,
             }
         )
@@ -166,7 +181,10 @@ def handler(event, context):
     if not BUCKET:
         raise RuntimeError("Env BUCKET is required, e.g. BUCKET=mlops-bikeshare-...")
 
-    lat, lon = CITY_COORDS[CITY]
+    coords = CITY_COORDS.get(CITY)
+    if not coords:
+        raise RuntimeError(f"Unsupported CITY={CITY!r}. Configure CITY_COORDS in src/ingest/weather_ingest.py")
+    lat, lon = coords
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=2)
     end = now
