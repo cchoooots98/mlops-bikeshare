@@ -73,6 +73,29 @@ view_quality             = "v_quality"         # optional
 
 Metrics must be emitted with dimensions `{ EndpointName, City }` for the custom namespace `Bikeshare/Model`. Batch-level posting is strongly recommended (one datapoint per 10-min batch), not per request.
 
+For ingestion and local Airflow runs, the weather pipeline now uses **OpenWeather One Call 3.0** with a 10-minute cadence. The required runtime settings are:
+
+```powershell
+$env:OPENWEATHER_API_KEY = "<your-openweather-api-key>"
+$env:RAW_S3_BUCKET = "<your-s3-bucket>"
+$env:WEATHER_CITY = "paris"
+```
+
+Weather raw payloads land in:
+
+```text
+s3://<your-s3-bucket>/raw/weather/city=paris/dt=YYYY-MM-DD-HH-MM/
+```
+
+Weather ingestion now lands in two warehouse staging tables:
+
+- `stg_weather_current`
+- `stg_weather_hourly`
+
+dbt then builds the final star-schema weather dimension:
+
+- `dim_weather`
+
 ---
 
 ## Run the Dashboard Locally
