@@ -14,11 +14,6 @@ from sqlalchemy import create_engine, text
 from .validators import validate_station_info, validate_station_status
 
 
-def floor_to_5min(ts: datetime) -> datetime:
-    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
-    return ts.replace(minute=(ts.minute // 5) * 5)
-
-
 BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "paris")
 
@@ -28,6 +23,12 @@ GBFS_ROOT = {
 }
 
 s3 = boto3.client("s3")
+
+
+def floor_to_5min(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return ts.replace(minute=(ts.minute // 5) * 5)
+
 
 
 def _dt_prefix_from_epoch(epoch_sec: int) -> str:
