@@ -33,22 +33,27 @@ CREATE TABLE IF NOT EXISTS dim_time (
 
 CREATE TABLE IF NOT EXISTS dim_weather (
   weather_id       BIGSERIAL PRIMARY KEY,
-  observed_at      TIMESTAMP UNIQUE,
-  temperature_c    DOUBLE PRECISION,
-  dew_point_c      DOUBLE PRECISION,
-  humidity_pct     DOUBLE PRECISION,
-  precipitation_mm DOUBLE PRECISION,
-  snow_mm          DOUBLE PRECISION,
-  wind_dir_deg     DOUBLE PRECISION,
-  wind_speed_kmh   DOUBLE PRECISION,
-  wind_gust_kmh    DOUBLE PRECISION,
-  pressure_hpa     DOUBLE PRECISION,
-  weather_code     INTEGER
+  weather_key                          TEXT UNIQUE,
+  city                                 TEXT NOT NULL,
+  observed_at                          TIMESTAMPTZ NOT NULL,
+  temperature_c                        DOUBLE PRECISION,
+  humidity_pct                         DOUBLE PRECISION,
+  wind_speed_ms                        DOUBLE PRECISION,
+  current_precipitation_mm             DOUBLE PRECISION,
+  next_hour_precipitation_mm           DOUBLE PRECISION,
+  next_hour_precipitation_probability_pct DOUBLE PRECISION,
+  rain_next_hour_flag                  BOOLEAN,
+  next_hour_valid_at                   TIMESTAMPTZ,
+  weather_code                         INTEGER,
+  weather_main                         TEXT,
+  weather_description                  TEXT,
+  source                               TEXT,
+  UNIQUE (city, observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS fact_station_status (
   station_status_id    BIGSERIAL PRIMARY KEY,
-  observed_at          TIMESTAMP NOT NULL,
+  observed_at          TIMESTAMPTZ NOT NULL,
   station_id           TEXT NOT NULL REFERENCES dim_station(station_id),
   date_id              INTEGER REFERENCES dim_date(date_id),
   time_id              SMALLINT REFERENCES dim_time(time_id),

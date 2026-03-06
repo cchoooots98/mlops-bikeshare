@@ -1,0 +1,64 @@
+erDiagram
+    DIM_STATION ||--o{ FACT_STATION_STATUS : station_id
+    DIM_DATE ||--o{ FACT_STATION_STATUS : date_id
+    DIM_TIME ||--o{ FACT_STATION_STATUS : time_id
+    DIM_WEATHER ||--o{ FACT_STATION_STATUS : weather_id
+
+    STG_STATION_INFORMATION }o--|| DIM_STATION : upsert
+    STG_STATION_STATUS }o--|| DIM_STATION : references
+    STG_HOLIDAYS }o--|| DIM_DATE : updates
+
+    STG_WEATHER_CURRENT ||--o{ DIM_WEATHER : current_snapshot
+    STG_WEATHER_HOURLY ||--o{ DIM_WEATHER : next_hour_summary
+
+    DIM_STATION {
+        text station_id PK
+        text name
+        float latitude
+        float longitude
+        int capacity
+    }
+
+    DIM_DATE {
+        int date_id PK
+        date date
+        boolean is_weekend
+        boolean is_holiday
+        text holiday_name
+    }
+
+    DIM_TIME {
+        int time_id PK
+        int hour
+        int minute
+        boolean is_peak_hour
+    }
+
+    DIM_WEATHER {
+        bigint weather_id PK
+        text weather_key
+        text city
+        timestamptz observed_at
+        float temperature_c
+        float humidity_pct
+        float wind_speed_ms
+        float current_precipitation_mm
+        float next_hour_precipitation_mm
+        float next_hour_precipitation_probability_pct
+        boolean rain_next_hour_flag
+        timestamptz next_hour_valid_at
+        int weather_code
+        text weather_main
+        text weather_description
+    }
+
+    FACT_STATION_STATUS {
+        bigint station_status_id PK
+        timestamptz observed_at
+        text station_id FK
+        int date_id FK
+        int time_id FK
+        bigint weather_id FK
+        int num_bikes_available
+        int num_docks_available
+    }

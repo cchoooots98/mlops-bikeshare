@@ -1,34 +1,22 @@
+import argparse
 import gzip
 import io
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import boto3
-import botocore
+import pandas as pd
 import requests
-
-from .validators import validate_weather
-
-
-def floor_to_5min(ts: datetime) -> datetime:
-    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
-    return ts.replace(minute=(ts.minute // 5) * 5)
-
-def floor_to_hour(ts: datetime) -> datetime:
-    ts = ts.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    return ts
+from sqlalchemy import create_engine, text
 
 
 BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "paris")
+API_KEY = os.getenv("OPENWEATHER_API_KEY", "").strip()
+OPENWEATHER_BASE_URL = os.getenv("OPENWEATHER_ONECALL_URL", "https://api.openweathermap.org/data/3.0/onecall")
 
-# Provider selection: official | rapidapi
-METEOSTAT_PROVIDER = os.getenv("METEOSTAT_PROVIDER", "rapidapi").lower().strip()
-API_KEY = os.getenv("METEOSTAT_API_KEY", "").strip()
-
-# City latitude and longitude (expandable)
 CITY_COORDS = {
     "nyc": (40.7128, -74.0060),
     "paris": (48.8566, 2.3522),
@@ -36,182 +24,455 @@ CITY_COORDS = {
 
 s3 = boto3.client("s3")
 
-def _exists(key: str) -> bool:
-    try:
-        s3.head_object(Bucket=BUCKET, Key=key)
-        return True
-    except botocore.exceptions.ClientError:
-        return False
 
-def _put_json(obj: dict, key: str):
+def floor_to_10min(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return ts.replace(minute=(ts.minute // 10) * 10)
+
+
+def _target_bucket_utc(now_utc: datetime | None = None) -> datetime:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    return floor_to_10min(now_utc)
+
+
+def _coords_for_city(city: str) -> tuple[float, float]:
+    coords = CITY_COORDS.get(city.lower().strip())
+    if not coords:
+        raise ValueError(f"Unsupported city={city!r}. Configure CITY_COORDS in src/ingest/weather_ingest.py")
+    return coords
+
+
+def _put_json(obj: dict, key: str, *, bucket: str | None = None, s3_client=None) -> None:
+    client = s3_client or s3
+    bucket_name = bucket or BUCKET
+    if not bucket_name:
+        raise RuntimeError("S3 bucket is required")
+
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
         gz.write(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
-    s3.put_object(Bucket=BUCKET, Key=key, Body=buf.getvalue(), ContentType="application/json", ContentEncoding="gzip")
+    client.put_object(
+        Bucket=bucket_name,
+        Key=key,
+        Body=buf.getvalue(),
+        ContentType="application/json",
+        ContentEncoding="gzip",
+    )
 
 
-def _fetch_meteostat(lat: float, lon: float, start: datetime, end: datetime) -> dict:
-    """
-    Meteostat has two providers:
-    - official: https://api.meteostat.net/v2/point/hourly (header: x-api-key)
-    - rapidapi: https://meteostat.p.rapidapi.com/point/hourly
-    (headers: x-rapidapi-key + x-rapidapi-host)
-    Note: RapidAPI's point/hourly requires the start/end values ​​to be in YYYY-MM-DD format (pure date).
-    """
-    if not API_KEY:
-        raise RuntimeError("Missing METEOSTAT_API_KEY")
+def _to_utc(ts_value: int | float | None) -> datetime | None:
+    if ts_value is None:
+        return None
+    return datetime.fromtimestamp(ts_value, tz=timezone.utc)
 
-    params = {
-        "lat": f"{lat:.4f}",
-        "lon": f"{lon:.4f}",
-        "tz": "UTC",
+
+def _weather_summary(block: dict) -> dict:
+    weather_items = block.get("weather") or []
+    first = weather_items[0] if weather_items else {}
+    return {
+        "weather_code": first.get("id"),
+        "weather_main": first.get("main"),
+        "weather_description": first.get("description"),
     }
 
-    if METEOSTAT_PROVIDER == "official":
-        base = "https://api.meteostat.net/v2/point/hourly"
-        params.update(
-            {
-                "start": start.strftime("%Y-%m-%d %H:%M"),
-                "end": end.strftime("%Y-%m-%d %H:%M"),
-            }
-        )
-        headers = {"x-api-key": API_KEY}
-    else:
-        # rapidapi
-        base = "https://meteostat.p.rapidapi.com/point/hourly"
-        # Only accept YYYY-MM-DD
-        params.update(
-            {
-                "start": start.strftime("%Y-%m-%d"),
-                "end": end.strftime("%Y-%m-%d"),
-            }
-        )
-        headers = {
-            "x-rapidapi-key": API_KEY,
-            "x-rapidapi-host": "meteostat.p.rapidapi.com",
-        }
 
-    r = requests.get(base, params=params, headers=headers, timeout=15)
-    if not r.ok:
-        raise RuntimeError(f"Meteostat HTTP {r.status_code}: {r.text[:300]}")
-    data = r.json()
-    validate_weather(data)
-    # Compatible output: Make sure the data array contains at least the
-    # time/temp/prcp/wnd keys (some field names are different)
-    rows = data.get("data", [])
-    norm = []
-    for row in rows:
-        # Official return keys: time/temp/prcp/wspd, etc.;
-        # rapidapi will keep the same name
-        raw_time = row.get("time") or row.get("date") or row.get("datetime")
-        if raw_time:
-            t = raw_time.replace("T", " ")
-            t = t[:16]  # Only keep to the minute
-        else:
-            t = None
-        norm.append(
-            {
-                "time": t,  # 'YYYY-MM-DD HH:MM'
-                "temp": row.get("temp") or row.get("temperature"),
-                "dwpt": row.get("dwpt") or row.get("dew_point"),
-                "prcp": row.get("prcp") or row.get("precipitation"),
-                "wnd": row.get("wspd") or row.get("wind_speed") or row.get("wind"),
-                "rhum": row.get("rhum") or row.get("humidity"),
-                "pres": row.get("pres") or row.get("pressure"),
-                "wdir": row.get("wdir") or row.get("wind_direction"),
-                "wpgt": row.get("wpgt") or row.get("wind_gust"),
-                "snow": row.get("snow"),
-                "tsun": row.get("tsun") or row.get("sunshine"),
-                "coco": row.get("coco") or row.get("weather_code"),
-            }
-        )
-    return {"meta": {"source": f"meteostat-{METEOSTAT_PROVIDER}"}, "data": norm}
+def _precipitation_mm(block: dict, *, default: float | None = None) -> float | None:
+    total = 0.0
+    found = False
+    if "precipitation" in block and block.get("precipitation") is not None:
+        return float(block.get("precipitation"))
+
+    for kind in ("rain", "snow"):
+        value = block.get(kind)
+        if isinstance(value, dict):
+            hourly = value.get("1h")
+            if hourly is not None:
+                total += float(hourly)
+                found = True
+    if found:
+        return total
+    return default
 
 
-def _fetch_open_meteo(lat: float, lon: float, start: datetime, end: datetime) -> dict:
-    """
-    兜底：Open‑Meteo（免 key），最小映射到 time/temp/prcp/wnd
-    """
-    base = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": f"{lat:.4f}",
-        "longitude": f"{lon:.4f}",
-        "hourly": "temperature_2m,precipitation,wind_speed_10m",
-        "timezone": "UTC",
-        "start_hour": start.strftime("%Y-%m-%dT%H:00"),
-        "end_hour": end.strftime("%Y-%m-%dT%H:00"),
+def _validate_openweather_payload(payload: dict) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("OpenWeather payload must be a dict")
+    if not isinstance(payload.get("current"), dict):
+        raise ValueError("OpenWeather payload missing current block")
+    if "dt" not in payload["current"]:
+        raise ValueError("OpenWeather current block missing dt")
+    if not isinstance(payload.get("hourly", []), list):
+        raise ValueError("OpenWeather payload hourly must be a list")
+
+
+def fetch_weather_payload(
+    *,
+    city: str,
+    api_key: str,
+    timeout_sec: int = 30,
+    target_bucket_utc: datetime | None = None,
+) -> dict:
+    if not api_key:
+        raise RuntimeError("OPENWEATHER_API_KEY is required for weather ingestion")
+
+    snapshot_bucket_at = target_bucket_utc or _target_bucket_utc()
+    lat, lon = _coords_for_city(city)
+    response = requests.get(
+        OPENWEATHER_BASE_URL,
+        params={
+            "lat": f"{lat:.4f}",
+            "lon": f"{lon:.4f}",
+            "appid": api_key,
+            "units": "metric",
+            "exclude": "minutely,daily,alerts",
+        },
+        timeout=timeout_sec,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    _validate_openweather_payload(payload)
+    payload["_meta_ingest"] = {
+        "source": "openweather-onecall-3.0",
+        "city": city,
+        "lat": lat,
+        "lon": lon,
+        "snapshot_bucket_at_utc": snapshot_bucket_at.isoformat(),
+        "fetched_at_utc": int(time.time()),
     }
-    r = requests.get(base, params=params, timeout=15)
-    if not r.ok:
-        raise RuntimeError(f"Open‑Meteo HTTP {r.status_code}: {r.text[:300]}")
-    j = r.json()
-    hourly = j.get("hourly", {})
-    times = hourly.get("time", []) or []
-    temps = hourly.get("temperature_2m", []) or []
-    prcps = hourly.get("precipitation", []) or []
-    winds = hourly.get("wind_speed_10m", []) or []
-    rhums = hourly.get("relativehumidity_2m", []) or []
-    press = hourly.get("surface_pressure", []) or []
-    wdirs = hourly.get("winddirection_10m", []) or []
-    gusts = hourly.get("windgusts_10m", []) or []
+    return payload
+
+
+def persist_weather_raw_to_s3(
+    payload: dict,
+    *,
+    bucket: str,
+    city: str,
+    run_id: str,
+    s3_client=None,
+) -> dict:
+    client = s3_client or s3
+    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
+    dt_prefix = snapshot_bucket_at.strftime("dt=%Y-%m-%d-%H-%M")
+    data_key = f"raw/weather/city={city}/{dt_prefix}/data.json.gz"
+    manifest_key = f"raw/weather/city={city}/{dt_prefix}/_manifest.json.gz"
+
+    _put_json(payload, data_key, bucket=bucket, s3_client=client)
+    _put_json(
+        {
+            "city": city,
+            "run_id": run_id,
+            "source": payload.get("_meta_ingest", {}).get("source"),
+            "snapshot_bucket_at_utc": payload.get("_meta_ingest", {}).get("snapshot_bucket_at_utc"),
+            "ingested_utc": int(time.time()),
+        },
+        manifest_key,
+        bucket=bucket,
+        s3_client=client,
+    )
+    return {"data_key": data_key, "manifest_key": manifest_key, "prefix": dt_prefix}
+
+
+def weather_current_dataframe(
+    payload: dict,
+    *,
+    city: str,
+    run_id: str,
+    ingested_at: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
+    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
+    source_last_updated = int(payload.get("_meta_ingest", {}).get("fetched_at_utc", int(time.time())))
+    source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
+
+    current = payload.get("current", {})
+    observed_at = _to_utc(current.get("dt"))
+    if observed_at is None:
+        raise ValueError("OpenWeather current block missing valid dt")
+    current_weather = _weather_summary(current)
+
+    row = {
+        "run_id": run_id,
+        "ingested_at": ingested_at,
+        "source_last_updated": source_last_updated,
+        "city": city,
+        "snapshot_bucket_at": snapshot_bucket_at,
+        "observed_at": observed_at,
+        "temperature_c": current.get("temp"),
+        "humidity_pct": current.get("humidity"),
+        "wind_speed_ms": current.get("wind_speed"),
+        "precipitation_mm": _precipitation_mm(current, default=0.0),
+        "weather_code": current_weather["weather_code"],
+        "weather_main": current_weather["weather_main"],
+        "weather_description": current_weather["weather_description"],
+        "source": source,
+    }
+    return pd.DataFrame([row])
+
+
+def weather_hourly_dataframe(
+    payload: dict,
+    *,
+    city: str,
+    run_id: str,
+    ingested_at: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
+    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
+    source_last_updated = int(payload.get("_meta_ingest", {}).get("fetched_at_utc", int(time.time())))
+    source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
+
     rows = []
-    for i, ts in enumerate(times):
+    for hourly_row in payload.get("hourly", []):
+        forecast_at = _to_utc(hourly_row.get("dt"))
+        if forecast_at is None:
+            continue
+        summary = _weather_summary(hourly_row)
         rows.append(
             {
-                "time": ts.replace("T", " "),
-                "temp": temps[i] if i < len(temps) else None,
-                "dwpt": None,
-                "prcp": prcps[i] if i < len(prcps) else None,
-                "wnd": winds[i] if i < len(winds) else None,
-                "rhum": rhums[i] if i < len(rhums) else None,
-                "pres": press[i] if i < len(press) else None,
-                "wdir": wdirs[i] if i < len(wdirs) else None,
-                "wpgt": gusts[i] if i < len(gusts) else None,
-                "snow": None,
-                "tsun": None,
-                "coco": None,
+                "run_id": run_id,
+                "ingested_at": ingested_at,
+                "source_last_updated": source_last_updated,
+                "city": city,
+                "snapshot_bucket_at": snapshot_bucket_at,
+                "forecast_at": forecast_at,
+                "forecast_horizon_min": int((forecast_at - snapshot_bucket_at).total_seconds() // 60),
+                "temperature_c": hourly_row.get("temp"),
+                "humidity_pct": hourly_row.get("humidity"),
+                "wind_speed_ms": hourly_row.get("wind_speed"),
+                "precipitation_mm": _precipitation_mm(hourly_row),
+                "precipitation_probability_pct": float(hourly_row.get("pop")) * 100 if hourly_row.get("pop") is not None else None,
+                "weather_code": summary["weather_code"],
+                "weather_main": summary["weather_main"],
+                "weather_description": summary["weather_description"],
+                "source": source,
             }
         )
-    data = {"meta": {"source": "open-meteo"}, "data": rows}
-    validate_weather(data)
-    return data
+    return pd.DataFrame(rows)
+
+
+def ensure_weather_staging_tables(conn_uri: str) -> None:
+    current_table_sql = """
+    CREATE TABLE IF NOT EXISTS stg_weather_current (
+      run_id               TEXT NOT NULL,
+      ingested_at          TIMESTAMPTZ NOT NULL,
+      source_last_updated  BIGINT,
+      city                 TEXT NOT NULL,
+      snapshot_bucket_at   TIMESTAMPTZ NOT NULL,
+      observed_at          TIMESTAMPTZ NOT NULL,
+      temperature_c        DOUBLE PRECISION,
+      humidity_pct         DOUBLE PRECISION,
+      wind_speed_ms        DOUBLE PRECISION,
+      precipitation_mm     DOUBLE PRECISION,
+      weather_code         INTEGER,
+      weather_main         TEXT,
+      weather_description  TEXT,
+      source               TEXT
+    );
+    """
+    hourly_table_sql = """
+    CREATE TABLE IF NOT EXISTS stg_weather_hourly (
+      run_id                          TEXT NOT NULL,
+      ingested_at                     TIMESTAMPTZ NOT NULL,
+      source_last_updated             BIGINT,
+      city                            TEXT NOT NULL,
+      snapshot_bucket_at              TIMESTAMPTZ NOT NULL,
+      forecast_at                     TIMESTAMPTZ NOT NULL,
+      forecast_horizon_min            INTEGER,
+      temperature_c                   DOUBLE PRECISION,
+      humidity_pct                    DOUBLE PRECISION,
+      wind_speed_ms                   DOUBLE PRECISION,
+      precipitation_mm                DOUBLE PRECISION,
+      precipitation_probability_pct   DOUBLE PRECISION,
+      weather_code                    INTEGER,
+      weather_main                    TEXT,
+      weather_description             TEXT,
+      source                          TEXT
+    );
+    """
+    index_sqls = [
+        "CREATE INDEX IF NOT EXISTS idx_stg_weather_current_city_bucket ON stg_weather_current (city, snapshot_bucket_at);",
+        "CREATE INDEX IF NOT EXISTS idx_stg_weather_current_city_obs ON stg_weather_current (city, observed_at);",
+        "CREATE INDEX IF NOT EXISTS idx_stg_weather_hourly_city_bucket ON stg_weather_hourly (city, snapshot_bucket_at);",
+        "CREATE INDEX IF NOT EXISTS idx_stg_weather_hourly_city_forecast ON stg_weather_hourly (city, forecast_at);",
+    ]
+
+    engine = create_engine(conn_uri, pool_pre_ping=True)
+    try:
+        with engine.begin() as conn:
+            legacy_tables = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name IN ('stg_weather', 'stg_weather_current', 'stg_weather_hourly')
+                        """
+                    )
+                )
+            }
+            if "stg_weather" in legacy_tables:
+                raise RuntimeError(
+                    "Legacy stg_weather table detected. Drop or rename public.stg_weather before running the refactored weather pipeline."
+                )
+            conn.execute(text(current_table_sql))
+            conn.execute(text(hourly_table_sql))
+            for stmt in index_sqls:
+                conn.execute(text(stmt))
+    finally:
+        engine.dispose()
+
+
+def weather_snapshot_exists(conn_uri: str, *, city: str, snapshot_bucket_at_utc: datetime) -> bool:
+    sql = text(
+        """
+        SELECT 1
+        FROM stg_weather_current
+        WHERE city = :city
+          AND snapshot_bucket_at = :snapshot_bucket_at
+        LIMIT 1
+        """
+    )
+    engine = create_engine(conn_uri, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sql, {"city": city, "snapshot_bucket_at": snapshot_bucket_at_utc}).first()
+            return row is not None
+    finally:
+        engine.dispose()
+
+
+def ingest_weather_to_staging(
+    conn_uri: str,
+    *,
+    payload: dict,
+    city: str,
+    run_id: str,
+) -> dict:
+    current_df = weather_current_dataframe(payload, city=city, run_id=run_id)
+    hourly_df = weather_hourly_dataframe(payload, city=city, run_id=run_id)
+    snapshot_bucket_at = pd.Timestamp(current_df.iloc[0]["snapshot_bucket_at"]).to_pydatetime()
+
+    engine = create_engine(conn_uri, pool_pre_ping=True)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM stg_weather_current
+                    WHERE city = :city
+                      AND snapshot_bucket_at = :snapshot_bucket_at
+                    """
+                ),
+                {"city": city, "snapshot_bucket_at": snapshot_bucket_at},
+            )
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM stg_weather_hourly
+                    WHERE city = :city
+                      AND snapshot_bucket_at = :snapshot_bucket_at
+                    """
+                ),
+                {"city": city, "snapshot_bucket_at": snapshot_bucket_at},
+            )
+        current_df.to_sql("stg_weather_current", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+        if not hourly_df.empty:
+            hourly_df.to_sql("stg_weather_hourly", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+    finally:
+        engine.dispose()
+
+    return {"current_rows_written": len(current_df), "hourly_rows_written": len(hourly_df)}
+
+
+def ingest_weather_dual_write(
+    conn_uri: str,
+    *,
+    city: str,
+    run_id: str,
+    raw_bucket: str,
+    api_key: str,
+    timeout_sec: int = 30,
+    target_bucket_utc: datetime | None = None,
+) -> dict:
+    ensure_weather_staging_tables(conn_uri)
+    payload = fetch_weather_payload(
+        city=city,
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        target_bucket_utc=target_bucket_utc,
+    )
+    raw_result = persist_weather_raw_to_s3(
+        payload,
+        bucket=raw_bucket,
+        city=city,
+        run_id=run_id,
+    )
+    write_result = ingest_weather_to_staging(
+        conn_uri,
+        payload=payload,
+        city=city,
+        run_id=run_id,
+    )
+    return {
+        **write_result,
+        "raw": raw_result,
+        "snapshot_bucket_at_utc": payload.get("_meta_ingest", {}).get("snapshot_bucket_at_utc"),
+        "source": payload.get("_meta_ingest", {}).get("source"),
+    }
 
 
 def handler(event, context):
-    if not BUCKET:
-        raise RuntimeError("Env BUCKET is required, e.g. BUCKET=mlops-bikeshare-...")
+    bucket = BUCKET or os.getenv("RAW_S3_BUCKET")
+    if not bucket:
+        raise RuntimeError("Env BUCKET or RAW_S3_BUCKET is required")
 
-    coords = CITY_COORDS.get(CITY)
-    if not coords:
-        raise RuntimeError(f"Unsupported CITY={CITY!r}. Configure CITY_COORDS in src/ingest/weather_ingest.py")
-    lat, lon = coords
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(hours=2)
-    end = now
+    city = os.getenv("WEATHER_CITY", CITY)
+    api_key = os.getenv("OPENWEATHER_API_KEY", API_KEY)
+    payload = fetch_weather_payload(
+        city=city,
+        api_key=api_key,
+        timeout_sec=int(os.getenv("WEATHER_HTTP_TIMEOUT_SEC", "30")),
+        target_bucket_utc=_target_bucket_utc(),
+    )
+    raw_result = persist_weather_raw_to_s3(
+        payload,
+        bucket=bucket,
+        city=city,
+        run_id=f"handler_{int(time.time())}",
+    )
+    return {"ok": True, "raw": raw_result, "source": payload.get("_meta_ingest", {}).get("source")}
 
-    # Try Meteostat first (automatically choose official/rapidapi based on provider); fallback to Open‑Meteo if that fails
-    try:
-        payload = _fetch_meteostat(lat, lon, start, end)
-        source = payload.get("meta", {}).get("source", "meteostat")
-    except Exception as e:
-        print(f"[weather_ingest] Meteostat failed: {e}. Falling back to Open‑Meteo.")
-        payload = _fetch_open_meteo(lat, lon, start, end)
-        source = "open-meteo"
 
-    src = payload.get("meta", {}).get("source", "")
-    if "meteostat" not in src and "open-meteo" not in src:
-        raise RuntimeError(f"[weather_ingest] unexpected weather source: {src}")
-
-    dt5 = floor_to_5min(now)
-    dt_prefix = dt5.strftime("dt=%Y-%m-%d-%H-%M")
-    key = f"raw/weather_hourly/city={CITY}/{dt_prefix}/data.json.gz"
-
-    payload["_meta_ingest"] = {"city": CITY, "source": source, "ingested_utc": int(time.time())}
-    _put_json(payload, key)
-    return {"ok": True, "key": key, "source": source}
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Ingest OpenWeather current and hourly forecast data to S3 raw and Postgres staging"
+    )
+    parser.add_argument("--city", default=os.getenv("WEATHER_CITY", CITY))
+    parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
+    parser.add_argument("--conn-uri", default=os.getenv("DW_CONN_URI", ""))
+    parser.add_argument("--run-id", default=f"manual_{int(time.time())}")
+    parser.add_argument("--api-key", default=os.getenv("OPENWEATHER_API_KEY", API_KEY))
+    parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("WEATHER_HTTP_TIMEOUT_SEC", "30")))
+    return parser
 
 
 if __name__ == "__main__":
-    print(f"[weather_ingest] city={CITY}, bucket=s3://{BUCKET}, provider={METEOSTAT_PROVIDER}")
-    res = handler({}, None)
-    print("[weather_ingest] result:", json.dumps(res))
+    args = _build_arg_parser().parse_args()
+    if not args.conn_uri:
+        raise RuntimeError("--conn-uri (or env DW_CONN_URI) is required")
+    if not args.raw_bucket:
+        raise RuntimeError("--raw-bucket (or env RAW_S3_BUCKET/BUCKET) is required")
+    if not args.api_key:
+        raise RuntimeError("--api-key (or env OPENWEATHER_API_KEY) is required")
+
+    result = ingest_weather_dual_write(
+        conn_uri=args.conn_uri,
+        city=args.city,
+        run_id=args.run_id,
+        raw_bucket=args.raw_bucket,
+        api_key=args.api_key,
+        timeout_sec=args.timeout_sec,
+    )
+    print(json.dumps(result))
