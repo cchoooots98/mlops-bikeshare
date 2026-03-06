@@ -1,0 +1,15 @@
+bikeshare_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: velib
+      password: velib
+      port: 15432
+      dbname: velib_dw
+      schema: analytics
+      threads: 4
+      connect_timeout: 10
+      sslmode: prefer
+

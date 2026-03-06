@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: stg_station_information
+    columns:
+      - name: station_info_pk
+        tests:
+          - not_null
+          - unique
+      - name: station_id
+        tests:
+          - not_null
+
+  - name: stg_station_status
+    columns:
+      - name: station_status_pk
+        tests:
+          - not_null
+          - unique
+      - name: station_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_station_information')
+              field: station_id
+
+  - name: stg_weather_current
+    columns:
+      - name: weather_current_pk
+        tests:
+          - not_null
+          - unique
+      - name: city
+        tests:
+          - not_null
+      - name: snapshot_bucket_at_utc
+        tests:
+          - not_null
+      - name: observed_at_utc
+        tests:
+          - not_null
+
+  - name: stg_weather_hourly
+    columns:
+      - name: weather_hourly_pk
+        tests:
+          - not_null
+          - unique
+      - name: city
+        tests:
+          - not_null
+      - name: snapshot_bucket_at_utc
+        tests:
+          - not_null
+      - name: forecast_at_utc
+        tests:
+          - not_null
+
+  - name: stg_holidays
+    columns:
+      - name: holiday_pk
+        tests:
+          - not_null
+          - unique
+      - name: holiday_date
+        tests:
+          - not_null
+      - name: is_holiday
+        tests:
+          - not_null
+
+  - name: dim_weather
+    columns:
+      - name: weather_key
+        tests:
+          - not_null
+          - unique
+      - name: city
+        tests:
+          - not_null
+      - name: observed_at
+        tests:
+          - not_null

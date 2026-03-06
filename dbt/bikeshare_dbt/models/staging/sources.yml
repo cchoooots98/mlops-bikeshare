@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: raw_staging
+    schema: public
+    tables:
+      - name: stg_station_information
+      - name: stg_station_status
+      - name: stg_weather_current
+      - name: stg_weather_hourly
+      - name: stg_holidays
