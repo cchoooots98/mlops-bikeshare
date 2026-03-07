@@ -10,6 +10,8 @@ select
     (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
     snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
     (snapshot_bucket_at::timestamptz at time zone 'Europe/Paris')::timestamp as snapshot_bucket_at_paris,
+    observed_at::timestamptz as observed_at_utc,
+    (observed_at::timestamptz at time zone 'Europe/Paris')::timestamp as observed_at_paris,
     forecast_at::timestamptz as forecast_at_utc,
     (forecast_at::timestamptz at time zone 'Europe/Paris')::timestamp as forecast_at_paris,
     forecast_horizon_min::integer as forecast_horizon_min,

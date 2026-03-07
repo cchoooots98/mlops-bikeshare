@@ -42,6 +42,7 @@ def ingest_holidays_year_task(**context):
         run_id=context["run_id"],
         country_code=_get_setting("HOLIDAY_COUNTRY_CODE", "HOLIDAY_COUNTRY_CODE", "FR"),
         timeout_sec=int(_get_setting("HOLIDAY_HTTP_TIMEOUT_SEC", "HOLIDAY_HTTP_TIMEOUT_SEC", "30")),
+        raw_bucket=_get_setting("RAW_S3_BUCKET", "RAW_S3_BUCKET", os.getenv("BUCKET", "")),
     )
     return result
 

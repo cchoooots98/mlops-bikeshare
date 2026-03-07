@@ -45,12 +45,15 @@ services:
       AWS_DEFAULT_REGION: eu-west-3
       AWS_PROFILE: Shirley-fr
       AWS_SDK_LOAD_CONFIG: "1"
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
     volumes: &airflow-volumes
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/logs:/opt/airflow/logs
       - ./src:/opt/airflow/src
-      - ${USERPROFILE}/.aws:/home/airflow/.aws:ro
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
     command: >
       bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true"
 

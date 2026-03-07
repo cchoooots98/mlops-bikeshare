@@ -220,11 +220,18 @@ def weather_hourly_dataframe(
     snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
     source_last_updated = int(payload.get("_meta_ingest", {}).get("fetched_at_utc", int(time.time())))
     source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
+    current = payload.get("current", {})
+    observed_at = _to_utc(current.get("dt"))
+    if observed_at is None:
+        raise ValueError("OpenWeather current block missing valid dt")
+    window_end = observed_at + pd.Timedelta(hours=1)
 
     rows = []
     for hourly_row in payload.get("hourly", []):
         forecast_at = _to_utc(hourly_row.get("dt"))
         if forecast_at is None:
+            continue
+        if not (observed_at < forecast_at <= window_end):
             continue
         summary = _weather_summary(hourly_row)
         rows.append(
@@ -234,6 +241,7 @@ def weather_hourly_dataframe(
                 "source_last_updated": source_last_updated,
                 "city": city,
                 "snapshot_bucket_at": snapshot_bucket_at,
+                "observed_at": observed_at,
                 "forecast_at": forecast_at,
                 "forecast_horizon_min": int((forecast_at - snapshot_bucket_at).total_seconds() // 60),
                 "temperature_c": hourly_row.get("temp"),
@@ -276,6 +284,7 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
       source_last_updated             BIGINT,
       city                            TEXT NOT NULL,
       snapshot_bucket_at              TIMESTAMPTZ NOT NULL,
+      observed_at                     TIMESTAMPTZ NOT NULL,
       forecast_at                     TIMESTAMPTZ NOT NULL,
       forecast_horizon_min            INTEGER,
       temperature_c                   DOUBLE PRECISION,
@@ -294,6 +303,39 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
         "CREATE INDEX IF NOT EXISTS idx_stg_weather_current_city_obs ON stg_weather_current (city, observed_at);",
         "CREATE INDEX IF NOT EXISTS idx_stg_weather_hourly_city_bucket ON stg_weather_hourly (city, snapshot_bucket_at);",
         "CREATE INDEX IF NOT EXISTS idx_stg_weather_hourly_city_forecast ON stg_weather_hourly (city, forecast_at);",
+    ]
+    alter_sqls = [
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS run_id TEXT;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS source_last_updated BIGINT;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS city TEXT;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS temperature_c DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS humidity_pct DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS wind_speed_ms DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS precipitation_mm DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS weather_code INTEGER;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS weather_main TEXT;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS weather_description TEXT;",
+        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS source TEXT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS run_id TEXT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS source_last_updated BIGINT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS city TEXT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS forecast_at TIMESTAMPTZ;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS forecast_horizon_min INTEGER;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS temperature_c DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS humidity_pct DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS wind_speed_ms DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS precipitation_mm DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS precipitation_probability_pct DOUBLE PRECISION;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS weather_code INTEGER;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS weather_main TEXT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS weather_description TEXT;",
+        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS source TEXT;",
     ]
 
     engine = create_engine(conn_uri, pool_pre_ping=True)
@@ -318,6 +360,8 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
                 )
             conn.execute(text(current_table_sql))
             conn.execute(text(hourly_table_sql))
+            for stmt in alter_sqls:
+                conn.execute(text(stmt))
             for stmt in index_sqls:
                 conn.execute(text(stmt))
     finally:

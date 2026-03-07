@@ -1,7 +1,7 @@
 # src\features\update_partitions.py
 # -*- coding: utf-8 -*-
 """
-Incrementally add Glue/Athena partitions for the latest 4 five-minute windows.
+Incrementally add Glue/Athena partitions for the latest GBFS and weather windows.
 Designed to replace expensive 'MSCK REPAIR TABLE' calls.
 
 
@@ -19,12 +19,12 @@ Environment variables (configure in Lambda console or PowerShell):
   # Table names in Glue/Athena:
   TBL_STATUS=station_status_raw
   TBL_INFO=station_information_raw
-  TBL_WEATHER=weather_hourly_raw
+  TBL_WEATHER=weather_raw
 
   # S3 prefixes corresponding to each table (without leading/trailing slash):
   PREFIX_STATUS=raw/station_status
   PREFIX_INFO=raw/station_information
-  PREFIX_WEATHER=raw/weather_hourly
+  PREFIX_WEATHER=raw/weather
 """
 
 import datetime as dt
@@ -80,15 +80,25 @@ def _floor_to_5min(ts: dt.datetime) -> dt.datetime:
     return ts.replace(minute=minute)
 
 
-def _last_4_windows(now_utc: dt.datetime) -> List[str]:
+def _floor_to_10min(ts: dt.datetime) -> dt.datetime:
+    ts = ts.replace(second=0, microsecond=0, tzinfo=dt.timezone.utc)
+    minute = (ts.minute // 10) * 10
+    return ts.replace(minute=minute)
+
+
+def _last_windows(now_utc: dt.datetime, *, step_minutes: int, count: int) -> List[str]:
     """
-    Build the list of 4 window strings: 'YYYY-MM-DD-HH-mm' for
-    [now_floor, now-5m, now-10m, now-15m].
+    Build window strings 'YYYY-MM-DD-HH-mm' for a fixed cadence.
     """
-    base = _floor_to_5min(now_utc)
+    if step_minutes == 5:
+        base = _floor_to_5min(now_utc)
+    elif step_minutes == 10:
+        base = _floor_to_10min(now_utc)
+    else:
+        raise ValueError(f"Unsupported step_minutes={step_minutes}")
     dts = []
-    for k in range(4):
-        t = base - dt.timedelta(minutes=5 * k)
+    for k in range(count):
+        t = base - dt.timedelta(minutes=step_minutes * k)
         dts.append(t.strftime("%Y-%m-%d-%H-%M"))
     return dts
 
@@ -149,13 +159,15 @@ def _build_sql_batch(
     p_status: str,
     p_info: str,
     p_weather: str,
-    windows: List[str],
+    status_windows: List[str],
+    weather_windows: List[str],
 ) -> List[str]:
     """Create the ALTER TABLE statements for all tables and all windows."""
     batch = []
-    for w in windows:
+    for w in status_windows:
         batch.append(_alter_add_partition_sql(db, tbl_status, city, bucket, p_status, w))
         batch.append(_alter_add_partition_sql(db, tbl_info, city, bucket, p_info, w))
+    for w in weather_windows:
         batch.append(_alter_add_partition_sql(db, tbl_weather, city, bucket, p_weather, w))
     return batch
 
@@ -171,19 +183,29 @@ def run_once(now_utc: dt.datetime = None) -> dict:
 
     tbl_status = _env("TBL_STATUS", "station_status_raw")
     tbl_info = _env("TBL_INFO", "station_information_raw")
-    tbl_weather = _env("TBL_WEATHER", "weather_hourly_raw")
+    tbl_weather = _env("TBL_WEATHER", "weather_raw")
 
     p_status = _env("PREFIX_STATUS", "raw/station_status")
     p_info = _env("PREFIX_INFO", "raw/station_information")
-    p_weather = _env("PREFIX_WEATHER", "raw/weather_hourly")
+    p_weather = _env("PREFIX_WEATHER", "raw/weather")
 
     if now_utc is None:
         now_utc = dt.datetime.now(dt.timezone.utc)
     latest_dt = _floor_to_5min(now_utc)
-
-    windows = _last_4_windows(now_utc)
+    status_windows = _last_windows(now_utc, step_minutes=5, count=4)
+    weather_windows = _last_windows(now_utc, step_minutes=10, count=4)
     sql_batch = _build_sql_batch(
-        city, db, bucket, tbl_status, tbl_info, tbl_weather, p_status, p_info, p_weather, windows
+        city,
+        db,
+        bucket,
+        tbl_status,
+        tbl_info,
+        tbl_weather,
+        p_status,
+        p_info,
+        p_weather,
+        status_windows,
+        weather_windows,
     )
 
     # Pass db here so QueryExecutionContext is not empty
@@ -192,7 +214,10 @@ def run_once(now_utc: dt.datetime = None) -> dict:
     latest_dt_iso = latest_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     put_freshness_metric(bucket=os.environ["BUCKET"], latest_dt_iso=latest_dt_iso)
 
-    return {"added_or_ensured": [(city, w) for w in windows]}
+    return {
+        "status_windows": [(city, w) for w in status_windows],
+        "weather_windows": [(city, w) for w in weather_windows],
+    }
 
 
 # ---- Lambda entrypoint ----

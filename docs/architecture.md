@@ -51,7 +51,7 @@ This document captures the implemented architecture for the Bikeshare project: i
 
 ## Components
 
-- **Ingestion and ETL**: fetch GBFS feeds and weather, write to S3 raw; batch ETL builds feature tables.
+- **Ingestion and ETL**: fetch GBFS feeds and weather, write raw payloads to S3, normalize warehouse staging tables, and use dbt to build dimensional models.
 - **Model Training**: builds model artifacts and registers versions (details in training docs).
 - **Online Inference**: SageMaker endpoint (`bikeshare-staging` or `bikeshare-prod`) serves predictions; batch driver emits one heartbeat per 10-min batch.
 - **Monitoring**: CloudWatch service metrics plus custom metrics under `Bikeshare/Model` with `{EndpointName, City}`.
@@ -61,11 +61,13 @@ This document captures the implemented architecture for the Bikeshare project: i
 
 ## Data Flow
 
-1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_hourly_raw` in S3.  
-2) **Feature build**: `features_offline` for training and reference.  
-3) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
-4) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), and cadence (`PredictionHeartbeat`) are published to CloudWatch.  
-5) **Dashboard**: queries the latest 2 hours of predictions and the last 24 hours of metrics to present the city map, top-N, model/system health, and freshness.
+1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_raw`, and `holidays_raw` in S3.  
+2) **Warehouse staging**: Airflow normalizes payloads into `stg_station_information`, `stg_station_status`, `stg_weather_current`, `stg_weather_hourly`, and `stg_holidays`. Weather keeps current observations and only the next 60 minutes of hourly forecast rows.  
+3) **DBT transforms**: dbt builds curated dimensions such as `dim_weather` from staging tables. Holiday ingestion bootstraps and updates `dim_date` in the warehouse.  
+4) **Feature build**: feature jobs consume curated data for training and inference reference.  
+5) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
+6) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), and cadence (`PredictionHeartbeat`) are published to CloudWatch.  
+7) **Dashboard**: queries the latest 2 hours of predictions and the last 24 hours of metrics to present the city map, top-N, model/system health, and freshness.
 
 ---
 

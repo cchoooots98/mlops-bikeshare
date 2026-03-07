@@ -22,7 +22,7 @@
   - Precision=0.744, Recall=0.957, Fβ=0.906
 
 ## Assumptions & Limitations
-- Assumes 5-minute gridded station status and hourly weather aligned to UTC.
+- Assumes 5-minute gridded station status and a dbt-built weather dimension aligned to UTC current snapshots plus next-hour forecast summaries.
 - Neighbor features based on spatial BallTree and inverse-distance weighting.
 - Labels defined as stockout if `target_*_t30 ≤ threshold` within 30-minute horizon.
 - Temporal split ensures validation comes strictly after training period with a gap to reduce leakage.
@@ -46,4 +46,5 @@
 - **Run ID**: 5e34adb84e1d4cc7b99430eede62a36b
 - **Code**: `training/train.py`, `training/eval.py`
 - **Data schema**: `schema.py`
+
 

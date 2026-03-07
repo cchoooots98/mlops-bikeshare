@@ -9,6 +9,7 @@ This document describes the layered warehouse model for GBFS, weather, and holid
   - `raw/station_information/...`
   - `raw/station_status/...`
   - `raw/weather/...`
+  - `raw/holidays/...`
 
 ### Staging
 - `stg_station_information`
@@ -20,6 +21,7 @@ This document describes the layered warehouse model for GBFS, weather, and holid
 ### Transformation
 - dbt builds dimensional models from staging tables.
 - Weather business logic is implemented in dbt, not in ingestion code.
+- Holiday ingestion bootstraps `dim_date` if the table does not exist yet, then updates `is_weekend`, `is_holiday`, and `holiday_name`.
 
 ### Dimensions / Facts
 - `dim_station`
@@ -51,6 +53,7 @@ This document describes the layered warehouse model for GBFS, weather, and holid
 - source_last_updated (bigint)
 - city (text)
 - snapshot_bucket_at (timestamptz)
+- observed_at (timestamptz)
 - forecast_at (timestamptz)
 - forecast_horizon_min (integer)
 - temperature_c (double precision)
@@ -91,12 +94,18 @@ Columns:
 
 ## 6. Weather Transformation Logic
 - Ingestion writes raw current weather and raw hourly forecasts into separate staging tables.
-- dbt filters hourly rows to the next 60 minutes relative to each current snapshot.
+- Ingestion filters OpenWeather `hourly` rows to the next 60 minutes relative to each `current.observed_at` and stores those rows in `stg_weather_hourly`.
 - dbt computes:
   - `next_hour_precipitation_mm`
   - `next_hour_precipitation_probability_pct`
   - `rain_next_hour_flag`
 - dbt joins the summary back onto current weather to build `dim_weather`.
 
-## 7. Star-Schema Diagram
+## 7. Holiday and Date Dimension Logic
+- Holiday raw API responses are stored in S3 under `raw/holidays/country=.../year=.../dt=.../`.
+- `stg_holidays` stores one row per holiday date for a country/year load.
+- The holiday ingestion script creates `dim_date` if it is missing.
+- It then inserts the full requested year into `dim_date`, marks weekends, resets holiday flags for that year, and updates holiday fields from `stg_holidays`.
+
+## 8. Star-Schema Diagram
 - Mermaid source: [day3_star_schema.mmd](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/diagrams/day3_star_schema.mmd)

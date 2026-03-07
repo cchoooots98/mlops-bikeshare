@@ -87,14 +87,26 @@ Weather raw payloads land in:
 s3://<your-s3-bucket>/raw/weather/city=paris/dt=YYYY-MM-DD-HH-MM/
 ```
 
+Holiday raw payloads land in:
+
+```text
+s3://<your-s3-bucket>/raw/holidays/country=FR/year=YYYY/dt=YYYY-MM-DD-HH-MM/
+```
+
+If you use an AWS SSO profile in Docker, mount the SSO cache as writable. A fully read-only `~/.aws` mount can break token refresh during S3 writes.
+
 Weather ingestion now lands in two warehouse staging tables:
 
 - `stg_weather_current`
 - `stg_weather_hourly`
 
+After changing `OPENWEATHER_API_KEY` in your shell or `.env`, restart the Airflow containers so the running webserver and scheduler pick up the new value.
+
 dbt then builds the final star-schema weather dimension:
 
 - `dim_weather`
+
+Holiday ingestion writes raw API responses to S3, loads `stg_holidays`, and bootstraps `dim_date` if that table does not exist yet.
 
 ---
 

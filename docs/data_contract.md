@@ -56,8 +56,10 @@
 
 ### stg_weather_hourly
 - one row per city + weather snapshot bucket + forecast timestamp
+- only includes forecast rows within the next 60 minutes of the matching `stg_weather_current.observed_at`
 - columns include:
   - `snapshot_bucket_at`
+  - `observed_at`
   - `forecast_at`
   - `forecast_horizon_min`
   - `temperature_c`
@@ -78,6 +80,7 @@
 - Reject bad batches and log task failure in Airflow.
 - Persist only valid raw payloads to `raw/...`.
 - Investigate schema drift if OpenWeather stops returning `current.dt` or `hourly[]`.
+- Holiday ingestion creates `dim_date` if it is missing before applying yearly updates.
 
 ## Transformation Boundary
 - Python ingestion handles raw ingestion and normalized staging inserts only.
