@@ -13,3 +13,5 @@ holidays
 scikit-learn
 sagemaker
 orjson
+sqlalchemy
+psycopg2-binary
