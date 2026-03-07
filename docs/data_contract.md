@@ -1,10 +1,11 @@
-# Data Contract - Raw Layer (GBFS + OpenWeather)
+# Data Contract - Raw Layer and Warehouse Boundary
 
 ## Scope
 - GBFS ingestion runs on two cadences:
   - `station_status`: every 5 minutes
   - `station_information`: daily
 - Weather ingestion runs every 10 minutes.
+- Holiday ingestion runs yearly or on manual replay.
 - All raw timestamps are stored in UTC.
 - Raw payloads are partitioned by city and `dt=YYYY-MM-DD-HH-MM`.
 
@@ -12,6 +13,7 @@
 - `s3://<bucket>/raw/station_information/city=<city>/dt=YYYY-MM-DD-HH-MM/`
 - `s3://<bucket>/raw/station_status/city=<city>/dt=YYYY-MM-DD-HH-MM/`
 - `s3://<bucket>/raw/weather/city=<city>/dt=YYYY-MM-DD-HH-MM/`
+- `s3://<bucket>/raw/holidays/country=<country_code>/year=<year>/dt=YYYY-MM-DD-HH-MM/`
 
 ## Required Raw Payloads
 - **station_information**:
@@ -39,10 +41,23 @@
   - `hourly[].pop`
   - optional `hourly[].rain.1h` / `hourly[].snow.1h`
   - `hourly[].weather`
+- **Holiday API block**:
+  - JSON object of `YYYY-MM-DD -> holiday_name`
+
+## Ingestion Boundary
+- Python ingestion handles:
+  - API calls
+  - raw payload validation
+  - raw S3 writes
+  - normalized staging writes into `public.stg_*`
+- Python ingestion does not own:
+  - `analytics.dim_weather`
+  - `analytics.dim_date`
+  - future curated, intermediate, or feature tables
 
 ## Warehouse Staging Contract
-### stg_weather_current
-- one row per city + weather snapshot bucket
+### `stg_weather_current`
+- grain: one row per `city + snapshot_bucket_at`
 - columns include:
   - `snapshot_bucket_at`
   - `observed_at`
@@ -54,8 +69,8 @@
   - `weather_main`
   - `weather_description`
 
-### stg_weather_hourly
-- one row per city + weather snapshot bucket + forecast timestamp
+### `stg_weather_hourly`
+- grain: one row per `city + snapshot_bucket_at + forecast_at`
 - only includes forecast rows within the next 60 minutes of the matching `stg_weather_current.observed_at`
 - columns include:
   - `snapshot_bucket_at`
@@ -71,20 +86,77 @@
   - `weather_main`
   - `weather_description`
 
+### `stg_holidays`
+- grain: one row per `country_code + holiday_date`
+- columns include:
+  - `country_code`
+  - `holiday_date`
+  - `is_holiday`
+  - `holiday_name`
+
+## Curated Warehouse Contract
+### `dim_weather`
+- dbt owns weather summarization and builds `dim_weather`
+- source of truth for the current warehouse weather contract
+- feature-facing columns include:
+  - `temperature_c`
+  - `humidity_pct`
+  - `wind_speed_ms`
+  - `current_precipitation_mm`
+  - `next_hour_precipitation_mm`
+  - `next_hour_precipitation_probability_pct`
+  - `rain_next_hour_flag`
+  - `weather_code`
+
+### `dim_date`
+- dbt builds `dim_date` from `stg_holidays` and station-date coverage
+- dbt owns:
+  - `is_weekend`
+  - `is_holiday`
+  - `holiday_name`
+
+## Planned Feature-Layer Contract
+- The current repository still contains Athena-based feature build, training, and dashboard paths for the later MLOps stages.
+- The warehouse direction is to let dbt own curated and later feature-facing weather/date logic.
+- This does not mean the downstream MLOps work is removed; it means the warehouse contract should stay explicit.
+
+Target weather feature columns:
+- `temperature_c`
+- `humidity_pct`
+- `wind_speed_ms`
+- `current_precipitation_mm`
+- `next_hour_precipitation_mm`
+- `next_hour_precipitation_probability_pct`
+- `rain_next_hour_flag`
+- `weather_code`
+
+Deprecated weather feature columns:
+- `temp_c`
+- `precip_mm`
+- `wind_kph`
+- `rhum_pct`
+- `pres_hpa`
+- `wind_dir_deg`
+- `wind_gust_kph`
+- `snow_mm`
+
 ## Validation
 - Raw payload validation happens in ingestion code before S3 write and before staging insert.
 - Invalid payloads should fail the task and prevent partial structured writes.
-- Duplicate protection is keyed by city plus 10-minute snapshot bucket in `stg_weather_current`.
+- Weather duplicate protection is keyed by `city + snapshot_bucket_at` in `stg_weather_current`.
+- Holiday duplicate protection is keyed by `country_code + holiday_date` within the yearly load.
 
 ## Error Handling
 - Reject bad batches and log task failure in Airflow.
 - Persist only valid raw payloads to `raw/...`.
 - Investigate schema drift if OpenWeather stops returning `current.dt` or `hourly[]`.
-- Holiday ingestion creates `dim_date` if it is missing before applying yearly updates.
+- Holiday ingestion no longer creates or updates `dim_date`; dbt is responsible for rebuilding it from staging.
 
 ## Transformation Boundary
 - Python ingestion handles raw ingestion and normalized staging inserts only.
 - dbt handles weather summarization and builds `dim_weather`.
+- dbt handles holiday/date logic and builds `dim_date`.
+- Later machine-learning feature builds may continue to evolve, but the warehouse truth source should remain explicit and documented.
 
 ## Latency SLO
 - GBFS raw landing: <= 3 minutes end-to-S3.

@@ -106,7 +106,26 @@ dbt then builds the final star-schema weather dimension:
 
 - `dim_weather`
 
-Holiday ingestion writes raw API responses to S3, loads `stg_holidays`, and bootstraps `dim_date` if that table does not exist yet.
+Holiday ingestion writes raw API responses to S3 and loads `stg_holidays`. The date dimension is owned by dbt and built from staging as `analytics.dim_date`.
+
+The warehouse direction is now dbt-first:
+
+- Python ingestion owns raw landing and `public.stg_*` only
+- dbt owns curated dimensions such as `dim_weather` and `dim_date`
+- dbt `intermediate/` and `features/` layers are the planned home for future production feature engineering
+
+Weather feature design now aligns to `dim_weather`. The target production weather feature contract keeps:
+
+- `temperature_c`
+- `humidity_pct`
+- `wind_speed_ms`
+- `current_precipitation_mm`
+- `next_hour_precipitation_mm`
+- `next_hour_precipitation_probability_pct`
+- `rain_next_hour_flag`
+- `weather_code`
+
+Legacy feature fields such as `temp_c`, `precip_mm`, `wind_kph`, `rhum_pct`, `pres_hpa`, `wind_dir_deg`, `wind_gust_kph`, and `snow_mm` are no longer the target contract.
 
 ---
 

@@ -1,6 +1,6 @@
 # System Architecture and Data Flow (Final)
 
-This document captures the implemented architecture for the Bikeshare project: ingestion to inference, monitoring, the Business Dashboard (Step 9), and the Step 10 promotion and rollback flow. It complements `docs/ops_sla.md` and the runbook.
+This document captures the implemented architecture for the Bikeshare project: ingestion to inference, monitoring, the Business Dashboard (Step 9), and the Step 10 promotion and rollback flow. It also records the current warehouse boundary: Python ingestion lands raw data and `public.stg_*`, while dbt owns curated dimensions such as `analytics.dim_weather` and `analytics.dim_date`.
 
 > Region: `eu-west-3` • City: `paris` • Namespace: `Bikeshare/Model` • Endpoints: `bikeshare-staging`, `bikeshare-prod`
 
@@ -10,6 +10,7 @@ This document captures the implemented architecture for the Bikeshare project: i
 - [High-level Diagram](#high-level-diagram)
 - [Components](#components)
 - [Data Flow](#data-flow)
+- [Warehouse Boundary and Future Feature Flow](#warehouse-boundary-and-future-feature-flow)
 - [Business Dashboard (Step 9)](#business-dashboard-step-9)
 - [Metrics and Monitoring](#metrics-and-monitoring)
 - [IAM (Least Privilege)](#iam-least-privilege)
@@ -21,20 +22,21 @@ This document captures the implemented architecture for the Bikeshare project: i
 
 ## High-level Diagram
 
-```
+```text
 [Sources]
   ├─ GBFS (station info/status)
   ├─ Weather API
+  ├─ Holiday API
   └─ Labels (actual stock/dock events)
         |
         v
-[S3 Raw / Bronze]  --->  [ETL / Features (Batch)]  --->  [Training & Registry]
-        |                          |                              |
-        |                          v                              v
-        |                   [Features Offline]            [Model Artifacts]
-        |                          |                              |
-        v                          |                              |
-[Online Inference (SageMaker Endpoint: staging/prod)] <------------+
+[S3 Raw / Bronze]  --->  [Python Ingestion / Warehouse Staging]  --->  [dbt Curated / Future Features]  --->  [Training & Registry]
+        |                               |                                       |                                   |
+        |                               v                                       v                                   v
+        |                    [public.stg_* in Postgres]            [dim_weather, dim_date, future feat_*]   [Model Artifacts]
+        |                                                                                                             |
+        v                                                                                                             |
+[Online Inference (SageMaker Endpoint: staging/prod)] <----------------------------------------------------------------+
         |
         +--> Predictions (S3/Athena)
         +--> DataCapture (optional)
@@ -51,9 +53,11 @@ This document captures the implemented architecture for the Bikeshare project: i
 
 ## Components
 
-- **Ingestion and ETL**: fetch GBFS feeds and weather, write raw payloads to S3, normalize warehouse staging tables, and use dbt to build dimensional models.
+- **Ingestion and ETL**: fetch GBFS feeds, weather, and holidays; write raw payloads to S3; normalize warehouse staging tables; and use dbt to build curated dimensions.
+- **Warehouse staging**: Python ingestion lands `public.stg_station_information`, `public.stg_station_status`, `public.stg_weather_current`, `public.stg_weather_hourly`, and `public.stg_holidays`.
+- **dbt curated layer**: builds dimensions such as `analytics.dim_weather` and `analytics.dim_date`, and is the planned home for later intermediate and feature tables.
 - **Model Training**: builds model artifacts and registers versions (details in training docs).
-- **Online Inference**: SageMaker endpoint (`bikeshare-staging` or `bikeshare-prod`) serves predictions; batch driver emits one heartbeat per 10-min batch.
+- **Online Inference**: SageMaker endpoint (`bikeshare-staging` or `bikeshare-prod`) serves predictions; batch driver emits one heartbeat per 10-minute batch.
 - **Monitoring**: CloudWatch service metrics plus custom metrics under `Bikeshare/Model` with `{EndpointName, City}`.
 - **Dashboard**: Streamlit app reads Athena views and CloudWatch metrics to render business and system health.
 
@@ -61,13 +65,39 @@ This document captures the implemented architecture for the Bikeshare project: i
 
 ## Data Flow
 
-1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_raw`, and `holidays_raw` in S3.  
+1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_raw`, and `holidays_raw` land in S3.  
 2) **Warehouse staging**: Airflow normalizes payloads into `stg_station_information`, `stg_station_status`, `stg_weather_current`, `stg_weather_hourly`, and `stg_holidays`. Weather keeps current observations and only the next 60 minutes of hourly forecast rows.  
-3) **DBT transforms**: dbt builds curated dimensions such as `dim_weather` from staging tables. Holiday ingestion bootstraps and updates `dim_date` in the warehouse.  
-4) **Feature build**: feature jobs consume curated data for training and inference reference.  
+3) **DBT transforms**: dbt builds curated dimensions such as `dim_weather` and `dim_date` from staging tables. Holiday ingestion stops at `stg_holidays`; date logic belongs in dbt.  
+4) **Feature build**: the current repository still has Athena-based feature build and training paths, while the longer-term direction is to let dbt own curated and feature-facing warehouse logic.  
 5) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
 6) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), and cadence (`PredictionHeartbeat`) are published to CloudWatch.  
 7) **Dashboard**: queries the latest 2 hours of predictions and the last 24 hours of metrics to present the city map, top-N, model/system health, and freshness.
+
+---
+
+## Warehouse Boundary and Future Feature Flow
+
+Current warehouse ownership:
+
+- Python ingestion owns raw S3 landing and `public.stg_*`
+- dbt owns `analytics.dim_weather` and `analytics.dim_date`
+- future dbt `intermediate/` and `features/` models remain planned work, not implemented in this phase
+
+Weather contract direction:
+
+- future feature work should use `dim_weather`
+- the target weather feature columns are:
+  - `temperature_c`
+  - `humidity_pct`
+  - `wind_speed_ms`
+  - `current_precipitation_mm`
+  - `next_hour_precipitation_mm`
+  - `next_hour_precipitation_probability_pct`
+  - `rain_next_hour_flag`
+  - `weather_code`
+- legacy feature columns such as `temp_c`, `precip_mm`, `wind_kph`, `rhum_pct`, `pres_hpa`, `wind_dir_deg`, `wind_gust_kph`, and `snow_mm` are not the long-term contract
+
+This warehouse note does not replace the later MLOps stages below. It only clarifies the current warehouse truth source and the intended feature ownership boundary.
 
 ---
 
@@ -114,15 +144,15 @@ view_quality             = "v_quality"
 ### Caching and Performance
 
 - Cache AWS clients with `st.cache_resource` and data with `st.cache_data(ttl=60)`.
-- Use 5-min periods for `GetMetricData` to align with posting cadence and keep API calls low.
+- Use 5-minute periods for `GetMetricData` to align with posting cadence and keep API calls low.
 - Keep Athena windows small: predictions 2h, quality 24h; dashboard warm load under 3 seconds.
 
 ---
 
 ## Metrics and Monitoring
 
-- **Batch-level customs**: publish one `PredictionHeartbeat` per 10-min batch.
-- **Quality**: compute and post `PR-AUC-24h` and `F1-24h` on the same 10-min cadence.
+- **Batch-level customs**: publish one `PredictionHeartbeat` per 10-minute batch.
+- **Quality**: compute and post `PR-AUC-24h` and `F1-24h` on the same 10-minute cadence.
 - **Drift**: compute and post `PSI` hourly (warn 0.20, critical 0.30).
 - **Errors/Latency**: rely on SageMaker metrics for `ModelLatency`, `OverheadLatency`, `Invocation4XXErrors`, `Invocation5XXErrors`.
 - **Alarm catalog** lives in `docs/ops_sla.md` (prod names and thresholds).
@@ -144,7 +174,7 @@ view_quality             = "v_quality"
 
 ## Step 10: Prod Admission and Cutover
 
-**Admission gate (tools/check_gate.py)** checks the last 24 hours before promotion:
+**Admission gate (`tools/check_gate.py`)** checks the last 24 hours before promotion:
 - `PR-AUC-24h >= 0.70`, `F1-24h >= 0.55`
 - `ModelLatency p95 <= 200 ms`, `Invocation5XXErrors = 0`
 - `PredictionHeartbeat >= 144`
@@ -167,7 +197,7 @@ view_quality             = "v_quality"
 
 ## Performance and Cost Notes
 
-- Prefer 5-min periods and batch-level custom metrics to reduce CloudWatch charges.
+- Prefer 5-minute periods and batch-level custom metrics to reduce CloudWatch charges.
 - Apply S3 lifecycle to data capture, monitoring outputs, and Athena results.
 - Downsize or stop staging when prod is stable; keep prod instance at the smallest size that meets SLO.
 

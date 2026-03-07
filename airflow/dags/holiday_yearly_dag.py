@@ -61,9 +61,9 @@ with DAG(
     schedule="0 2 1 1 *",
     catchup=False,
     default_args=default_args,
-    tags=["holidays", "yearly", "dim_date"],
+    tags=["holidays", "yearly", "staging"],
 ):
     ingest = PythonOperator(
-        task_id="ingest_holidays_and_update_dim_date",
+        task_id="ingest_holidays_to_staging",
         python_callable=ingest_holidays_year_task,
     )

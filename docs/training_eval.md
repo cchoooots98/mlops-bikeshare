@@ -1,119 +1,57 @@
-# Training & Evaluation — Step 4
+# Training & Evaluation - Step 4
 
-## 0) Objectives & Deliverables
-- **Goal:** train a first binary classifier to predict **30-min stockout risk** (bikes or docks) per station.
-- **Deliverables (Step 4 “完成指标”):**
-  - **PR-AUC (validation) ≥ 0.70**.
-  - **Overfitting check**: |PR-AUC(train) − PR-AUC(valid)| < **0.10**.
-  - **Experiments traceable** in **MLflow** (local file mode is OK).
-  - **`model_card.md`** generated and complete (scenario, assumptions, risks, fairness).
+## Objectives
+- Train a first binary classifier to predict 30-minute stockout risk per station.
+- Keep experiments traceable in MLflow.
+- Maintain an architecture that can migrate cleanly to dbt-owned production feature tables.
 
----
+## Data and Labels
+- Target source table: `analytics.feat_station_snapshot_5min` in Postgres/dbt.
+- Current repository state: the Python training code still reads `features_offline` (Athena external). Migrating training to dbt-owned feature tables is planned but not implemented in this phase.
+- Feature set: defined centrally in `schema.py -> FEATURE_COLUMNS`.
+- Labels:
+  - `y_stockout_bikes_30`
+  - `y_stockout_docks_30`
+- Numeric targets:
+  - `target_bikes_t30`
+  - `target_docks_t30`
 
-## 1) Data & Labels
-- **Source table:** `features_offline` (Athena external), partitioned by **`city`** (string) and **`dt`** (UTC string `yyyy-MM-dd-HH-mm`).
-- **Feature set:** defined centrally in `schema.py → FEATURE_COLUMNS`. Enforced by `validate_feature_df(...)`.
-- **Labels (binary):**
-  - `y_stockout_bikes_30` (positive if bikes will stock out within 30 minutes).
-  - `y_stockout_docks_30` (positive if docks will stock out within 30 minutes).
-- **Targets (numeric, optional for analysis/calibration):**
-  - `target_bikes_t30`, `target_docks_t30`.
+## Direction of Travel
+- dbt is the long-term owner of production feature generation.
+- Python training will later become a consumer of dbt feature tables instead of an Athena-built offline table.
+- The long-term weather feature contract follows `dim_weather`, not the legacy Athena weather schema.
 
-> **Why schema import?** Keeping feature names in `schema.py` ensures **offline/online consistency** and avoids accidental leakage from future-looking columns.
+## Weather Feature Direction
+Target weather feature columns:
 
----
+- `temperature_c`
+- `humidity_pct`
+- `wind_speed_ms`
+- `current_precipitation_mm`
+- `next_hour_precipitation_mm`
+- `next_hour_precipitation_probability_pct`
+- `rain_next_hour_flag`
+- `weather_code`
 
-## 2) Temporal Split (Time Extrapolation)
-- **Principle:** train on earlier timestamps, validate on **later** timestamps (simulate “future”).
-- **Default:** last **20%** of timestamps → **validation**; preceding **60–80 min gap** to reduce leakage from rolling features.
-- **Example:**
-  - Train: **2025-08-18 → 2025-08-21**
-  - Gap: **60 minutes** (no samples used)
-  - Validate: **2025-08-22**
+Deprecated weather feature columns:
 
-**CLI knobs (in `training/train.py`):**
-- `--valid-ratio 0.2` (portion of latest timestamps for validation)
-- `--gap-minutes 60`
+- `temp_c`
+- `precip_mm`
+- `wind_kph`
+- `rhum_pct`
+- `pres_hpa`
+- `wind_dir_deg`
+- `wind_gust_kph`
+- `snow_mm`
 
----
+## Temporal Split
+- Train on earlier timestamps and validate on later timestamps.
+- Keep a gap window between train and validation slices to reduce leakage from rolling features.
 
-## 3) Class Imbalance Strategy
-- **Reality:** stockouts are **rare** (positive class ≪ negative).
-- **Mitigations used in Step 4:**
-  1) **Threshold tuning** on validation to **maximize F-β** (β=2 gives higher weight to recall).
-  2) **Primary metric = PR-AUC** (robust under imbalance).
-  3) Optional (when needed):
-     - **XGBoost:** set `scale_pos_weight = (#neg / #pos)` or tune.
-     - **LightGBM:** `class_weight="balanced"` or `is_unbalance=true`.
+## Metrics
+- Primary metric: PR-AUC on validation.
+- Overfitting check: gap between train PR-AUC and validation PR-AUC.
+- Threshold selection: optimize on validation, not on training data.
 
-> We log PR curve, precision/recall, best F-β, and the chosen **decision threshold**.
-
----
-
-## 4) Models & Baseline Hyperparameters
-- **Algorithms:** **XGBoost** (`--model-type xgboost`) or **LightGBM** (`--model-type lightgbm`).
-- **Baselines (conservative):**
-  - XGBoost: `n_estimators=500`, `max_depth=6`, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`, `tree_method="hist"`.
-  - LightGBM: `n_estimators=800`, `num_leaves=63`, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`.
-- **Reproducibility:** fixed `--random-state 42`.
-- **Tuning:** not required for Step 4; add random search/Optuna later.
-
----
-
-## 5) Metrics & Quality Gates
-- **Primary metric:** **PR-AUC (validation)** — **target ≥ 0.70**.
-- **Overfitting check:** |PR-AUC(train) − PR-AUC(valid)| **< 0.10** (we compute and log `overfit_gap`).
-- **Threshold selection:** maximize **F-β (β=2)** on **validation**; we log:
-  - `best_threshold`, `best_precision`, `best_recall`, `best_fbeta`.
-- **Secondary (optional):**
-  - ROC-AUC, calibration checks, confusion matrices at the chosen threshold.
-  - If you also track an F1 target, document it as **nice-to-have**, not a Step-4 gate.
-
----
-
-## 6) Artifacts (logged to MLflow)
-- **Curves:** `val_pr_curve.png`, `train_pr_curve.png`.
-- **Confusion matrices:** `val_confusion_matrix.png`, `train_confusion_matrix.png` (at best threshold).
-- **Feature importance:** `feature_importance.csv` + `feature_importance.png` (top-25).
-- **Model object:** logged via **MLflow autolog** (and `mlflow.sklearn.log_model`).
-- **Run summary:** `eval_summary.json` (used by `eval.py` to render the model card).
-- **Model card:** `model_card.md` (generated by `training/eval.py`).
-
----
-
-## 7) Experiment Tracking (Local, Simple & Reproducible)
-- **Tracking:** **MLflow autolog** to local folder **`./mlruns/`** (no server required).
-- **How to view UI (optional):**
-  - Start UI: `mlflow ui --port 5000 --host 127.0.0.1`
-  - Open: `http://127.0.0.1:5000`
-- **Run metadata:** each run stores
-  - city, date window, feature version (implicitly via code/schema), model type, hyperparameters, metrics, artifacts, and **run_id**.
-- **Experiment name:** `bikeshare-step4`.
-
-> You can also point MLflow to a remote server later. For Step 4, **local file mode** is recommended.
-
----
-
-## 8) How to Run (Windows PowerShell)
-
-**Train (example window; adjust to your actual partitions):**
-```powershell
-# Activate virtual env first
-. .\.venv\Scripts\Activate.ps1
-
-# Run training (XGBoost + bikes label; using src/ package layout)
-python -m src.training.train `
-  --city paris `
-  --start "2025-08-18 00:00" `
-  --end   "2025-08-25 23:55" `
-  --database mlops_bikeshare `
-  --workgroup primary `
-  --athena-output "s3://mlops-bikeshare-387706002632-eu-west-3/athena/results/" `
-  --region eu-west-3 `
-  --label y_stockout_bikes_30 `
-  --model-type xgboost `
-  --valid-ratio 0.2 `
-  --gap-minutes 60 `
-  --beta 2.0 `
-  --experiment bikeshare-step4
-  
+## Current Execution Note
+The current code path and CLI examples still reflect the existing Athena-based training implementation. Those commands remain valid until the later feature-layer migration is implemented.

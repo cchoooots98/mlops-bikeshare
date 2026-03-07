@@ -1,15 +1,27 @@
+%% Current implemented: stg_* + dim_weather + dim_date
+%% Planned next: dim_station, dim_time, fct_station_status, intermediate, features
 erDiagram
-    DIM_STATION ||--o{ FACT_STATION_STATUS : station_id
-    DIM_DATE ||--o{ FACT_STATION_STATUS : date_id
-    DIM_TIME ||--o{ FACT_STATION_STATUS : time_id
-    DIM_WEATHER ||--o{ FACT_STATION_STATUS : weather_id
-
-    STG_STATION_INFORMATION }o--|| DIM_STATION : upsert
-    STG_STATION_STATUS }o--|| DIM_STATION : references
-    STG_HOLIDAYS }o--|| DIM_DATE : updates
-
+    STG_STATION_INFORMATION }o--|| DIM_STATION : dbt_builds
+    STG_STATION_STATUS }o--|| FCT_STATION_STATUS : dbt_builds
+    STG_HOLIDAYS }o--|| DIM_DATE : dbt_builds
     STG_WEATHER_CURRENT ||--o{ DIM_WEATHER : current_snapshot
     STG_WEATHER_HOURLY ||--o{ DIM_WEATHER : next_hour_summary
+
+    DIM_STATION ||--o{ FCT_STATION_STATUS : station_id
+    DIM_DATE ||--o{ FCT_STATION_STATUS : date_id
+    DIM_TIME ||--o{ FCT_STATION_STATUS : time_id
+    DIM_WEATHER ||--o{ FCT_STATION_STATUS : weather_id
+
+    DIM_STATION ||--o{ INT_STATION_NEIGHBORS : source_station
+    DIM_STATION ||--o{ INT_STATION_STATUS_ENRICHED : station_lookup
+    DIM_DATE ||--o{ INT_STATION_STATUS_ENRICHED : date_lookup
+    DIM_TIME ||--o{ INT_STATION_STATUS_ENRICHED : time_lookup
+    DIM_WEATHER ||--o{ INT_STATION_STATUS_ENRICHED : weather_lookup
+    FCT_STATION_STATUS ||--o{ INT_STATION_STATUS_ENRICHED : enriches
+
+    INT_STATION_NEIGHBORS ||--o{ FEAT_STATION_SNAPSHOT_5MIN : neighbor_features
+    INT_STATION_STATUS_ENRICHED ||--o{ FEAT_STATION_SNAPSHOT_5MIN : base_features
+    FEAT_STATION_SNAPSHOT_5MIN ||--o{ FEAT_STATION_SNAPSHOT_LATEST : latest_view
 
     DIM_STATION {
         text station_id PK
@@ -35,7 +47,6 @@ erDiagram
     }
 
     DIM_WEATHER {
-        bigint weather_id PK
         text weather_key
         text city
         timestamptz observed_at
@@ -52,13 +63,44 @@ erDiagram
         text weather_description
     }
 
-    FACT_STATION_STATUS {
-        bigint station_status_id PK
+    FCT_STATION_STATUS {
         timestamptz observed_at
         text station_id FK
         int date_id FK
         int time_id FK
-        bigint weather_id FK
+        text weather_key FK
         int num_bikes_available
         int num_docks_available
+    }
+
+    INT_STATION_NEIGHBORS {
+        text src_station_id
+        text nbr_station_id
+        float weight
+    }
+
+    INT_STATION_STATUS_ENRICHED {
+        text city
+        text dt
+        text station_id
+    }
+
+    FEAT_STATION_SNAPSHOT_5MIN {
+        text city
+        text dt
+        text station_id
+        float temperature_c
+        float humidity_pct
+        float wind_speed_ms
+        float current_precipitation_mm
+        float next_hour_precipitation_mm
+        float next_hour_precipitation_probability_pct
+        boolean rain_next_hour_flag
+        int weather_code
+    }
+
+    FEAT_STATION_SNAPSHOT_LATEST {
+        text city
+        text dt
+        text station_id
     }

@@ -127,27 +127,6 @@ def ensure_stg_holidays(conn_uri: str) -> None:
         engine.dispose()
 
 
-def ensure_dim_date_table(conn_uri: str) -> None:
-    ddl = """
-    CREATE TABLE IF NOT EXISTS dim_date (
-      date_id         INTEGER PRIMARY KEY,
-      date            DATE UNIQUE,
-      day_of_week     SMALLINT,
-      month           SMALLINT,
-      year            SMALLINT,
-      is_weekend      BOOLEAN,
-      is_holiday      BOOLEAN,
-      holiday_name    TEXT
-    );
-    """
-    engine = create_engine(conn_uri, pool_pre_ping=True)
-    try:
-        with engine.begin() as conn:
-            conn.execute(text(ddl))
-    finally:
-        engine.dispose()
-
-
 def load_holidays_to_staging(conn_uri: str, *, df: pd.DataFrame, year: int, country_code: str = "FR") -> int:
     year_start = date(year, 1, 1)
     year_end = date(year, 12, 31)
@@ -170,83 +149,6 @@ def load_holidays_to_staging(conn_uri: str, *, df: pd.DataFrame, year: int, coun
     return len(df)
 
 
-def ensure_dim_date_columns(conn_uri: str) -> None:
-    stmts = [
-        "ALTER TABLE dim_date ADD COLUMN IF NOT EXISTS is_weekend BOOLEAN;",
-        "ALTER TABLE dim_date ADD COLUMN IF NOT EXISTS is_holiday BOOLEAN;",
-        "ALTER TABLE dim_date ADD COLUMN IF NOT EXISTS holiday_name TEXT;",
-    ]
-    engine = create_engine(conn_uri, pool_pre_ping=True)
-    try:
-        with engine.begin() as conn:
-            for stmt in stmts:
-                conn.execute(text(stmt))
-    finally:
-        engine.dispose()
-
-
-def upsert_dim_date_for_year(conn_uri: str, *, year: int, country_code: str = "FR") -> None:
-    year_start = date(year, 1, 1)
-    year_end = date(year, 12, 31)
-    engine = create_engine(conn_uri, pool_pre_ping=True)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO dim_date (date_id, date, day_of_week, month, year, is_weekend, is_holiday, holiday_name)
-                    SELECT
-                      TO_CHAR(d::date, 'YYYYMMDD')::int AS date_id,
-                      d::date AS date,
-                      EXTRACT(ISODOW FROM d)::smallint AS day_of_week,
-                      EXTRACT(MONTH FROM d)::smallint AS month,
-                      EXTRACT(YEAR FROM d)::smallint AS year,
-                      (EXTRACT(ISODOW FROM d) IN (6, 7)) AS is_weekend,
-                      FALSE AS is_holiday,
-                      NULL::text AS holiday_name
-                    FROM generate_series(:year_start, :year_end, interval '1 day') d
-                    ON CONFLICT (date) DO UPDATE
-                    SET
-                      day_of_week = EXCLUDED.day_of_week,
-                      month = EXCLUDED.month,
-                      year = EXCLUDED.year,
-                      is_weekend = EXCLUDED.is_weekend
-                    """
-                ),
-                {"year_start": year_start, "year_end": year_end},
-            )
-
-            conn.execute(
-                text(
-                    """
-                    UPDATE dim_date
-                    SET is_holiday = FALSE,
-                        holiday_name = NULL
-                    WHERE date BETWEEN :year_start AND :year_end
-                    """
-                ),
-                {"year_start": year_start, "year_end": year_end},
-            )
-
-            conn.execute(
-                text(
-                    """
-                    UPDATE dim_date dd
-                    SET
-                      is_holiday = sh.is_holiday,
-                      holiday_name = sh.holiday_name
-                    FROM stg_holidays sh
-                    WHERE dd.date = sh.holiday_date
-                      AND sh.country_code = :country_code
-                      AND sh.holiday_date BETWEEN :year_start AND :year_end
-                    """
-                ),
-                {"country_code": country_code, "year_start": year_start, "year_end": year_end},
-            )
-    finally:
-        engine.dispose()
-
-
 def ingest_holidays_year(
     conn_uri: str,
     *,
@@ -257,8 +159,6 @@ def ingest_holidays_year(
     raw_bucket: str | None = None,
 ) -> dict:
     ensure_stg_holidays(conn_uri)
-    ensure_dim_date_table(conn_uri)
-    ensure_dim_date_columns(conn_uri)
     fetched_at_utc = datetime.now(timezone.utc)
     payload = fetch_holidays(year=year, timeout_sec=timeout_sec)
     raw_result = None
@@ -273,7 +173,6 @@ def ingest_holidays_year(
         )
     df = holidays_dataframe(payload, year=year, run_id=run_id, country_code=country_code)
     rows_written = load_holidays_to_staging(conn_uri, df=df, year=year, country_code=country_code)
-    upsert_dim_date_for_year(conn_uri, year=year, country_code=country_code)
     result = {
         "year": year,
         "country_code": country_code,
@@ -286,7 +185,7 @@ def ingest_holidays_year(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ingest French holidays and update dim_date")
+    parser = argparse.ArgumentParser(description="Ingest French holidays to raw S3 and stg_holidays")
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--conn-uri", default=os.getenv("DW_CONN_URI", ""))
     parser.add_argument("--country-code", default=os.getenv("HOLIDAY_COUNTRY_CODE", "FR"))
