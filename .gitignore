@@ -21,7 +21,6 @@ __pycache__/
 
 # Vendored/accidental libs
 src/package/
-docs/plan_detail/
 
 # OS / IDE
 .DS_Store
@@ -31,3 +30,10 @@ docs/plan_detail/
 *.log
 *.tmp
 .streamlit/
+
+# dbt
+dbt/.user.yml
+dbt/bikeshare_dbt/target/
+
+# local planning attachments
+docs/plan_detail/
