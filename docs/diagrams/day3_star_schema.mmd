@@ -24,8 +24,10 @@ erDiagram
     FEAT_STATION_SNAPSHOT_5MIN ||--o{ FEAT_STATION_SNAPSHOT_LATEST : latest_view
 
     DIM_STATION {
-        text station_id PK
-        text name
+        text station_key PK
+        text city
+        text station_id
+        text station_name
         float latitude
         float longitude
         int capacity
@@ -68,8 +70,10 @@ erDiagram
     }
 
     FCT_STATION_STATUS {
+        text city
         timestamptz observed_at
-        text station_id FK
+        text station_key FK
+        text station_id
         int date_id FK
         int time_id FK
         text weather_key FK

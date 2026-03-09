@@ -155,7 +155,12 @@ def _series_from_candidates(df: pd.DataFrame, candidates: list[str], default=Non
     return result
 
 
-def station_information_dataframe(payload: dict, run_id: str, ingested_at: pd.Timestamp | None = None) -> pd.DataFrame:
+def station_information_dataframe(
+    payload: dict,
+    run_id: str,
+    city: str,
+    ingested_at: pd.Timestamp | None = None,
+) -> pd.DataFrame:
     stations = payload.get("data", {}).get("stations", [])
     if not stations:
         raise ValueError("station_information has no rows")
@@ -168,6 +173,7 @@ def station_information_dataframe(payload: dict, run_id: str, ingested_at: pd.Ti
             "run_id": run_id,
             "ingested_at": ingested_at,
             "source_last_updated": _last_updated_epoch(payload),
+            "city": city,
             "station_id": _series_from_candidates(df, ["station_id"]).astype(str),
             "name": _series_from_candidates(df, ["name"]),
             "lat": pd.to_numeric(_series_from_candidates(df, ["lat"]), errors="coerce"),
@@ -177,7 +183,12 @@ def station_information_dataframe(payload: dict, run_id: str, ingested_at: pd.Ti
     )
 
 
-def station_status_dataframe(payload: dict, run_id: str, ingested_at: pd.Timestamp | None = None) -> pd.DataFrame:
+def station_status_dataframe(
+    payload: dict,
+    run_id: str,
+    city: str,
+    ingested_at: pd.Timestamp | None = None,
+) -> pd.DataFrame:
     stations = payload.get("data", {}).get("stations", [])
     if not stations:
         raise ValueError("station_status has no rows")
@@ -202,6 +213,7 @@ def station_status_dataframe(payload: dict, run_id: str, ingested_at: pd.Timesta
             "run_id": run_id,
             "ingested_at": ingested_at,
             "source_last_updated": _last_updated_epoch(payload),
+            "city": city,
             "station_id": _series_from_candidates(df, ["station_id"]).astype(str),
             "num_bikes_available": bikes,
             "num_docks_available": docks,
@@ -218,6 +230,7 @@ def ensure_staging_tables(conn_uri: str) -> None:
         run_id TEXT NOT NULL,
         ingested_at TIMESTAMPTZ NOT NULL,
         source_last_updated BIGINT,
+        city TEXT NOT NULL,
         station_id TEXT NOT NULL,
         name TEXT,
         lat DOUBLE PRECISION,
@@ -232,6 +245,7 @@ def ensure_staging_tables(conn_uri: str) -> None:
         run_id TEXT NOT NULL,
         ingested_at TIMESTAMPTZ NOT NULL,
         source_last_updated BIGINT,
+        city TEXT NOT NULL,
         station_id TEXT NOT NULL,
         num_bikes_available INTEGER,
         num_docks_available INTEGER,
@@ -248,6 +262,24 @@ def ensure_staging_tables(conn_uri: str) -> None:
         with engine.begin() as conn:
             conn.execute(text(create_info_sql))
             conn.execute(text(create_status_sql))
+            conn.execute(text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS city TEXT;"))
+            conn.execute(text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS city TEXT;"))
+            conn.execute(text("UPDATE stg_station_information SET city = :city WHERE city IS NULL;"), {"city": CITY})
+            conn.execute(text("UPDATE stg_station_status SET city = :city WHERE city IS NULL;"), {"city": CITY})
+            conn.execute(text("ALTER TABLE stg_station_information ALTER COLUMN city SET NOT NULL;"))
+            conn.execute(text("ALTER TABLE stg_station_status ALTER COLUMN city SET NOT NULL;"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_stg_station_information_city_station "
+                    "ON stg_station_information (city, station_id);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_stg_station_status_city_station "
+                    "ON stg_station_status (city, station_id);"
+                )
+            )
     finally:
         engine.dispose()
 
@@ -275,7 +307,7 @@ def ingest_station_information_to_staging(
             upsert=raw_upsert,
             s3_client=s3_client,
         )
-    out = station_information_dataframe(payload, run_id=run_id)
+    out = station_information_dataframe(payload, run_id=run_id, city=raw_city)
 
     engine = create_engine(conn_uri, pool_pre_ping=True)
     try:
@@ -308,7 +340,7 @@ def ingest_station_status_to_staging(
             upsert=raw_upsert,
             s3_client=s3_client,
         )
-    out = station_status_dataframe(payload, run_id=run_id)
+    out = station_status_dataframe(payload, run_id=run_id, city=raw_city)
 
     engine = create_engine(conn_uri, pool_pre_ping=True)
     try:

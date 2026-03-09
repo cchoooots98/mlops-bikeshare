@@ -19,6 +19,7 @@ This document defines the dbt-first warehouse boundary for GBFS, weather, and ho
 - `stg_holidays`
 
 ### dbt Curated in `analytics`
+- `dim_station`
 - `dim_weather`
 - `dim_date`
 
@@ -28,7 +29,6 @@ This document defines the dbt-first warehouse boundary for GBFS, weather, and ho
 These layers are part of the target architecture but are not implemented in this phase.
 
 ### Curated / Fact
-- `dim_station`
 - `dim_time`
 - `fct_station_status`
 
@@ -41,6 +41,46 @@ These layers are part of the target architecture but are not implemented in this
 ### Features
 - `feat_station_snapshot_5min`
 - `feat_station_snapshot_latest`
+
+## Station Model Contract
+Station data should retain `city` from raw landing through staging, dimensions, and future facts. In production terms, `station_id` by itself is not a safe long-term business key once the warehouse may hold more than one city.
+
+### `stg_station_information`
+- `run_id`
+- `ingested_at`
+- `source_last_updated`
+- `city`
+- `station_id`
+- `station_name`
+- `latitude`
+- `longitude`
+- `capacity`
+
+### `stg_station_status`
+- `run_id`
+- `ingested_at`
+- `source_last_updated`
+- `city`
+- `station_id`
+- `last_reported_at`
+- `num_bikes_available`
+- `num_docks_available`
+- `is_renting`
+- `is_returning`
+
+### `dim_station`
+- `station_key`
+- `city`
+- `station_id`
+- `station_name`
+- `latitude`
+- `longitude`
+- `capacity`
+
+### Future `fct_station_status`
+- should retain `city`
+- should join station via `station_key`
+- should keep uniqueness scoped by `city + observed_at + station_id`
 
 ## Weather Model Contract
 `dim_weather` is the single source of truth for weather features. It is built from `stg_weather_current` and `stg_weather_hourly`.

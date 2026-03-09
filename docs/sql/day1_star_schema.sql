@@ -6,11 +6,14 @@ DROP TABLE IF EXISTS dim_date CASCADE;
 DROP TABLE IF EXISTS dim_station CASCADE;
 
 CREATE TABLE IF NOT EXISTS dim_station (
-  station_id      TEXT PRIMARY KEY,
-  name            TEXT,
+  station_key     TEXT PRIMARY KEY,
+  city            TEXT NOT NULL,
+  station_id      TEXT NOT NULL,
+  station_name    TEXT,
   latitude        DOUBLE PRECISION,
   longitude       DOUBLE PRECISION,
-  capacity        INTEGER
+  capacity        INTEGER,
+  UNIQUE (city, station_id)
 );
 
 CREATE TABLE IF NOT EXISTS  dim_date (
@@ -57,8 +60,10 @@ CREATE TABLE IF NOT EXISTS dim_weather (
 
 CREATE TABLE IF NOT EXISTS fact_station_status (
   station_status_id    BIGSERIAL PRIMARY KEY,
+  city                 TEXT NOT NULL,
   observed_at          TIMESTAMPTZ NOT NULL,
-  station_id           TEXT NOT NULL REFERENCES dim_station(station_id),
+  station_key          TEXT NOT NULL REFERENCES dim_station(station_key),
+  station_id           TEXT NOT NULL,
   date_id              INTEGER REFERENCES dim_date(date_id),
   time_id              SMALLINT REFERENCES dim_time(time_id),
   weather_id           BIGINT REFERENCES dim_weather(weather_id),
@@ -67,11 +72,11 @@ CREATE TABLE IF NOT EXISTS fact_station_status (
   is_renting           SMALLINT,
   is_returning         SMALLINT,
   bike_shortage_30m    SMALLINT,
-  UNIQUE (observed_at, station_id)
+  UNIQUE (city, observed_at, station_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fact_station_status_obs
   ON fact_station_status (observed_at);
 
 CREATE INDEX IF NOT EXISTS idx_fact_station_status_station_obs
-  ON fact_station_status (station_id, observed_at);
+  ON fact_station_status (city, station_id, observed_at);

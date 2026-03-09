@@ -60,8 +60,8 @@ This document captures the implemented architecture for the Bikeshare project: i
 ## Components
 
 - **Ingestion and ETL**: fetch GBFS feeds, weather, and holidays; write raw payloads to S3; normalize warehouse staging tables; and use dbt to build curated dimensions.
-- **Warehouse staging**: Python ingestion lands `public.stg_station_information`, `public.stg_station_status`, `public.stg_weather_current`, `public.stg_weather_hourly`, and `public.stg_holidays`.
-- **dbt curated layer**: builds dimensions such as `analytics.dim_weather` and `analytics.dim_date`, and is the planned home for later intermediate and feature tables.
+- **Warehouse staging**: Python ingestion lands `public.stg_station_information`, `public.stg_station_status`, `public.stg_weather_current`, `public.stg_weather_hourly`, and `public.stg_holidays`. Station staging now retains `city` alongside `station_id` so the warehouse contract stays multi-city safe.
+- **dbt curated layer**: builds dimensions such as `analytics.dim_station`, `analytics.dim_weather`, and `analytics.dim_date`, and is the planned home for later intermediate and feature tables.
 - **Model Training**: builds model artifacts and registers versions (details in training docs).
 - **Online Inference**: SageMaker endpoint (`bikeshare-staging` or `bikeshare-prod`) serves predictions; batch driver emits one heartbeat per 10-minute batch.
 - **Monitoring**: CloudWatch service metrics plus custom metrics under `Bikeshare/Model` with `{EndpointName, City}`.
@@ -72,8 +72,8 @@ This document captures the implemented architecture for the Bikeshare project: i
 ## Data Flow
 
 1) **Raw ingestion**: `station_information_raw`, `station_status_raw`, `weather_raw`, and `holidays_raw` land in S3.  
-2) **Warehouse staging**: Airflow normalizes payloads into `stg_station_information`, `stg_station_status`, `stg_weather_current`, `stg_weather_hourly`, and `stg_holidays`. Weather keeps current observations and only the next 60 minutes of hourly forecast rows.  
-3) **DBT transforms**: dbt builds curated dimensions such as `dim_weather` and `dim_date` from staging tables. Holiday ingestion stops at `stg_holidays`; date logic belongs in dbt.  
+2) **Warehouse staging**: Airflow normalizes payloads into `stg_station_information`, `stg_station_status`, `stg_weather_current`, `stg_weather_hourly`, and `stg_holidays`. Both station tables retain `city`; weather keeps current observations and only the next 60 minutes of hourly forecast rows.  
+3) **DBT transforms**: dbt builds curated dimensions such as `dim_station`, `dim_weather`, and `dim_date` from staging tables. Holiday ingestion stops at `stg_holidays`; date logic belongs in dbt.  
 4) **Feature build**: the current repository still has Athena-based feature build and training paths, while the longer-term direction is to let dbt own curated and feature-facing warehouse logic.  
 5) **Inference**: the online predictor writes a window of predictions to `inference` (including horizon minutes and probabilities).  
 6) **Monitoring**: quality metrics (`PR-AUC-24h`, `F1-24h`), drift (`PSI`), and cadence (`PredictionHeartbeat`) are published to CloudWatch.  
@@ -86,8 +86,15 @@ This document captures the implemented architecture for the Bikeshare project: i
 Current warehouse ownership:
 
 - Python ingestion owns raw S3 landing and `public.stg_*`
-- dbt owns `analytics.dim_weather` and `analytics.dim_date`
+- dbt owns `analytics.dim_station`, `analytics.dim_weather`, and `analytics.dim_date`
 - future dbt `intermediate/` and `features/` models remain planned work, not implemented in this phase
+
+Station contract direction:
+
+- station staging, dimensions, and future facts should all retain `city`
+- `station_id` alone is not treated as a globally safe warehouse key
+- `dim_station` should use `city + station_id` as its natural grain, exposed as `station_key`
+- future `fct_station_status` should also carry `city` so fact uniqueness and joins remain scoped correctly
 
 Weather contract direction:
 

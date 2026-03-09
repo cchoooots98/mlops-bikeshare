@@ -56,6 +56,33 @@
   - future curated, intermediate, or feature tables
 
 ## Warehouse Staging Contract
+### `stg_station_information`
+- grain: one row per `city + run_id + station_id`
+- columns include:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+  - `city`
+  - `station_id`
+  - `name`
+  - `lat`
+  - `lon`
+  - `capacity`
+
+### `stg_station_status`
+- grain: one row per `city + run_id + station_id`
+- columns include:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+  - `city`
+  - `station_id`
+  - `last_reported_at`
+  - `num_bikes_available`
+  - `num_docks_available`
+  - `is_renting`
+  - `is_returning`
+
 ### `stg_weather_current`
 - grain: one row per `city + snapshot_bucket_at`
 - columns include:
@@ -95,6 +122,18 @@
   - `holiday_name`
 
 ## Curated Warehouse Contract
+### `dim_station`
+- dbt owns the latest station dimension snapshot
+- grain: one row per `city + station_id`
+- columns include:
+  - `station_key`
+  - `city`
+  - `station_id`
+  - `station_name`
+  - `latitude`
+  - `longitude`
+  - `capacity`
+
 ### `dim_weather`
 - dbt owns weather summarization and builds `dim_weather`
 - source of truth for the current warehouse weather contract
