@@ -1,3 +1,7 @@
+{{ config(
+    materialized='view'
+) }}
+
 with src as (
     select * from {{ source('raw_staging', 'stg_weather_hourly') }}
 )

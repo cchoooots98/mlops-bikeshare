@@ -1,3 +1,7 @@
+{{ config(
+    materialized='table'
+) }}
+
 with ranked_station_info as (
     select
         city,

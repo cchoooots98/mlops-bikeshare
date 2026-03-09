@@ -1,3 +1,7 @@
+{{ config(
+    materialized='view'
+) }}
+
 with src as (
     select * from {{ source('raw_staging', 'stg_holidays') }}
 )
@@ -11,4 +15,3 @@ select
     holiday_name::text as holiday_name,
     concat(country_code::text, '|', holiday_date::text) as holiday_pk
 from src
-

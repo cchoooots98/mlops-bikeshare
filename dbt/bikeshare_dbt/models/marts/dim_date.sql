@@ -1,3 +1,7 @@
+{{ config(
+    materialized='table'
+) }}
+
 with holiday_dates as (
     select
         holiday_date,
