@@ -1,6 +1,7 @@
 {{ config(
     materialized='incremental',
-    unique_key='weather_key'
+    unique_key='weather_key',
+    on_schema_change='sync_all_columns'
 ) }}
 
 with current_weather as (
@@ -10,41 +11,40 @@ with current_weather as (
     where observed_at_utc > (select coalesce(max(observed_at), '1900-01-01'::timestamptz) from {{ this }})
     {% endif %}
 ),
-hourly_candidates as (
+hourly_merged as (
     select
+        c.weather_current_pk,
         c.city,
+        c.run_id,
         c.snapshot_bucket_at_utc,
         c.observed_at_utc,
-        h.forecast_at_utc,
-        h.precipitation_mm,
-        h.precipitation_probability_pct,
-        row_number() over (
-            partition by c.city, c.snapshot_bucket_at_utc
-            order by h.forecast_at_utc
-        ) as rn
+        max(h.forecast_at_utc) as hourly_forecast_at,
+        (array_agg(h.temperature_c order by h.forecast_at_utc desc)
+            filter (where h.temperature_c is not null))[1] as hourly_temperature_c,
+        (array_agg(h.humidity_pct order by h.forecast_at_utc desc)
+            filter (where h.humidity_pct is not null))[1] as hourly_humidity_pct,
+        (array_agg(h.wind_speed_ms order by h.forecast_at_utc desc)
+            filter (where h.wind_speed_ms is not null))[1] as hourly_wind_speed_ms,
+        (array_agg(h.precipitation_mm order by h.forecast_at_utc desc)
+            filter (where h.precipitation_mm is not null))[1] as hourly_precipitation_mm,
+        (array_agg(h.precipitation_probability_pct order by h.forecast_at_utc desc)
+            filter (where h.precipitation_probability_pct is not null))[1] as hourly_precipitation_probability_pct,
+        (array_agg(h.weather_code order by h.forecast_at_utc desc)
+            filter (where h.weather_code is not null))[1] as hourly_weather_code,
+        (array_agg(h.weather_main order by h.forecast_at_utc desc)
+            filter (where h.weather_main is not null))[1] as hourly_weather_main
     from current_weather c
     left join {{ ref('stg_weather_hourly') }} h
         on c.city = h.city
+       and c.run_id = h.run_id
        and c.snapshot_bucket_at_utc = h.snapshot_bucket_at_utc
-       and h.forecast_at_utc > c.observed_at_utc
-       and h.forecast_at_utc <= c.observed_at_utc + interval '1 hour'
-),
-hourly_summary as (
-    select
-        city,
-        snapshot_bucket_at_utc,
-        sum(coalesce(precipitation_mm, 0.0)) as next_hour_precipitation_mm,
-        max(case when rn = 1 then precipitation_probability_pct end) as next_hour_precipitation_probability_pct
-    from hourly_candidates
-    group by city, snapshot_bucket_at_utc
-),
-earliest_forecast as (
-    select
-        city,
-        snapshot_bucket_at_utc,
-        forecast_at_utc as next_hour_forecast_at_utc
-    from hourly_candidates
-    where rn = 1
+       and c.observed_at_utc = h.observed_at_utc
+    group by
+        c.weather_current_pk,
+        c.city,
+        c.run_id,
+        c.snapshot_bucket_at_utc,
+        c.observed_at_utc
 )
 select
     concat(
@@ -57,25 +57,20 @@ select
     c.temperature_c,
     c.humidity_pct,
     c.wind_speed_ms,
-    c.precipitation_mm as current_precipitation_mm,
-    coalesce(s.next_hour_precipitation_mm, 0.0) as next_hour_precipitation_mm,
-    s.next_hour_precipitation_probability_pct,
-    case
-        when coalesce(s.next_hour_precipitation_mm, 0.0) > 0
-          or coalesce(s.next_hour_precipitation_probability_pct, 0.0) >= 50
-        then true
-        else false
-    end as rain_next_hour_flag,
-    e.next_hour_forecast_at_utc as next_hour_valid_at,
+    c.precipitation_mm,
     c.weather_code,
     c.weather_main,
     c.weather_description,
+    h.hourly_forecast_at,
+    h.hourly_temperature_c,
+    h.hourly_humidity_pct,
+    h.hourly_wind_speed_ms,
+    h.hourly_precipitation_mm,
+    h.hourly_precipitation_probability_pct,
+    h.hourly_weather_code,
+    h.hourly_weather_main,
     c.source,
     c.snapshot_bucket_at_utc
 from current_weather c
-left join hourly_summary s
-    on c.city = s.city
-   and c.snapshot_bucket_at_utc = s.snapshot_bucket_at_utc
-left join earliest_forecast e
-    on c.city = e.city
-   and c.snapshot_bucket_at_utc = e.snapshot_bucket_at_utc
+left join hourly_merged h
+    on c.weather_current_pk = h.weather_current_pk

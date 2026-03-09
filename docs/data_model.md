@@ -44,6 +44,7 @@ These layers are part of the target architecture but are not implemented in this
 
 ## Weather Model Contract
 `dim_weather` is the single source of truth for weather features. It is built from `stg_weather_current` and `stg_weather_hourly`.
+For each current-weather row, dbt joins hourly rows from the same `city + run_id + snapshot_bucket_at`, takes the latest `forecast_at` as the reference hourly row, and backfills null hourly fields from earlier `forecast_at` rows in that same ingest bucket.
 
 ### `stg_weather_current`
 - `run_id`
@@ -87,28 +88,35 @@ These layers are part of the target architecture but are not implemented in this
 - `temperature_c`
 - `humidity_pct`
 - `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
-- `next_hour_valid_at`
+- `precipitation_mm`
 - `weather_code`
 - `weather_main`
 - `weather_description`
+- `hourly_forecast_at`
+- `hourly_temperature_c`
+- `hourly_humidity_pct`
+- `hourly_wind_speed_ms`
+- `hourly_precipitation_mm`
+- `hourly_precipitation_probability_pct`
+- `hourly_weather_code`
+- `hourly_weather_main`
 - `source`
 - `snapshot_bucket_at_utc`
 
 ## Weather Feature Direction
-The planned dbt feature layer will consume only the following weather feature columns:
+The planned dbt feature layer will consume the following weather columns from `dim_weather`:
 
 - `temperature_c`
 - `humidity_pct`
 - `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
+- `precipitation_mm`
 - `weather_code`
+- `hourly_temperature_c`
+- `hourly_humidity_pct`
+- `hourly_wind_speed_ms`
+- `hourly_precipitation_mm`
+- `hourly_precipitation_probability_pct`
+- `hourly_weather_code`
 
 The following legacy fields are no longer part of the target feature contract:
 

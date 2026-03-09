@@ -114,16 +114,12 @@ The warehouse direction is now dbt-first:
 - dbt owns curated dimensions such as `dim_weather` and `dim_date`
 - dbt `intermediate/` and `features/` layers are the planned home for future production feature engineering
 
-Weather feature design now aligns to `dim_weather`. The target production weather feature contract keeps:
+Weather feature design now aligns to `dim_weather`. The curated weather contract keeps current-observation fields plus one merged hourly forecast row per ingest bucket:
 
-- `temperature_c`
-- `humidity_pct`
-- `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
-- `weather_code`
+- current fields: `temperature_c`, `humidity_pct`, `wind_speed_ms`, `precipitation_mm`, `weather_code`, `weather_main`
+- merged hourly fields: `hourly_temperature_c`, `hourly_humidity_pct`, `hourly_wind_speed_ms`, `hourly_precipitation_mm`, `hourly_precipitation_probability_pct`, `hourly_weather_code`, `hourly_weather_main`
+
+The merged hourly row is chosen from the latest `forecast_at` within the same `city + run_id + snapshot_bucket_at` bucket, and null hourly fields are backfilled from earlier `forecast_at` rows in that same bucket.
 
 Legacy feature fields such as `temp_c`, `precip_mm`, `wind_kph`, `rhum_pct`, `pres_hpa`, `wind_dir_deg`, `wind_gust_kph`, and `snow_mm` are no longer the target contract.
 

@@ -102,11 +102,20 @@
   - `temperature_c`
   - `humidity_pct`
   - `wind_speed_ms`
-  - `current_precipitation_mm`
-  - `next_hour_precipitation_mm`
-  - `next_hour_precipitation_probability_pct`
-  - `rain_next_hour_flag`
+  - `precipitation_mm`
   - `weather_code`
+  - `weather_main`
+  - `hourly_temperature_c`
+  - `hourly_humidity_pct`
+  - `hourly_wind_speed_ms`
+  - `hourly_precipitation_mm`
+  - `hourly_precipitation_probability_pct`
+  - `hourly_weather_code`
+  - `hourly_weather_main`
+- hourly enrichment rule:
+  - join `stg_weather_hourly` on the same `city + run_id + snapshot_bucket_at`
+  - use the row with the latest `forecast_at` as the anchor row
+  - for each hourly field, backfill nulls from earlier `forecast_at` rows in the same ingest bucket
 
 ### `dim_date`
 - dbt builds `dim_date` from `stg_holidays` and station-date coverage
@@ -124,11 +133,14 @@ Target weather feature columns:
 - `temperature_c`
 - `humidity_pct`
 - `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
+- `precipitation_mm`
 - `weather_code`
+- `hourly_temperature_c`
+- `hourly_humidity_pct`
+- `hourly_wind_speed_ms`
+- `hourly_precipitation_mm`
+- `hourly_precipitation_probability_pct`
+- `hourly_weather_code`
 
 Deprecated weather feature columns:
 - `temp_c`

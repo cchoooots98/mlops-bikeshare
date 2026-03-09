@@ -7,16 +7,22 @@ This document captures the implemented architecture for the Bikeshare project: i
 ---
 
 ## Table of Contents
-- [High-level Diagram](#high-level-diagram)
-- [Components](#components)
-- [Data Flow](#data-flow)
-- [Warehouse Boundary and Future Feature Flow](#warehouse-boundary-and-future-feature-flow)
-- [Business Dashboard (Step 9)](#business-dashboard-step-9)
-- [Metrics and Monitoring](#metrics-and-monitoring)
-- [IAM (Least Privilege)](#iam-least-privilege)
-- [Step 10: Prod Admission and Cutover](#step-10-prod-admission-and-cutover)
-- [Performance and Cost Notes](#performance-and-cost-notes)
-- [Appendix: View SQL Skeletons](#appendix-view-sql-skeletons)
+- [System Architecture and Data Flow (Final)](#system-architecture-and-data-flow-final)
+  - [Table of Contents](#table-of-contents)
+  - [High-level Diagram](#high-level-diagram)
+  - [Components](#components)
+  - [Data Flow](#data-flow)
+  - [Warehouse Boundary and Future Feature Flow](#warehouse-boundary-and-future-feature-flow)
+  - [Business Dashboard](#business-dashboard)
+    - [Pages and Interactions](#pages-and-interactions)
+    - [Data and Metric Sources](#data-and-metric-sources)
+    - [App Configuration (secrets)](#app-configuration-secrets)
+    - [Caching and Performance](#caching-and-performance)
+  - [Metrics and Monitoring](#metrics-and-monitoring)
+  - [IAM (Least Privilege)](#iam-least-privilege)
+  - [Step 10: Prod Admission and Cutover](#step-10-prod-admission-and-cutover)
+  - [Performance and Cost Notes](#performance-and-cost-notes)
+  - [Appendix: View SQL Skeletons](#appendix-view-sql-skeletons)
 
 ---
 
@@ -90,18 +96,24 @@ Weather contract direction:
   - `temperature_c`
   - `humidity_pct`
   - `wind_speed_ms`
-  - `current_precipitation_mm`
-  - `next_hour_precipitation_mm`
-  - `next_hour_precipitation_probability_pct`
-  - `rain_next_hour_flag`
+  - `precipitation_mm`
   - `weather_code`
+  
+  - `hourly_temperature_c`
+  - `hourly_humidity_pct`
+  - `hourly_wind_speed_ms`
+  - `hourly_precipitation_mm`
+  - `hourly_precipitation_probability_pct`
+  - `hourly_weather_code`
+
 - legacy feature columns such as `temp_c`, `precip_mm`, `wind_kph`, `rhum_pct`, `pres_hpa`, `wind_dir_deg`, `wind_gust_kph`, and `snow_mm` are not the long-term contract
+- dbt derives the hourly side of `dim_weather` by joining the same `city + run_id + snapshot_bucket_at` ingest bucket, anchoring on the latest `forecast_at`, and backfilling null hourly fields from earlier forecast rows
 
 This warehouse note does not replace the later MLOps stages below. It only clarifies the current warehouse truth source and the intended feature ownership boundary.
 
 ---
 
-## Business Dashboard (Step 9)
+## Business Dashboard 
 
 ### Pages and Interactions
 - **City Map**: colored by risk = max(P_bikeout, P_dockout); clicking a station shows details and a 2-hour trajectory.

@@ -86,6 +86,9 @@ models:
       - name: observed_at
         tests:
           - not_null
+      - name: snapshot_bucket_at_utc
+        tests:
+          - not_null
 
   - name: dim_date
     columns:

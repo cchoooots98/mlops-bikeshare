@@ -5,7 +5,7 @@ erDiagram
     STG_STATION_STATUS }o--|| FCT_STATION_STATUS : dbt_builds
     STG_HOLIDAYS }o--|| DIM_DATE : dbt_builds
     STG_WEATHER_CURRENT ||--o{ DIM_WEATHER : current_snapshot
-    STG_WEATHER_HOURLY ||--o{ DIM_WEATHER : next_hour_summary
+    STG_WEATHER_HOURLY ||--o{ DIM_WEATHER : merged_hourly_row
 
     DIM_STATION ||--o{ FCT_STATION_STATUS : station_id
     DIM_DATE ||--o{ FCT_STATION_STATUS : date_id
@@ -53,14 +53,18 @@ erDiagram
         float temperature_c
         float humidity_pct
         float wind_speed_ms
-        float current_precipitation_mm
-        float next_hour_precipitation_mm
-        float next_hour_precipitation_probability_pct
-        boolean rain_next_hour_flag
-        timestamptz next_hour_valid_at
+        float precipitation_mm
         int weather_code
         text weather_main
         text weather_description
+        timestamptz hourly_forecast_at
+        float hourly_temperature_c
+        float hourly_humidity_pct
+        float hourly_wind_speed_ms
+        float hourly_precipitation_mm
+        float hourly_precipitation_probability_pct
+        int hourly_weather_code
+        text hourly_weather_main
     }
 
     FCT_STATION_STATUS {
@@ -92,11 +96,14 @@ erDiagram
         float temperature_c
         float humidity_pct
         float wind_speed_ms
-        float current_precipitation_mm
-        float next_hour_precipitation_mm
-        float next_hour_precipitation_probability_pct
-        boolean rain_next_hour_flag
+        float precipitation_mm
         int weather_code
+        float hourly_temperature_c
+        float hourly_humidity_pct
+        float hourly_wind_speed_ms
+        float hourly_precipitation_mm
+        float hourly_precipitation_probability_pct
+        int hourly_weather_code
     }
 
     FEAT_STATION_SNAPSHOT_LATEST {

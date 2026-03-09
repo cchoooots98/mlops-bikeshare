@@ -14,24 +14,32 @@ The curated weather dimension exposes one row per weather observation time with:
 - `temperature_c`
 - `humidity_pct`
 - `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
+- `precipitation_mm`
 - `weather_code`
-- `weather_main`
+
 - `weather_description`
+- `hourly_forecast_at`
+- `hourly_temperature_c`
+- `hourly_humidity_pct`
+- `hourly_wind_speed_ms`
+- `hourly_precipitation_mm`
+- `hourly_precipitation_probability_pct`
+- `hourly_weather_code`
+
 
 The planned feature layer will keep only the following weather fields as first-class model features:
 
 - `temperature_c`
 - `humidity_pct`
 - `wind_speed_ms`
-- `current_precipitation_mm`
-- `next_hour_precipitation_mm`
-- `next_hour_precipitation_probability_pct`
-- `rain_next_hour_flag`
+- `precipitation_mm`
 - `weather_code`
+- `hourly_temperature_c`
+- `hourly_humidity_pct`
+- `hourly_wind_speed_ms`
+- `hourly_precipitation_mm`
+- `hourly_precipitation_probability_pct`
+- `hourly_weather_code`
 
 Legacy weather feature fields to remove in the next feature migration:
 
@@ -46,8 +54,9 @@ Legacy weather feature fields to remove in the next feature migration:
 
 ## Current and Planned Layers
 - Raw weather JSON remains in S3 for replay and auditing.
-- Business logic such as "next hour rain" is not computed in Python ingestion.
+- Python ingestion does not collapse hourly forecast rows into a single weather contract row.
 - Python weather ingestion stores only current observations and the next 60 minutes of hourly forecast rows.
+- dbt merges those hourly rows by staying within the same `city + run_id + snapshot_bucket_at` bucket, using the latest `forecast_at` as the anchor hourly row, and backfilling null hourly fields from earlier forecast rows.
 - Current implemented flow:
   - raw weather JSON
   - `stg_weather_current`
