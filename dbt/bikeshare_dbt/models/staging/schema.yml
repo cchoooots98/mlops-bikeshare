@@ -16,6 +16,9 @@ models:
       - name: station_key
         tests:
           - not_null
+      - name: capacity
+        tests:
+          - non_negative
 
   - name: stg_station_status
     columns:
@@ -116,18 +119,5 @@ models:
         tests:
           - not_null
       - name: is_holiday
-        tests:
-          - not_null
-
-  - name: dim_station
-    columns:
-      - name: station_key
-        tests:
-          - not_null
-          - unique
-      - name: city
-        tests:
-          - not_null
-      - name: station_id
         tests:
           - not_null

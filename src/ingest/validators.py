@@ -96,7 +96,7 @@ def validate_station_info(payload: Dict, *, min_stations: int = 10) -> None:
             raise ValueError("info: lat/lon out of range")
 
         if cap is not None and cap < 0:
-            raise ValueError("info: capacity < 0")
+            raise ValueError(f"info: capacity < 0 for station_id={sid}")
 
 
 # ---------- Weather (Meteostat/Open‑Meteo mapped) ----------
