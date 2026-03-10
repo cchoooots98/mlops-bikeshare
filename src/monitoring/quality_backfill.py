@@ -100,20 +100,32 @@ def _make_candidate_dts(latest_dt_str: str, now_utc: datetime) -> List[str]:
 
 def _compute_actuals_for_dt(cnx, city: str, pred_dt: str, threshold: int = STOCKOUT_THRESHOLD) -> pd.DataFrame:
     """
-    Look up bikes(t+30m) and produce the binary label:
-    y_stockout_bikes_30 = 1.0 if bikes_t30 <= threshold else 0.0
+    Look up the future 30-minute window and produce the binary label:
+    y_stockout_bikes_30 = 1.0 if any bikes value in (t, t+30m] <= threshold else 0.0
     """
     dt_plus30 = (datetime.strptime(pred_dt, "%Y-%m-%d-%H-%M") + timedelta(minutes=30)).strftime("%Y-%m-%d-%H-%M")
     sql = f"""
-    SELECT station_id, bikes AS bikes_t30
-    FROM {cnx.schema_name}.v_station_status
-    WHERE city = '{city}' AND dt = '{dt_plus30}'
+    WITH future_window AS (
+      SELECT
+        station_id,
+        MIN(bikes) AS min_bikes_within_30m,
+        MAX(CASE WHEN dt = '{dt_plus30}' THEN bikes END) AS bikes_t30
+      FROM {cnx.schema_name}.v_station_status
+      WHERE city = '{city}'
+        AND parse_datetime(dt,'yyyy-MM-dd-HH-mm') > parse_datetime('{pred_dt}','yyyy-MM-dd-HH-mm')
+        AND parse_datetime(dt,'yyyy-MM-dd-HH-mm') <= parse_datetime('{pred_dt}','yyyy-MM-dd-HH-mm') + INTERVAL '30' MINUTE
+      GROUP BY station_id
+    )
+    SELECT station_id, min_bikes_within_30m, bikes_t30
+    FROM future_window
     """
     df = query_df(cnx, sql)
     if df.empty:
-        return pd.DataFrame(columns=["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"])
+        return pd.DataFrame(
+            columns=["station_id", "min_bikes_within_30m", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]
+        )
 
-    df["y_stockout_bikes_30"] = (df["bikes_t30"] <= threshold).astype("float64")
+    df["y_stockout_bikes_30"] = (df["min_bikes_within_30m"] <= threshold).astype("float64")
     df["dt_plus30"] = dt_plus30
     return df
 
@@ -179,7 +191,7 @@ def main():
         # Merge on station_id; keep inferenceId for traceability
         joined = (
             preds.merge(
-                acts[["station_id", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]],
+                acts[["station_id", "min_bikes_within_30m", "bikes_t30", "y_stockout_bikes_30", "dt_plus30"]],
                 on="station_id",
                 how="inner",
             )
@@ -193,6 +205,7 @@ def main():
                     "yhat_bikes",
                     "yhat_bikes_bin",
                     "y_stockout_bikes_30",
+                    "min_bikes_within_30m",
                     "bikes_t30",
                     "inferenceId",
                 ],

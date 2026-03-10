@@ -205,15 +205,17 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="paris") -> pd.DataFra
     # 5分钟 UTC 目标网格
     idx5 = pd.date_range(start=start_ts, end=end_ts, freq="5min", tz="UTC")
     cols = [
-        "temp_c",
-        "precip_mm",
-        "wind_kph",
-        "rhum_pct",
-        "pres_hpa",
-        "wind_dir_deg",
-        "wind_gust_kph",
-        "snow_mm",
+        "temperature_c",
+        "humidity_pct",
+        "wind_speed_ms",
+        "precipitation_mm",
         "weather_code",
+        "hourly_temperature_c",
+        "hourly_humidity_pct",
+        "hourly_wind_speed_ms",
+        "hourly_precipitation_mm",
+        "hourly_precipitation_probability_pct",
+        "hourly_weather_code",
     ]
 
     if weather_df.empty:
@@ -229,6 +231,17 @@ def align_weather_5min(weather_df, start_ts, end_ts, city="paris") -> pd.DataFra
     w["ts_utc"] = w["ts"].dt.tz_localize(tz, nonexistent="shift_forward", ambiguous="infer").dt.tz_convert("UTC")
 
     # 2) 只保留所需列并去重（若同一小时多条，保留最后一条）
+    w["temperature_c"] = pd.to_numeric(w["temp_c"], errors="coerce")
+    w["humidity_pct"] = pd.to_numeric(w["rhum_pct"], errors="coerce")
+    w["wind_speed_ms"] = pd.to_numeric(w["wind_kph"], errors="coerce") / 3.6
+    w["precipitation_mm"] = pd.to_numeric(w["precip_mm"], errors="coerce")
+    w["hourly_temperature_c"] = w["temperature_c"]
+    w["hourly_humidity_pct"] = w["humidity_pct"]
+    w["hourly_wind_speed_ms"] = w["wind_speed_ms"]
+    w["hourly_precipitation_mm"] = w["precipitation_mm"]
+    w["hourly_precipitation_probability_pct"] = 0.0
+    w["hourly_weather_code"] = pd.to_numeric(w["weather_code"], errors="coerce")
+
     w = w[["ts_utc"] + cols].sort_values("ts_utc").drop_duplicates(subset=["ts_utc"], keep="last")
 
     # 3) 与 5min 网格做 asof 向后填充（backward），得到逐 5 分钟值
@@ -279,9 +292,16 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
     df = add_time_features(df, df["city"].iloc[0])
 
     # --- rolling features (no groupby.apply) ---
+    ts = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
     gb = df.groupby("station_id", sort=False, observed=True)
-    df["delta_bikes_5m"] = gb["bikes"].diff().fillna(0).astype("float32")
-    df["delta_docks_5m"] = gb["docks"].diff().fillna(0).astype("float32")
+    df["minutes_since_prev_snapshot"] = (
+        ts.groupby(df["station_id"]).diff().dt.total_seconds().div(60).fillna(0.0).astype("float32")
+    )
+    bike_diff = gb["bikes"].diff()
+    dock_diff = gb["docks"].diff()
+    gap = pd.to_numeric(df["minutes_since_prev_snapshot"], errors="coerce").replace(0, np.nan)
+    df["delta_bikes_5m"] = (bike_diff.div(gap).mul(5).replace([np.inf, -np.inf], np.nan).fillna(0.0)).astype("float32")
+    df["delta_docks_5m"] = (dock_diff.div(gap).mul(5).replace([np.inf, -np.inf], np.nan).fillna(0.0)).astype("float32")
 
     for win, name in [(3, "15"), (6, "30"), (12, "60")]:
         df[f"roll{name}_net_bikes"] = (
@@ -348,15 +368,17 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
 
     # fixed debug print
     weather_cols = [
-        "temp_c",
-        "precip_mm",
-        "wind_kph",
-        "rhum_pct",
-        "pres_hpa",
-        "wind_dir_deg",
-        "wind_gust_kph",
-        "snow_mm",
+        "temperature_c",
+        "humidity_pct",
+        "wind_speed_ms",
+        "precipitation_mm",
         "weather_code",
+        "hourly_temperature_c",
+        "hourly_humidity_pct",
+        "hourly_wind_speed_ms",
+        "hourly_precipitation_mm",
+        "hourly_precipitation_probability_pct",
+        "hourly_weather_code",
     ]
     # hit_ratio = joined["temp_c"].notna().mean() if "temp_c" in joined.columns else 0.0
     # counts = {c: int(joined[c].notna().sum()) for c in weather_cols if c in joined.columns}
@@ -382,8 +404,24 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
     gb2 = df.groupby("station_id", sort=False, observed=True)
     df["target_bikes_t30"] = gb2["bikes"].shift(-steps)
     df["target_docks_t30"] = gb2["docks"].shift(-steps)
-    df["y_stockout_bikes_30"] = (df["target_bikes_t30"] <= threshold).astype("float32")
-    df["y_stockout_docks_30"] = (df["target_docks_t30"] <= threshold).astype("float32")
+
+    future_bikes = pd.concat([gb2["bikes"].shift(-i) for i in range(1, steps + 1)], axis=1)
+    future_docks = pd.concat([gb2["docks"].shift(-i) for i in range(1, steps + 1)], axis=1)
+    future_bikes_count = future_bikes.notna().sum(axis=1)
+    future_docks_count = future_docks.notna().sum(axis=1)
+    future_min_bikes = future_bikes.min(axis=1, skipna=True)
+    future_min_docks = future_docks.min(axis=1, skipna=True)
+
+    df["y_stockout_bikes_30"] = np.where(
+        future_bikes_count == steps,
+        (future_min_bikes <= threshold).astype("float32"),
+        np.nan,
+    )
+    df["y_stockout_docks_30"] = np.where(
+        future_docks_count == steps,
+        (future_min_docks <= threshold).astype("float32"),
+        np.nan,
+    )
 
     return df
 
@@ -428,19 +466,22 @@ def create_table_if_not_exists(cnx, bucket: str):
     nbr_docks_weighted double,
     has_neighbors_within_radius double,
     neighbor_count_within_radius double,
+    minutes_since_prev_snapshot double,
     hour double,
     dow double,
     is_weekend double,
     is_holiday double,
-    temp_c double,
-    precip_mm double,
-    wind_kph double,
-    rhum_pct double,
-    pres_hpa double,
-    wind_dir_deg double,
-    wind_gust_kph double,
-    snow_mm double,
+    temperature_c double,
+    humidity_pct double,
+    wind_speed_ms double,
+    precipitation_mm double,
     weather_code double,
+    hourly_temperature_c double,
+    hourly_humidity_pct double,
+    hourly_wind_speed_ms double,
+    hourly_precipitation_mm double,
+    hourly_precipitation_probability_pct double,
+    hourly_weather_code double,
     y_stockout_bikes_30 double,
     y_stockout_docks_30 double,
     target_bikes_t30 double,

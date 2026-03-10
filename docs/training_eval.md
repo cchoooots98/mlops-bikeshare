@@ -13,8 +13,12 @@
   - `y_stockout_bikes_30`
   - `y_stockout_docks_30`
 - Numeric targets:
-  - `target_bikes_t30`
-  - `target_docks_t30`
+  - `target_bikes_t30` (diagnostic exact `t+30m` value)
+  - `target_docks_t30` (diagnostic exact `t+30m` value)
+
+Label semantics:
+- `y_stockout_*_30 = 1` if any snapshot in `(t, t+30m]` has bikes or docks `<= 2`.
+- The project is classification-first; `target_*_t30` is retained for diagnostics, not as the primary model objective.
 
 ## Direction of Travel
 - dbt is the long-term owner of production feature generation.

@@ -19,19 +19,22 @@ FEATURE_COLUMNS: List[str] = [
     "nbr_docks_weighted",
     "has_neighbors_within_radius",
     "neighbor_count_within_radius",
+    "minutes_since_prev_snapshot",
     "hour",
     "dow",
     "is_weekend",
     "is_holiday",
-    "temp_c",
-    "precip_mm",
-    "wind_kph",
-    "rhum_pct",
-    "pres_hpa",
-    "wind_dir_deg",
-    "wind_gust_kph",
-    "snow_mm",
+    "temperature_c",
+    "humidity_pct",
+    "wind_speed_ms",
+    "precipitation_mm",
     "weather_code",
+    "hourly_temperature_c",
+    "hourly_humidity_pct",
+    "hourly_wind_speed_ms",
+    "hourly_precipitation_mm",
+    "hourly_precipitation_probability_pct",
+    "hourly_weather_code",
 ]
 
 LABEL_COLUMNS: List[str] = ["y_stockout_bikes_30", "y_stockout_docks_30", "target_bikes_t30", "target_docks_t30"]
@@ -76,6 +79,12 @@ def validate_feature_df(df: pd.DataFrame, missing_rate_threshold: float = 0.01):
     if not neighbor_count_mask.all():
         bad = int((~neighbor_count_mask).sum())
         raise ValueError(f"neighbor_count_within_radius must be >=0; {bad} values out of range")
+
+    gap_minutes = pd.to_numeric(df["minutes_since_prev_snapshot"], errors="coerce")
+    gap_minutes_mask = gap_minutes.isna() | (gap_minutes >= 0)
+    if not gap_minutes_mask.all():
+        bad = int((~gap_minutes_mask).sum())
+        raise ValueError(f"minutes_since_prev_snapshot must be >=0; {bad} values out of range")
 
     # --- NEW STEP: drop all-NaN feature columns ---
     feat = df[FEATURE_COLUMNS].copy()

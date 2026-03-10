@@ -38,7 +38,7 @@ MODEL_CARD_TEMPLATE = """# Model Card — {model_name}
 ## Assumptions & Limitations
 - Assumes 5-minute gridded station status and a dbt-built weather dimension aligned to UTC current snapshots plus next-hour forecast summaries.
 - Neighbor features based on spatial BallTree and inverse-distance weighting.
-- Labels defined as stockout if `target_*_t30 ≤ threshold` within 30-minute horizon.
+- Labels defined as stockout if any inventory value in `(t, t+30m]` is `<= threshold`.
 - Temporal split ensures validation comes strictly after training period with a gap to reduce leakage.
 
 ## Risks
