@@ -26,6 +26,64 @@ models:
         tests:
           - non_negative
 
+  - name: dim_weather
+    columns: 
+      - name: weather_key
+        tests:
+          - not_null
+          - unique
+      - name: observed_at
+        tests:
+          - not_null
+      - name: city
+        tests:
+          - not_null
+
+  - name: dim_date
+    columns:
+      - name: date_id
+        tests:
+          - not_null
+          - unique
+      - name: date
+        tests:
+          - not_null
+      - name: day_of_week
+        tests:
+          - not_null
+      - name: month
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: is_weekend
+        tests:
+          - not_null
+      - name: is_holiday
+        tests:
+          - not_null
+          
+  - name: dim_time
+    columns:
+      - name: time_id
+        tests:
+          - not_null
+          - unique
+      - name: bucket_label
+        tests:
+          - not_null
+          - unique
+      - name: hour
+        tests:
+          - not_null
+      - name: minute
+        tests:
+          - not_null
+      - name: minute_of_day
+        tests:
+          - not_null
+  
   - name: fct_station_status
     columns:
       - name: fact_station_status_key
