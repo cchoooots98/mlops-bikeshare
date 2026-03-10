@@ -32,3 +32,63 @@ models:
       - name: neighbor_weight
         tests:
           - not_null
+
+  - name: int_station_status_enriched
+    columns:
+      - name: fact_station_status_key
+        tests:
+          - not_null
+          - unique
+      - name: city
+        tests:
+          - not_null
+      - name: station_id
+        tests:
+          - not_null
+      - name: station_version_key
+        tests:
+          - not_null
+      - name: snapshot_bucket_at_utc
+        tests:
+          - not_null
+      - name: date_id
+        tests:
+          - not_null
+      - name: time_id
+        tests:
+          - not_null
+      - name: capacity
+        tests:
+          - not_null
+          - non_negative
+      - name: latitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -90
+                max_value: 90
+      - name: longitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -180
+                max_value: 180
+      - name: has_weather_context
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: weather_observed_at_utc
+        tests:
+          - column_pair_not_greater_than:
+              arguments:
+                other_column: snapshot_bucket_at_utc
+      - name: weather_asof_lag_minutes
+        tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: "{{ var('station_status_weather_asof_tolerance_minutes', 15) | int }}"
