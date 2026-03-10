@@ -16,6 +16,20 @@ models:
       - name: station_id
         tests:
           - not_null
+      - name: latitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -90
+                max_value: 90
+      - name: longitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -180
+                max_value: 180
       - name: valid_from_utc
         tests:
           - not_null

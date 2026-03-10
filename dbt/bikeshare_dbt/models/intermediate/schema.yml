@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: int_station_neighbors
+    columns:
+      - name: city
+        tests:
+          - not_null
+      - name: station_key
+        tests:
+          - not_null
+      - name: station_id
+        tests:
+          - not_null
+      - name: neighbor_station_key
+        tests:
+          - not_null
+      - name: neighbor_station_id
+        tests:
+          - not_null
+      - name: distance_km
+        tests:
+          - not_null
+          - non_negative
+      - name: neighbor_count_within_radius
+        tests:
+          - not_null
+          - non_negative
+      - name: neighbor_rank
+        tests:
+          - not_null
+      - name: neighbor_weight
+        tests:
+          - not_null

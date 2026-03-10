@@ -3,6 +3,7 @@ from typing import List
 
 import pandas as pd
 
+# dbt feature tables are the formal producer contract; Python validates and consumes that contract.
 FEATURE_COLUMNS: List[str] = [
     "util_bikes",
     "util_docks",
@@ -16,6 +17,8 @@ FEATURE_COLUMNS: List[str] = [
     "roll60_bikes_mean",
     "nbr_bikes_weighted",
     "nbr_docks_weighted",
+    "has_neighbors_within_radius",
+    "neighbor_count_within_radius",
     "hour",
     "dow",
     "is_weekend",
@@ -61,6 +64,18 @@ def validate_feature_df(df: pd.DataFrame, missing_rate_threshold: float = 0.01):
         if not mask.all():
             bad = int((~mask).sum())
             raise ValueError(f"{c} must be in [0,1]; {bad} values out of range")
+
+    neighbor_flag = pd.to_numeric(df["has_neighbors_within_radius"], errors="coerce")
+    neighbor_flag_mask = neighbor_flag.isna() | neighbor_flag.isin([0, 1])
+    if not neighbor_flag_mask.all():
+        bad = int((~neighbor_flag_mask).sum())
+        raise ValueError(f"has_neighbors_within_radius must be 0/1; {bad} values out of range")
+
+    neighbor_count = pd.to_numeric(df["neighbor_count_within_radius"], errors="coerce")
+    neighbor_count_mask = neighbor_count.isna() | (neighbor_count >= 0)
+    if not neighbor_count_mask.all():
+        bad = int((~neighbor_count_mask).sum())
+        raise ValueError(f"neighbor_count_within_radius must be >=0; {bad} values out of range")
 
     # --- NEW STEP: drop all-NaN feature columns ---
     feat = df[FEATURE_COLUMNS].copy()

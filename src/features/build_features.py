@@ -117,9 +117,11 @@ def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.
     """
     Build a neighbor table using haversine distance (via BallTree).
     Protect against None/NaN coords and very small networks.
+    Radius-only semantics: if a station has no other station inside the radius,
+    it has no neighbors instead of falling back to farther stations.
     """
     if info_df is None or info_df.empty:
-        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "neighbor_count_within_radius", "w"])
 
     # Coerce to numeric and drop invalid coords
     info = info_df.copy()
@@ -130,7 +132,7 @@ def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.
 
     # If we have < 2 stations after cleaning, return empty
     if len(info) < 2:
-        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "neighbor_count_within_radius", "w"])
 
     # Degrees -> radians with guaranteed float dtype to avoid NoneType errors
     lat_rad = np.deg2rad(np.asarray(info["lat"].values, dtype="float64"))
@@ -140,30 +142,45 @@ def build_neighbors(info_df: pd.DataFrame, k: int = 5, max_radius_km: float = 0.
     # Build BallTree with haversine metric (expects radians)
     tree = BallTree(coords, metric="haversine")
 
-    # Query k+1 (self + k neighbors)
     k_eff = int(min(k, max(1, len(info) - 1)))
-    dist, idx = tree.query(coords, k=k_eff + 1)  # includes self at column 0
-    dist_km = dist * EARTH_RADIUS_KM
+    radius_rad = float(max_radius_km) / EARTH_RADIUS_KM if max_radius_km else None
+
+    if radius_rad:
+        idx, dist = tree.query_radius(
+            coords,
+            r=radius_rad,
+            return_distance=True,
+            sort_results=True,
+        )
+    else:
+        dist, idx = tree.query(coords, k=k_eff + 1)  # includes self at column 0
+        dist = [dist_row for dist_row in dist]
+        idx = [idx_row for idx_row in idx]
 
     rows = []
     station_ids = info["station_id"].values
     for i in range(len(info)):
-        # skip self at j=0
-        for d, j in zip(dist_km[i, 1:], idx[i, 1:]):
-            # respect radius if provided
-            if max_radius_km and d > max_radius_km:
-                continue
-            rows.append((station_ids[i], station_ids[j], float(d)))
+        if radius_rad:
+            candidate_pairs = [
+                (float(d * EARTH_RADIUS_KM), int(j))
+                for d, j in zip(dist[i], idx[i])
+                if station_ids[i] != station_ids[j]
+            ]
+        else:
+            candidate_pairs = [
+                (float(d * EARTH_RADIUS_KM), int(j))
+                for d, j in zip(dist[i][1:], idx[i][1:])
+            ]
 
-        # fallback: if nothing within radius, take closest k_eff
-        if not any(r[0] == station_ids[i] for r in rows):
-            for d, j in zip(dist_km[i, 1:], idx[i, 1:]):
-                rows.append((station_ids[i], station_ids[j], float(d)))
+        neighbor_count_within_radius = len(candidate_pairs)
+
+        for d, j in candidate_pairs[:k_eff]:
+            rows.append((station_ids[i], station_ids[j], float(d), neighbor_count_within_radius))
 
     if not rows:
-        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "w"])
+        return pd.DataFrame(columns=["src_id", "nbr_id", "dist_km", "neighbor_count_within_radius", "w"])
 
-    nbr = pd.DataFrame(rows, columns=["src_id", "nbr_id", "dist_km"])
+    nbr = pd.DataFrame(rows, columns=["src_id", "nbr_id", "dist_km", "neighbor_count_within_radius"])
 
     # inverse-distance weights with row normalization
     eps = 1e-6
@@ -279,6 +296,11 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
 
     # --- neighbor aggregation (skip if no neighbors) ---
     if nbr is not None and not nbr.empty:
+        nbr_counts = (
+            nbr[["src_id", "neighbor_count_within_radius"]]
+            .drop_duplicates(subset=["src_id"])
+            .rename(columns={"src_id": "station_id"})
+        )
         neigh = df[["station_id", "dt", "bikes", "docks"]].rename(
             columns={"station_id": "nbr_id", "bikes": "nbr_bikes", "docks": "nbr_docks"}
         )
@@ -295,12 +317,17 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
             .rename(columns={"src_id": "station_id"})
         )
         df = df.merge(agg, on=["station_id", "dt"], how="left")
+        df = df.merge(nbr_counts, on="station_id", how="left")
         df["nbr_bikes_weighted"] = df["wb"].fillna(0.0).astype("float32")
         df["nbr_docks_weighted"] = df["wd"].fillna(0.0).astype("float32")
+        df["neighbor_count_within_radius"] = df["neighbor_count_within_radius"].fillna(0.0).astype("float32")
+        df["has_neighbors_within_radius"] = (df["neighbor_count_within_radius"] > 0).astype("float32")
         df = df.drop(columns=["wb", "wd"])
     else:
         df["nbr_bikes_weighted"] = np.float32(0.0)
         df["nbr_docks_weighted"] = np.float32(0.0)
+        df["neighbor_count_within_radius"] = np.float32(0.0)
+        df["has_neighbors_within_radius"] = np.float32(0.0)
 
     # --- weather join via asof ---
     ts_status = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True)
@@ -399,6 +426,8 @@ def create_table_if_not_exists(cnx, bucket: str):
     roll60_bikes_mean double,
     nbr_bikes_weighted double,
     nbr_docks_weighted double,
+    has_neighbors_within_radius double,
+    neighbor_count_within_radius double,
     hour double,
     dow double,
     is_weekend double,

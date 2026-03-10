@@ -17,6 +17,8 @@ with ranked_station_info as (
             order by ingested_at_utc desc, source_last_updated desc, run_id desc
         ) as row_num
     from {{ ref('stg_station_information') }}
+    where latitude between -90 and 90
+      and longitude between -180 and 180
 ),
 station_info_deduped as (
     select

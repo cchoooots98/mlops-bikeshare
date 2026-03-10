@@ -16,6 +16,20 @@ models:
       - name: station_id
         tests:
           - not_null
+      - name: latitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -90
+                max_value: 90
+      - name: longitude
+        tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: -180
+                max_value: 180
       - name: station_key
         tests:
           - not_null
@@ -91,39 +105,6 @@ models:
               arguments:
                 to: ref('dim_date')
                 field: date
-      - name: is_holiday
-        tests:
-          - not_null
-
-  - name: dim_weather
-    columns:
-      - name: weather_key
-        tests:
-          - not_null
-          - unique
-      - name: city
-        tests:
-          - not_null
-      - name: observed_at
-        tests:
-          - not_null
-      - name: snapshot_bucket_at_utc
-        tests:
-          - not_null
-
-  - name: dim_date
-    columns:
-      - name: date_id
-        tests:
-          - not_null
-          - unique
-      - name: date
-        tests:
-          - not_null
-          - unique
-      - name: is_weekend
-        tests:
-          - not_null
       - name: is_holiday
         tests:
           - not_null
