@@ -57,12 +57,17 @@
 
 ## Warehouse Staging Contract
 ### `stg_station_information`
-- grain: one row per `city + run_id + station_id`
+- grain: one row per `city + snapshot_bucket_at + station_id`
+- lineage columns retained in staging only:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
 - columns include:
   - `run_id`
   - `ingested_at`
   - `source_last_updated`
   - `city`
+  - `snapshot_bucket_at`
   - `station_id`
   - `name`
   - `lat`
@@ -70,12 +75,17 @@
   - `capacity`
 
 ### `stg_station_status`
-- grain: one row per `city + run_id + station_id`
+- grain: one row per `city + snapshot_bucket_at + station_id`
+- lineage columns retained in staging only:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
 - columns include:
   - `run_id`
   - `ingested_at`
   - `source_last_updated`
   - `city`
+  - `snapshot_bucket_at`
   - `station_id`
   - `last_reported_at`
   - `num_bikes_available`
@@ -123,9 +133,11 @@
 
 ## Curated Warehouse Contract
 ### `dim_station`
-- dbt owns the latest station dimension snapshot
-- grain: one row per `city + station_id`
+- dbt owns the station SCD2 dimension
+- durable business key: `station_key = city + station_id`
+- grain: one row per station version
 - columns include:
+  - `station_version_key`
   - `station_key`
   - `city`
   - `station_id`
@@ -133,6 +145,33 @@
   - `latitude`
   - `longitude`
   - `capacity`
+  - `valid_from_utc`
+  - `valid_to_utc`
+  - `is_current`
+
+### `fct_station_status`
+- dbt owns the normalized station status fact
+- grain: one row per `city + station_id + snapshot_bucket_at`
+- columns include:
+  - `fact_station_status_key`
+  - `city`
+  - `station_id`
+  - `station_key`
+  - `station_version_key`
+  - `snapshot_bucket_at_utc`
+  - `snapshot_bucket_at_paris`
+  - `date_id`
+  - `time_id`
+  - `last_reported_at_utc`
+  - `last_reported_at_paris`
+  - `num_bikes_available`
+  - `num_docks_available`
+  - `is_renting`
+  - `is_returning`
+- intentionally excludes:
+  - `capacity`
+  - utilization fields
+  - weather columns
 
 ### `dim_weather`
 - dbt owns weather summarization and builds `dim_weather`
@@ -194,6 +233,7 @@ Deprecated weather feature columns:
 ## Validation
 - Raw payload validation happens in ingestion code before S3 write and before staging insert.
 - Invalid payloads should fail the task and prevent partial structured writes.
+- Station duplicate protection is keyed by `city + snapshot_bucket_at` for both station staging tables.
 - Weather duplicate protection is keyed by `city + snapshot_bucket_at` in `stg_weather_current`.
 - Holiday duplicate protection is keyed by `country_code + holiday_date` within the yearly load.
 
@@ -205,6 +245,8 @@ Deprecated weather feature columns:
 
 ## Transformation Boundary
 - Python ingestion handles raw ingestion and normalized staging inserts only.
+- dbt handles station SCD2 logic and builds `dim_station`.
+- dbt handles base station fact logic and builds `fct_station_status`.
 - dbt handles weather summarization and builds `dim_weather`.
 - dbt handles holiday/date logic and builds `dim_date`.
 - Later machine-learning feature builds may continue to evolve, but the warehouse truth source should remain explicit and documented.

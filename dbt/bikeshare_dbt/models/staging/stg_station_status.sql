@@ -11,6 +11,8 @@ select
     (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
     source_last_updated::bigint as source_last_updated,
     city::text as city,
+    snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
+    (snapshot_bucket_at::timestamptz at time zone 'Europe/Paris')::timestamp as snapshot_bucket_at_paris,
     station_id::text as station_id,
     last_reported_at::timestamptz as last_reported_at_utc,
     (last_reported_at::timestamptz at time zone 'Europe/Paris')::timestamp as last_reported_at_paris,
@@ -19,5 +21,11 @@ select
     is_renting::smallint as is_renting,
     is_returning::smallint as is_returning,
     concat(city::text, '|', station_id::text) as station_key,
-    concat(city::text, '|', run_id::text, '|', station_id::text) as station_status_pk
+    concat(
+        city::text,
+        '|',
+        to_char(snapshot_bucket_at::timestamptz, 'YYYY-MM-DD HH24:MI:SSOF'),
+        '|',
+        station_id::text
+    ) as station_status_pk
 from src

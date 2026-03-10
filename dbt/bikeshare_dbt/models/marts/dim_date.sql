@@ -13,8 +13,8 @@ with holiday_dates as (
 ),
 status_bounds as (
     select
-        min((coalesce(last_reported_at_utc, ingested_at_utc))::date) as min_date,
-        max((coalesce(last_reported_at_utc, ingested_at_utc))::date) as max_date
+        min(snapshot_bucket_at_paris::date) as min_date,
+        max(snapshot_bucket_at_paris::date) as max_date
     from {{ ref('stg_station_status') }}
 ),
 holiday_bounds as (

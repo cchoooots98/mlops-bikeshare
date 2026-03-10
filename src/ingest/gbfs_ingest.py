@@ -37,6 +37,10 @@ def _dt_prefix_from_epoch(epoch_sec: int) -> str:
     return dt5.strftime("dt=%Y-%m-%d-%H-%M")
 
 
+def _snapshot_bucket_from_payload(payload: dict) -> datetime:
+    return floor_to_5min(datetime.fromtimestamp(_last_updated_epoch(payload), tz=timezone.utc))
+
+
 def _exists(key: str, bucket: str, s3_client=None) -> bool:
     client = s3_client or s3
     try:
@@ -107,7 +111,8 @@ def persist_raw_payload_to_s3(
     s3_client=None,
 ) -> dict:
     source_ts = _last_updated_epoch(payload)
-    dt_prefix = _dt_prefix_from_epoch(source_ts)
+    snapshot_bucket_at = _snapshot_bucket_from_payload(payload)
+    dt_prefix = snapshot_bucket_at.strftime("dt=%Y-%m-%d-%H-%M")
     data_key = f"raw/{feed_name}/city={city}/{dt_prefix}/data.json.gz"
     manifest_key = f"raw/{feed_name}/city={city}/{dt_prefix}/_manifest.json.gz"
 
@@ -121,6 +126,7 @@ def persist_raw_payload_to_s3(
             "feed_name": feed_name,
             "run_id": run_id,
             "source_ts": source_ts,
+            "snapshot_bucket_at_utc": snapshot_bucket_at.isoformat(),
             "ingested_utc": int(time.time()),
         },
         manifest_key,
@@ -167,13 +173,16 @@ def station_information_dataframe(
 
     df = pd.DataFrame(stations)
     ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
+    source_last_updated = _last_updated_epoch(payload)
+    snapshot_bucket_at = _snapshot_bucket_from_payload(payload)
 
     return pd.DataFrame(
         {
             "run_id": run_id,
             "ingested_at": ingested_at,
-            "source_last_updated": _last_updated_epoch(payload),
+            "source_last_updated": source_last_updated,
             "city": city,
+            "snapshot_bucket_at": snapshot_bucket_at,
             "station_id": _series_from_candidates(df, ["station_id"]).astype(str),
             "name": _series_from_candidates(df, ["name"]),
             "lat": pd.to_numeric(_series_from_candidates(df, ["lat"]), errors="coerce"),
@@ -195,6 +204,8 @@ def station_status_dataframe(
 
     df = pd.DataFrame(stations)
     ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
+    source_last_updated = _last_updated_epoch(payload)
+    snapshot_bucket_at = _snapshot_bucket_from_payload(payload)
 
     bikes = pd.to_numeric(
         _series_from_candidates(df, ["num_bikes_available", "numBikesAvailable"]),
@@ -212,8 +223,9 @@ def station_status_dataframe(
         {
             "run_id": run_id,
             "ingested_at": ingested_at,
-            "source_last_updated": _last_updated_epoch(payload),
+            "source_last_updated": source_last_updated,
             "city": city,
+            "snapshot_bucket_at": snapshot_bucket_at,
             "station_id": _series_from_candidates(df, ["station_id"]).astype(str),
             "num_bikes_available": bikes,
             "num_docks_available": docks,
@@ -231,6 +243,7 @@ def ensure_staging_tables(conn_uri: str) -> None:
         ingested_at TIMESTAMPTZ NOT NULL,
         source_last_updated BIGINT,
         city TEXT NOT NULL,
+        snapshot_bucket_at TIMESTAMPTZ NOT NULL,
         station_id TEXT NOT NULL,
         name TEXT,
         lat DOUBLE PRECISION,
@@ -246,6 +259,7 @@ def ensure_staging_tables(conn_uri: str) -> None:
         ingested_at TIMESTAMPTZ NOT NULL,
         source_last_updated BIGINT,
         city TEXT NOT NULL,
+        snapshot_bucket_at TIMESTAMPTZ NOT NULL,
         station_id TEXT NOT NULL,
         num_bikes_available INTEGER,
         num_docks_available INTEGER,
@@ -264,10 +278,38 @@ def ensure_staging_tables(conn_uri: str) -> None:
             conn.execute(text(create_status_sql))
             conn.execute(text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS city TEXT;"))
             conn.execute(text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS city TEXT;"))
+            conn.execute(text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;"))
+            conn.execute(text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;"))
             conn.execute(text("UPDATE stg_station_information SET city = :city WHERE city IS NULL;"), {"city": CITY})
             conn.execute(text("UPDATE stg_station_status SET city = :city WHERE city IS NULL;"), {"city": CITY})
+            conn.execute(
+                text(
+                    """
+                    UPDATE stg_station_information
+                    SET snapshot_bucket_at = coalesce(
+                        to_timestamp(floor(source_last_updated / 300.0) * 300),
+                        to_timestamp(floor(extract(epoch from ingested_at) / 300.0) * 300)
+                    )
+                    WHERE snapshot_bucket_at IS NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE stg_station_status
+                    SET snapshot_bucket_at = coalesce(
+                        to_timestamp(floor(source_last_updated / 300.0) * 300),
+                        to_timestamp(floor(extract(epoch from ingested_at) / 300.0) * 300)
+                    )
+                    WHERE snapshot_bucket_at IS NULL
+                    """
+                )
+            )
             conn.execute(text("ALTER TABLE stg_station_information ALTER COLUMN city SET NOT NULL;"))
             conn.execute(text("ALTER TABLE stg_station_status ALTER COLUMN city SET NOT NULL;"))
+            conn.execute(text("ALTER TABLE stg_station_information ALTER COLUMN snapshot_bucket_at SET NOT NULL;"))
+            conn.execute(text("ALTER TABLE stg_station_status ALTER COLUMN snapshot_bucket_at SET NOT NULL;"))
             conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_stg_station_information_city_station "
@@ -278,6 +320,18 @@ def ensure_staging_tables(conn_uri: str) -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_stg_station_status_city_station "
                     "ON stg_station_status (city, station_id);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_stg_station_information_city_bucket "
+                    "ON stg_station_information (city, snapshot_bucket_at);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_stg_station_status_city_bucket "
+                    "ON stg_station_status (city, snapshot_bucket_at);"
                 )
             )
     finally:
@@ -308,13 +362,25 @@ def ingest_station_information_to_staging(
             s3_client=s3_client,
         )
     out = station_information_dataframe(payload, run_id=run_id, city=raw_city)
+    snapshot_bucket_at = pd.Timestamp(out.iloc[0]["snapshot_bucket_at"]).to_pydatetime()
 
     engine = create_engine(conn_uri, pool_pre_ping=True)
     try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM stg_station_information
+                    WHERE city = :city
+                      AND snapshot_bucket_at = :snapshot_bucket_at
+                    """
+                ),
+                {"city": raw_city, "snapshot_bucket_at": snapshot_bucket_at},
+            )
         out.to_sql("stg_station_information", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
     finally:
         engine.dispose()
-    return {"rows_written": len(out), "raw": raw_result}
+    return {"rows_written": len(out), "raw": raw_result, "snapshot_bucket_at_utc": snapshot_bucket_at.isoformat()}
 
 
 def ingest_station_status_to_staging(
@@ -341,13 +407,25 @@ def ingest_station_status_to_staging(
             s3_client=s3_client,
         )
     out = station_status_dataframe(payload, run_id=run_id, city=raw_city)
+    snapshot_bucket_at = pd.Timestamp(out.iloc[0]["snapshot_bucket_at"]).to_pydatetime()
 
     engine = create_engine(conn_uri, pool_pre_ping=True)
     try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM stg_station_status
+                    WHERE city = :city
+                      AND snapshot_bucket_at = :snapshot_bucket_at
+                    """
+                ),
+                {"city": raw_city, "snapshot_bucket_at": snapshot_bucket_at},
+            )
         out.to_sql("stg_station_status", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
     finally:
         engine.dispose()
-    return {"rows_written": len(out), "raw": raw_result}
+    return {"rows_written": len(out), "raw": raw_result, "snapshot_bucket_at_utc": snapshot_bucket_at.isoformat()}
 
 
 def handler(event, context):

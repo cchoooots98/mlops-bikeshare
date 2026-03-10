@@ -10,6 +10,9 @@ models:
       - name: city
         tests:
           - not_null
+      - name: snapshot_bucket_at_utc
+        tests:
+          - not_null
       - name: station_id
         tests:
           - not_null
@@ -27,6 +30,9 @@ models:
           - not_null
           - unique
       - name: city
+        tests:
+          - not_null
+      - name: snapshot_bucket_at_utc
         tests:
           - not_null
       - name: station_id

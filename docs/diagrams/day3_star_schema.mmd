@@ -1,5 +1,5 @@
-%% Current implemented: stg_* + dim_weather + dim_date
-%% Planned next: dim_station, dim_time, fct_station_status, intermediate, features
+%% Current implemented: stg_* + dim_station + dim_time + dim_weather + dim_date + fct_station_status
+%% Planned next: intermediate, features
 erDiagram
     STG_STATION_INFORMATION }o--|| DIM_STATION : dbt_builds
     STG_STATION_STATUS }o--|| FCT_STATION_STATUS : dbt_builds
@@ -7,11 +7,9 @@ erDiagram
     STG_WEATHER_CURRENT ||--o{ DIM_WEATHER : current_snapshot
     STG_WEATHER_HOURLY ||--o{ DIM_WEATHER : merged_hourly_row
 
-    DIM_STATION ||--o{ FCT_STATION_STATUS : station_id
+    DIM_STATION ||--o{ FCT_STATION_STATUS : station_version_key
     DIM_DATE ||--o{ FCT_STATION_STATUS : date_id
     DIM_TIME ||--o{ FCT_STATION_STATUS : time_id
-    DIM_WEATHER ||--o{ FCT_STATION_STATUS : weather_id
-
     DIM_STATION ||--o{ INT_STATION_NEIGHBORS : source_station
     DIM_STATION ||--o{ INT_STATION_STATUS_ENRICHED : station_lookup
     DIM_DATE ||--o{ INT_STATION_STATUS_ENRICHED : date_lookup
@@ -24,13 +22,17 @@ erDiagram
     FEAT_STATION_SNAPSHOT_5MIN ||--o{ FEAT_STATION_SNAPSHOT_LATEST : latest_view
 
     DIM_STATION {
-        text station_key PK
+        text station_version_key PK
+        text station_key
         text city
         text station_id
         text station_name
         float latitude
         float longitude
         int capacity
+        timestamptz valid_from_utc
+        timestamptz valid_to_utc
+        boolean is_current
     }
 
     DIM_DATE {
@@ -70,13 +72,17 @@ erDiagram
     }
 
     FCT_STATION_STATUS {
+        text fact_station_status_key
         text city
-        timestamptz observed_at
-        text station_key FK
+        text station_key
+        text station_version_key FK
         text station_id
+        timestamptz snapshot_bucket_at_utc
+        timestamp snapshot_bucket_at_paris
         int date_id FK
         int time_id FK
-        text weather_key FK
+        timestamptz last_reported_at_utc
+        timestamp last_reported_at_paris
         int num_bikes_available
         int num_docks_available
     }

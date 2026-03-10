@@ -11,11 +11,19 @@ select
     (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
     source_last_updated::bigint as source_last_updated,
     city::text as city,
+    snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
+    (snapshot_bucket_at::timestamptz at time zone 'Europe/Paris')::timestamp as snapshot_bucket_at_paris,
     station_id::text as station_id,
     name::text as station_name,
     lat::double precision as latitude,
     lon::double precision as longitude,
     capacity::integer as capacity,
     concat(city::text, '|', station_id::text) as station_key,
-    concat(city::text, '|', run_id::text, '|', station_id::text) as station_info_pk
+    concat(
+        city::text,
+        '|',
+        to_char(snapshot_bucket_at::timestamptz, 'YYYY-MM-DD HH24:MI:SSOF'),
+        '|',
+        station_id::text
+    ) as station_info_pk
 from src

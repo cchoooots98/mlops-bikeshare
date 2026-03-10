@@ -6,14 +6,17 @@ DROP TABLE IF EXISTS dim_date CASCADE;
 DROP TABLE IF EXISTS dim_station CASCADE;
 
 CREATE TABLE IF NOT EXISTS dim_station (
-  station_key     TEXT PRIMARY KEY,
-  city            TEXT NOT NULL,
-  station_id      TEXT NOT NULL,
-  station_name    TEXT,
-  latitude        DOUBLE PRECISION,
-  longitude       DOUBLE PRECISION,
-  capacity        INTEGER,
-  UNIQUE (city, station_id)
+  station_version_key TEXT PRIMARY KEY,
+  station_key         TEXT NOT NULL,
+  city                TEXT NOT NULL,
+  station_id          TEXT NOT NULL,
+  station_name        TEXT,
+  latitude            DOUBLE PRECISION,
+  longitude           DOUBLE PRECISION,
+  capacity            INTEGER,
+  valid_from_utc      TIMESTAMPTZ NOT NULL,
+  valid_to_utc        TIMESTAMPTZ,
+  is_current          BOOLEAN NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS  dim_date (
@@ -59,24 +62,26 @@ CREATE TABLE IF NOT EXISTS dim_weather (
 );
 
 CREATE TABLE IF NOT EXISTS fact_station_status (
-  station_status_id    BIGSERIAL PRIMARY KEY,
-  city                 TEXT NOT NULL,
-  observed_at          TIMESTAMPTZ NOT NULL,
-  station_key          TEXT NOT NULL REFERENCES dim_station(station_key),
-  station_id           TEXT NOT NULL,
-  date_id              INTEGER REFERENCES dim_date(date_id),
-  time_id              SMALLINT REFERENCES dim_time(time_id),
-  weather_id           BIGINT REFERENCES dim_weather(weather_id),
-  num_bikes_available  INTEGER,
-  num_docks_available  INTEGER,
-  is_renting           SMALLINT,
-  is_returning         SMALLINT,
-  bike_shortage_30m    SMALLINT,
-  UNIQUE (city, observed_at, station_id)
+  fact_station_status_key  TEXT PRIMARY KEY,
+  city                     TEXT NOT NULL,
+  station_id               TEXT NOT NULL,
+  station_key              TEXT NOT NULL,
+  station_version_key      TEXT NOT NULL REFERENCES dim_station(station_version_key),
+  snapshot_bucket_at_utc   TIMESTAMPTZ NOT NULL,
+  snapshot_bucket_at_paris TIMESTAMP NOT NULL,
+  date_id                  INTEGER REFERENCES dim_date(date_id),
+  time_id                  SMALLINT REFERENCES dim_time(time_id),
+  last_reported_at_utc     TIMESTAMPTZ,
+  last_reported_at_paris   TIMESTAMP,
+  num_bikes_available      INTEGER,
+  num_docks_available      INTEGER,
+  is_renting               SMALLINT,
+  is_returning             SMALLINT,
+  UNIQUE (city, snapshot_bucket_at_utc, station_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fact_station_status_obs
-  ON fact_station_status (observed_at);
+  ON fact_station_status (snapshot_bucket_at_utc);
 
 CREATE INDEX IF NOT EXISTS idx_fact_station_status_station_obs
-  ON fact_station_status (city, station_id, observed_at);
+  ON fact_station_status (city, station_id, snapshot_bucket_at_utc);

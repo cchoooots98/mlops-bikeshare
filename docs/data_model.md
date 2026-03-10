@@ -20,17 +20,15 @@ This document defines the dbt-first warehouse boundary for GBFS, weather, and ho
 
 ### dbt Curated in `analytics`
 - `dim_station`
+- `dim_time`
 - `dim_weather`
 - `dim_date`
+- `fct_station_status`
 
 `dim_date` is now owned by dbt. Holiday ingestion stops at `stg_holidays`.
 
 ## Planned dbt Layers
 These layers are part of the target architecture but are not implemented in this phase.
-
-### Curated / Fact
-- `dim_time`
-- `fct_station_status`
 
 ### Intermediate
 - `int_station_neighbors`
@@ -46,41 +44,85 @@ These layers are part of the target architecture but are not implemented in this
 Station data should retain `city` from raw landing through staging, dimensions, and future facts. In production terms, `station_id` by itself is not a safe long-term business key once the warehouse may hold more than one city.
 
 ### `stg_station_information`
-- `run_id`
-- `ingested_at`
-- `source_last_updated`
-- `city`
-- `station_id`
-- `station_name`
-- `latitude`
-- `longitude`
-- `capacity`
+- grain: one row per `city + snapshot_bucket_at + station_id`
+- audit-only staging columns:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+- columns:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+  - `city`
+  - `snapshot_bucket_at`
+  - `station_id`
+  - `station_name`
+  - `latitude`
+  - `longitude`
+  - `capacity`
 
 ### `stg_station_status`
-- `run_id`
-- `ingested_at`
-- `source_last_updated`
-- `city`
-- `station_id`
-- `last_reported_at`
-- `num_bikes_available`
-- `num_docks_available`
-- `is_renting`
-- `is_returning`
+- grain: one row per `city + snapshot_bucket_at + station_id`
+- audit-only staging columns:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+- columns:
+  - `run_id`
+  - `ingested_at`
+  - `source_last_updated`
+  - `city`
+  - `snapshot_bucket_at`
+  - `station_id`
+  - `last_reported_at`
+  - `num_bikes_available`
+  - `num_docks_available`
+  - `is_renting`
+  - `is_returning`
 
 ### `dim_station`
-- `station_key`
-- `city`
-- `station_id`
-- `station_name`
-- `latitude`
-- `longitude`
-- `capacity`
+- SCD2 dimension with one row per station version
+- durable business key: `station_key`
+- row key: `station_version_key`
+- version boundaries come from station information `snapshot_bucket_at`
+- tracked attributes:
+  - `station_name`
+  - `latitude`
+  - `longitude`
+  - `capacity`
+- columns:
+  - `station_version_key`
+  - `station_key`
+  - `city`
+  - `station_id`
+  - `station_name`
+  - `latitude`
+  - `longitude`
+  - `capacity`
+  - `valid_from_utc`
+  - `valid_to_utc`
+  - `is_current`
 
-### Future `fct_station_status`
-- should retain `city`
-- should join station via `station_key`
-- should keep uniqueness scoped by `city + observed_at + station_id`
+### `fct_station_status`
+- lean fact table with one row per `city + snapshot_bucket_at + station_id`
+- joins station via `station_version_key`
+- columns:
+  - `fact_station_status_key`
+  - `city`
+  - `station_id`
+  - `station_key`
+  - `station_version_key`
+  - `snapshot_bucket_at_utc`
+  - `snapshot_bucket_at_paris`
+  - `date_id`
+  - `time_id`
+  - `last_reported_at_utc`
+  - `last_reported_at_paris`
+  - `num_bikes_available`
+  - `num_docks_available`
+  - `is_renting`
+  - `is_returning`
+- intentionally excludes `capacity`, utilization fields, and weather columns
 
 ## Weather Model Contract
 `dim_weather` is the single source of truth for weather features. It is built from `stg_weather_current` and `stg_weather_hourly`.
