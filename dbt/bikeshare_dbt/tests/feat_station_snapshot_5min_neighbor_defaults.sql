@@ -18,7 +18,7 @@ with stations_without_neighbors as (
 )
 select *
 from stations_without_neighbors
-where nbr_bikes_weighted <> 0.0
-   or nbr_docks_weighted <> 0.0
+where nbr_bikes_weighted is not null
+   or nbr_docks_weighted is not null
    or has_neighbors_within_radius <> 0
    or neighbor_count_within_radius <> 0

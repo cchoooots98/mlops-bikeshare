@@ -13,7 +13,27 @@
 {% set incremental_source_lookback_minutes = incremental_reprocess_buffer_minutes + max_roll_window_minutes %}
 {% set expected_future_snapshots = label_horizon_minutes // snapshot_step_minutes %}
 
-with base_source as (
+with incremental_state as (
+    {% if is_incremental() %}
+    select
+        coalesce(
+            max(to_timestamp(dt, 'YYYY-MM-DD-HH24-MI')::timestamp at time zone 'UTC')
+                - interval '{{ incremental_source_lookback_minutes }} minutes',
+            '1900-01-01'::timestamptz
+        ) as source_reprocess_from_utc,
+        coalesce(
+            max(to_timestamp(dt, 'YYYY-MM-DD-HH24-MI')::timestamp at time zone 'UTC')
+                - interval '{{ incremental_reprocess_buffer_minutes }} minutes',
+            '1900-01-01'::timestamptz
+        ) as output_reprocess_from_utc
+    from {{ this }}
+    {% else %}
+    select
+        '1900-01-01'::timestamptz as source_reprocess_from_utc,
+        '1900-01-01'::timestamptz as output_reprocess_from_utc
+    {% endif %}
+),
+base_source as (
     select
         e.city,
         e.station_id,
@@ -44,13 +64,7 @@ with base_source as (
         e.prev_num_docks_available
     from {{ ref('int_station_status_enriched') }} e
     {% if is_incremental() %}
-    where e.snapshot_bucket_at_utc >= (
-        select coalesce(
-            max(snapshot_bucket_at_utc) - interval '{{ incremental_source_lookback_minutes }} minutes',
-            '1900-01-01'::timestamptz
-        )
-        from {{ this }}
-    )
+    where e.snapshot_bucket_at_utc >= (select source_reprocess_from_utc from incremental_state)
     {% endif %}
 ),
 station_features as (
@@ -162,8 +176,8 @@ neighbor_aggregates as (
         cur.city,
         cur.station_id,
         cur.snapshot_bucket_at_utc,
-        coalesce(sum(n.neighbor_weight * nbr.bikes::double precision), 0.0) as nbr_bikes_weighted,
-        coalesce(sum(n.neighbor_weight * nbr.docks::double precision), 0.0) as nbr_docks_weighted,
+        sum(n.neighbor_weight * nbr.bikes::double precision) as nbr_bikes_weighted,
+        sum(n.neighbor_weight * nbr.docks::double precision) as nbr_docks_weighted,
         coalesce(max(n.neighbor_count_within_radius), 0) as neighbor_count_within_radius
     from station_features cur
     left join {{ ref('int_station_neighbors') }} n
@@ -178,14 +192,26 @@ neighbor_aggregates as (
         cur.station_id,
         cur.snapshot_bucket_at_utc
 ),
-future_window as (
+future_label_helpers as (
     select
         cur.city,
         cur.station_id,
         cur.snapshot_bucket_at_utc,
         count(fut.snapshot_bucket_at_utc) as future_snapshot_count,
         min(fut.bikes) as future_min_bikes_30,
-        min(fut.docks) as future_min_docks_30
+        min(fut.docks) as future_min_docks_30,
+        max(
+            case
+                when fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                    then fut.bikes
+            end
+        ) as target_bikes_t30,
+        max(
+            case
+                when fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                    then fut.docks
+            end
+        ) as target_docks_t30
     from station_features cur
     left join station_features fut
         on cur.city = fut.city
@@ -196,19 +222,6 @@ future_window as (
         cur.city,
         cur.station_id,
         cur.snapshot_bucket_at_utc
-),
-future_targets as (
-    select
-        cur.city,
-        cur.station_id,
-        cur.snapshot_bucket_at_utc,
-        fut.bikes as target_bikes_t30,
-        fut.docks as target_docks_t30
-    from station_features cur
-    left join station_features fut
-        on cur.city = fut.city
-       and cur.station_id = fut.station_id
-       and fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
 ),
 assembled as (
     select
@@ -254,20 +267,20 @@ assembled as (
         sf.hourly_precipitation_probability_pct,
         sf.hourly_weather_code,
         case
-            when fw.future_snapshot_count = {{ expected_future_snapshots }}
-                then ft.target_bikes_t30
+            when flh.future_snapshot_count = {{ expected_future_snapshots }}
+                then flh.target_bikes_t30
         end as target_bikes_t30,
         case
-            when fw.future_snapshot_count = {{ expected_future_snapshots }}
-                then ft.target_docks_t30
+            when flh.future_snapshot_count = {{ expected_future_snapshots }}
+                then flh.target_docks_t30
         end as target_docks_t30,
         case
-            when fw.future_snapshot_count = {{ expected_future_snapshots }}
-                then case when fw.future_min_bikes_30 <= {{ stockout_threshold }} then 1 else 0 end
+            when flh.future_snapshot_count = {{ expected_future_snapshots }}
+                then case when flh.future_min_bikes_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_bikes_30,
         case
-            when fw.future_snapshot_count = {{ expected_future_snapshots }}
-                then case when fw.future_min_docks_30 <= {{ stockout_threshold }} then 1 else 0 end
+            when flh.future_snapshot_count = {{ expected_future_snapshots }}
+                then case when flh.future_min_docks_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_docks_30,
         sf.snapshot_bucket_at_utc
     from station_features sf
@@ -279,14 +292,10 @@ assembled as (
         on sf.city = na.city
        and sf.station_id = na.station_id
        and sf.snapshot_bucket_at_utc = na.snapshot_bucket_at_utc
-    inner join future_window fw
-        on sf.city = fw.city
-       and sf.station_id = fw.station_id
-       and sf.snapshot_bucket_at_utc = fw.snapshot_bucket_at_utc
-    inner join future_targets ft
-        on sf.city = ft.city
-       and sf.station_id = ft.station_id
-       and sf.snapshot_bucket_at_utc = ft.snapshot_bucket_at_utc
+    inner join future_label_helpers flh
+        on sf.city = flh.city
+       and sf.station_id = flh.station_id
+       and sf.snapshot_bucket_at_utc = flh.snapshot_bucket_at_utc
 )
 select
     city,
@@ -333,11 +342,5 @@ select
     y_stockout_docks_30
 from assembled
 {% if is_incremental() %}
-where snapshot_bucket_at_utc >= (
-    select coalesce(
-        max(snapshot_bucket_at_utc) - interval '{{ incremental_reprocess_buffer_minutes }} minutes',
-        '1900-01-01'::timestamptz
-    )
-    from {{ this }}
-)
+where snapshot_bucket_at_utc >= (select output_reprocess_from_utc from incremental_state)
 {% endif %}

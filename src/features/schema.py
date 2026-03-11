@@ -40,6 +40,7 @@ FEATURE_COLUMNS: List[str] = [
 LABEL_COLUMNS: List[str] = ["y_stockout_bikes_30", "y_stockout_docks_30", "target_bikes_t30", "target_docks_t30"]
 
 REQUIRED_BASE = ["city", "dt", "station_id", "capacity", "lat", "lon", "bikes", "docks"]
+NULLABLE_BY_DESIGN_FEATURE_COLUMNS = ["nbr_bikes_weighted", "nbr_docks_weighted"]
 
 
 def _is_dt_string(s: pd.Series) -> bool:
@@ -88,6 +89,9 @@ def validate_feature_df(df: pd.DataFrame, missing_rate_threshold: float = 0.01):
 
     # --- NEW STEP: drop all-NaN feature columns ---
     feat = df[FEATURE_COLUMNS].copy()
+    for c in NULLABLE_BY_DESIGN_FEATURE_COLUMNS:
+        if c in feat.columns:
+            feat = feat.drop(columns=[c])
     all_nan_cols = [c for c in feat.columns if feat[c].isna().all()]
     if all_nan_cols:
         print(f"[INFO] Dropping {len(all_nan_cols)} all-NaN feature columns: {all_nan_cols}")

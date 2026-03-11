@@ -338,14 +338,14 @@ def engineer(status, info, weather5, nbr, horizon_min=30, threshold=2, city="par
         )
         df = df.merge(agg, on=["station_id", "dt"], how="left")
         df = df.merge(nbr_counts, on="station_id", how="left")
-        df["nbr_bikes_weighted"] = df["wb"].fillna(0.0).astype("float32")
-        df["nbr_docks_weighted"] = df["wd"].fillna(0.0).astype("float32")
         df["neighbor_count_within_radius"] = df["neighbor_count_within_radius"].fillna(0.0).astype("float32")
         df["has_neighbors_within_radius"] = (df["neighbor_count_within_radius"] > 0).astype("float32")
+        df["nbr_bikes_weighted"] = df["wb"].where(df["neighbor_count_within_radius"] > 0, np.nan).astype("float32")
+        df["nbr_docks_weighted"] = df["wd"].where(df["neighbor_count_within_radius"] > 0, np.nan).astype("float32")
         df = df.drop(columns=["wb", "wd"])
     else:
-        df["nbr_bikes_weighted"] = np.float32(0.0)
-        df["nbr_docks_weighted"] = np.float32(0.0)
+        df["nbr_bikes_weighted"] = np.float32(np.nan)
+        df["nbr_docks_weighted"] = np.float32(np.nan)
         df["neighbor_count_within_radius"] = np.float32(0.0)
         df["has_neighbors_within_radius"] = np.float32(0.0)
 
