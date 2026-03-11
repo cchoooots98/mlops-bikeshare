@@ -38,10 +38,18 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      _PIP_ADDITIONAL_REQUIREMENTS: "pandas==2.1.4 psycopg2-binary==2.9.10 requests==2.32.3"
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas==2.1.4 psycopg2-binary==2.9.10 requests==2.32.3 dbt-postgres==1.8.2"
       GBFS_BASE_URL: "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json"
       GBFS_CITY: "paris"
       DW_CONN_ID: "velib_dw"
+      DBT_PROJECT_DIR: "dbt/bikeshare_dbt"
+      DBT_PROFILES_DIR: "dbt"
+      DBT_HOST: "dw-postgres"
+      DBT_PORT: "5432"
+      DBT_USER: "velib"
+      DBT_PASSWORD: "velib"
+      DBT_DATABASE: "velib_dw"
+      DBT_SCHEMA: "analytics"
       AWS_DEFAULT_REGION: eu-west-3
       AWS_PROFILE: Shirley-fr
       AWS_SDK_LOAD_CONFIG: "1"
@@ -51,6 +59,8 @@ services:
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/logs:/opt/airflow/logs
       - ./src:/opt/airflow/src
+      - ./dbt:/opt/airflow/dbt
+      - ./pipelines:/opt/airflow/pipelines
       - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
       - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
       - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache

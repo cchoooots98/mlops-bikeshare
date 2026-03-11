@@ -3,13 +3,12 @@ bikeshare_dbt:
   outputs:
     dev:
       type: postgres
-      host: localhost
-      user: velib
-      password: velib
-      port: 15432
-      dbname: velib_dw
-      schema: analytics
-      threads: 4
-      connect_timeout: 10
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      user: "{{ env_var('DBT_USER', 'velib') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'velib') }}"
+      port: "{{ env_var('DBT_PORT', '15432') | int }}"
+      dbname: "{{ env_var('DBT_DATABASE', 'velib_dw') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+      connect_timeout: "{{ env_var('DBT_CONNECT_TIMEOUT', '10') | int }}"
       sslmode: prefer
-
