@@ -2,29 +2,7 @@
     materialized='table'
 ) }}
 
-with status_ranked as (
-    select
-        city,
-        station_id,
-        station_key,
-        snapshot_bucket_at_utc,
-        snapshot_bucket_at_paris,
-        last_reported_at_utc,
-        last_reported_at_paris,
-        num_bikes_available,
-        num_docks_available,
-        is_renting,
-        is_returning,
-        ingested_at_utc,
-        source_last_updated,
-        run_id,
-        row_number() over (
-            partition by city, station_id, snapshot_bucket_at_utc
-            order by ingested_at_utc desc, source_last_updated desc, run_id desc
-        ) as row_num
-    from {{ ref('stg_station_status') }}
-),
-status_deduped as (
+with status_source as (
     select
         city,
         station_id,
@@ -37,18 +15,11 @@ status_deduped as (
         num_docks_available,
         is_renting,
         is_returning
-    from status_ranked
-    where row_num = 1
+    from {{ ref('stg_station_status') }}
 ),
 station_joined as (
     select
-        concat(
-            s.city,
-            '|',
-            to_char(s.snapshot_bucket_at_utc, 'YYYY-MM-DD HH24:MI:SSOF'),
-            '|',
-            s.station_id
-        ) as fact_station_status_key,
+        {{ station_snapshot_key('s.city', 's.station_id', 's.snapshot_bucket_at_utc') }} as fact_station_status_key,
         s.city,
         s.station_id,
         s.station_key,
@@ -61,7 +32,7 @@ station_joined as (
         s.num_docks_available,
         s.is_renting,
         s.is_returning
-    from status_deduped s
+    from status_source s
     left join {{ ref('dim_station') }} d
         on s.station_key = d.station_key
        and s.snapshot_bucket_at_utc >= d.valid_from_utc

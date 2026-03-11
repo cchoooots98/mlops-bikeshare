@@ -1,14 +1,29 @@
 {{ config(
     materialized='incremental',
     unique_key='weather_key',
-    on_schema_change='sync_all_columns'
+    incremental_strategy='delete+insert',
+    on_schema_change='fail'
 ) }}
 
-with current_weather as (
+{% set weather_incremental_reprocess_buffer_minutes = var('weather_incremental_reprocess_buffer_minutes', 180) | int %}
+
+with incremental_state as (
+    {% if is_incremental() %}
+    select
+        coalesce(
+            max(observed_at) - interval '{{ weather_incremental_reprocess_buffer_minutes }} minutes',
+            '1900-01-01'::timestamptz
+        ) as reprocess_from_utc
+    from {{ this }}
+    {% else %}
+    select '1900-01-01'::timestamptz as reprocess_from_utc
+    {% endif %}
+),
+current_weather as (
     select *
     from {{ ref('stg_weather_current') }}
     {% if is_incremental() %}
-    where observed_at_utc > (select coalesce(max(observed_at), '1900-01-01'::timestamptz) from {{ this }})
+    where observed_at_utc >= (select reprocess_from_utc from incremental_state)
     {% endif %}
 ),
 hourly_merged as (
@@ -50,7 +65,7 @@ select
     concat(
         c.city,
         '|',
-        to_char(c.observed_at_utc, 'YYYY-MM-DD HH24:MI:SSOF')
+        {{ utc_ts_key('c.observed_at_utc') }}
     ) as weather_key,
     c.city,
     c.observed_at_utc as observed_at,

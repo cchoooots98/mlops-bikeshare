@@ -2,25 +2,7 @@
     materialized='table'
 ) }}
 
-with ranked_station_info as (
-    select
-        station_key,
-        city,
-        station_id,
-        station_name,
-        latitude,
-        longitude,
-        capacity,
-        snapshot_bucket_at_utc,
-        row_number() over (
-            partition by station_key, snapshot_bucket_at_utc
-            order by ingested_at_utc desc, source_last_updated desc, run_id desc
-        ) as row_num
-    from {{ ref('stg_station_information') }}
-    where latitude between -90 and 90
-      and longitude between -180 and 180
-),
-station_info_deduped as (
+with station_info_source as (
     select
         station_key,
         city,
@@ -30,8 +12,9 @@ station_info_deduped as (
         longitude,
         capacity,
         snapshot_bucket_at_utc
-    from ranked_station_info
-    where row_num = 1
+    from {{ ref('stg_station_information') }}
+    where latitude between -90 and 90
+      and longitude between -180 and 180
 ),
 station_change_candidates as (
     select
@@ -52,7 +35,7 @@ station_change_candidates as (
                 coalesce(capacity::text, '')
             )
         ) as attribute_hash
-    from station_info_deduped
+    from station_info_source
 ),
 station_change_points as (
     select
@@ -78,11 +61,7 @@ station_change_points as (
 ),
 station_scd2 as (
     select
-        concat(
-            station_key,
-            '|',
-            to_char(snapshot_bucket_at_utc, 'YYYY-MM-DD HH24:MI:SSOF')
-        ) as station_version_key,
+        {{ station_snapshot_key('city', 'station_id', 'snapshot_bucket_at_utc') }} as station_version_key,
         station_key,
         city,
         station_id,

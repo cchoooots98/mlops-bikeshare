@@ -45,12 +45,6 @@ select
     longitude,
     capacity,
     concat(city, '|', station_id) as station_key,
-    concat(
-        city,
-        '|',
-        to_char(snapshot_bucket_at_utc, 'YYYY-MM-DD HH24:MI:SSOF'),
-        '|',
-        station_id
-    ) as station_info_pk
+    {{ station_snapshot_key('city', 'station_id', 'snapshot_bucket_at_utc') }} as station_info_pk
 from ranked
 where row_num = 1

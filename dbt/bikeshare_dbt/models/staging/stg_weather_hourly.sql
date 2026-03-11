@@ -4,34 +4,70 @@
 
 with src as (
     select * from {{ source('raw_staging', 'stg_weather_hourly') }}
+),
+ranked as (
+    select
+        run_id::text as run_id,
+        city::text as city,
+        source::text as source,
+        source_last_updated::bigint as source_last_updated,
+        ingested_at::timestamptz as ingested_at_utc,
+        (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
+        snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
+        (snapshot_bucket_at::timestamptz at time zone 'Europe/Paris')::timestamp as snapshot_bucket_at_paris,
+        observed_at::timestamptz as observed_at_utc,
+        (observed_at::timestamptz at time zone 'Europe/Paris')::timestamp as observed_at_paris,
+        forecast_at::timestamptz as forecast_at_utc,
+        (forecast_at::timestamptz at time zone 'Europe/Paris')::timestamp as forecast_at_paris,
+        forecast_horizon_min::integer as forecast_horizon_min,
+        temperature_c::double precision as temperature_c,
+        humidity_pct::double precision as humidity_pct,
+        wind_speed_ms::double precision as wind_speed_ms,
+        precipitation_mm::double precision as precipitation_mm,
+        precipitation_probability_pct::double precision as precipitation_probability_pct,
+        weather_code::integer as weather_code,
+        weather_main::text as weather_main,
+        weather_description::text as weather_description,
+        row_number() over (
+            partition by
+                city::text,
+                snapshot_bucket_at::timestamptz,
+                forecast_at::timestamptz
+            order by
+                source_last_updated::bigint desc,
+                ingested_at::timestamptz desc,
+                run_id::text desc
+        ) as row_num
+    from src
 )
 select
-    run_id::text as run_id,
-    city::text as city,
-    source::text as source,
-    source_last_updated::bigint as source_last_updated,
-    ingested_at::timestamptz as ingested_at_utc,
-    (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
-    snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
-    (snapshot_bucket_at::timestamptz at time zone 'Europe/Paris')::timestamp as snapshot_bucket_at_paris,
-    observed_at::timestamptz as observed_at_utc,
-    (observed_at::timestamptz at time zone 'Europe/Paris')::timestamp as observed_at_paris,
-    forecast_at::timestamptz as forecast_at_utc,
-    (forecast_at::timestamptz at time zone 'Europe/Paris')::timestamp as forecast_at_paris,
-    forecast_horizon_min::integer as forecast_horizon_min,
-    temperature_c::double precision as temperature_c,
-    humidity_pct::double precision as humidity_pct,
-    wind_speed_ms::double precision as wind_speed_ms,
-    precipitation_mm::double precision as precipitation_mm,
-    precipitation_probability_pct::double precision as precipitation_probability_pct,
-    weather_code::integer as weather_code,
-    weather_main::text as weather_main,
-    weather_description::text as weather_description,
+    run_id,
+    city,
+    source,
+    source_last_updated,
+    ingested_at_utc,
+    ingested_at_paris,
+    snapshot_bucket_at_utc,
+    snapshot_bucket_at_paris,
+    observed_at_utc,
+    observed_at_paris,
+    forecast_at_utc,
+    forecast_at_paris,
+    forecast_horizon_min,
+    temperature_c,
+    humidity_pct,
+    wind_speed_ms,
+    precipitation_mm,
+    precipitation_probability_pct,
+    weather_code,
+    weather_main,
+    weather_description,
     concat(
-        city::text,
+        city,
         '|',
-        to_char(snapshot_bucket_at::timestamptz, 'YYYY-MM-DD HH24:MI:SSOF'),
+        {{ utc_ts_key('snapshot_bucket_at_utc') }},
         '|',
-        to_char(forecast_at::timestamptz, 'YYYY-MM-DD HH24:MI:SSOF')
+        {{ utc_ts_key('forecast_at_utc') }}
     ) as weather_hourly_pk
-from src
+from ranked
+where row_num = 1
