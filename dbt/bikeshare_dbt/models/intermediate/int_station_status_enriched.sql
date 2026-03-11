@@ -147,10 +147,12 @@ select
     hourly_precipitation_mm,
     hourly_precipitation_probability_pct,
     hourly_weather_code,
-    weather_asof_lag_minutes,
+    weather_asof_lag_minutes::double precision as weather_asof_lag_minutes,
     has_weather_context,
     prev_snapshot_bucket_at_utc,
-    extract(epoch from (snapshot_bucket_at_utc - prev_snapshot_bucket_at_utc)) / 60.0 as minutes_since_prev_snapshot,
+    (
+        extract(epoch from (snapshot_bucket_at_utc - prev_snapshot_bucket_at_utc)) / 60.0
+    )::double precision as minutes_since_prev_snapshot,
     prev_num_bikes_available,
     prev_num_docks_available
 from temporal_helpers

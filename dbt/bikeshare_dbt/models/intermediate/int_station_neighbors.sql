@@ -105,8 +105,8 @@ selected_neighbors as (
         neighbor_station_key,
         neighbor_station_id,
         distance_km,
-        neighbor_count_within_radius,
-        neighbor_rank
+        neighbor_count_within_radius::integer as neighbor_count_within_radius,
+        neighbor_rank::integer as neighbor_rank
     from ranked_pairs
     where neighbor_rank <= {{ neighbor_k }}
 ),

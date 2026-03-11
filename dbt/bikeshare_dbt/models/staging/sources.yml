@@ -5,7 +5,116 @@ sources:
     schema: public
     tables:
       - name: stg_station_information
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 20, period: minute}
+          error_after: {count: 60, period: minute}
+        tests:
+          - duplicate_grain:
+              arguments:
+                columns: ["city", "snapshot_bucket_at", "station_id"]
+              config:
+                severity: warn
+        columns:
+          - name: run_id
+            tests:
+              - not_null
+          - name: city
+            tests:
+              - not_null
+          - name: snapshot_bucket_at
+            tests:
+              - not_null
+          - name: station_id
+            tests:
+              - not_null
       - name: stg_station_status
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 20, period: minute}
+          error_after: {count: 60, period: minute}
+        tests:
+          - duplicate_grain:
+              arguments:
+                columns: ["city", "snapshot_bucket_at", "station_id"]
+              config:
+                severity: warn
+        columns:
+          - name: run_id
+            tests:
+              - not_null
+          - name: city
+            tests:
+              - not_null
+          - name: snapshot_bucket_at
+            tests:
+              - not_null
+          - name: station_id
+            tests:
+              - not_null
       - name: stg_weather_current
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 30, period: minute}
+          error_after: {count: 120, period: minute}
+        tests:
+          - duplicate_grain:
+              arguments:
+                columns: ["city", "observed_at"]
+              config:
+                severity: warn
+        columns:
+          - name: run_id
+            tests:
+              - not_null
+          - name: city
+            tests:
+              - not_null
+          - name: observed_at
+            tests:
+              - not_null
       - name: stg_weather_hourly
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 30, period: minute}
+          error_after: {count: 120, period: minute}
+        tests:
+          - duplicate_grain:
+              arguments:
+                columns: ["city", "snapshot_bucket_at", "forecast_at"]
+              config:
+                severity: warn
+        columns:
+          - name: run_id
+            tests:
+              - not_null
+          - name: city
+            tests:
+              - not_null
+          - name: snapshot_bucket_at
+            tests:
+              - not_null
+          - name: forecast_at
+            tests:
+              - not_null
       - name: stg_holidays
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 400, period: day}
+          error_after: {count: 800, period: day}
+        tests:
+          - duplicate_grain:
+              arguments:
+                columns: ["country_code", "holiday_date"]
+              config:
+                severity: warn
+        columns:
+          - name: run_id
+            tests:
+              - not_null
+          - name: country_code
+            tests:
+              - not_null
+          - name: holiday_date
+            tests:
+              - not_null

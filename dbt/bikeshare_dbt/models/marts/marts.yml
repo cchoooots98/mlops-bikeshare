@@ -2,21 +2,35 @@ version: 2
 
 models:
   - name: dim_station
+    config:
+      contract:
+        enforced: true
+      tags: ["contract_critical"]
+      meta:
+        sla: daily_contract
+        tier: shared
     columns:
       - name: station_version_key
+        data_type: text
         tests:
           - not_null
           - unique
       - name: station_key
+        data_type: text
         tests:
           - not_null
       - name: city
+        data_type: text
         tests:
           - not_null
       - name: station_id
+        data_type: text
         tests:
           - not_null
+      - name: station_name
+        data_type: text
       - name: latitude
+        data_type: double precision
         tests:
           - not_null
           - value_between:
@@ -24,32 +38,107 @@ models:
                 min_value: -90
                 max_value: 90
       - name: longitude
+        data_type: double precision
         tests:
           - not_null
           - value_between:
               arguments:
                 min_value: -180
                 max_value: 180
-      - name: valid_from_utc
-        tests:
-          - not_null
-      - name: is_current
-        tests:
-          - not_null
       - name: capacity
+        data_type: integer
         tests:
           - non_negative
+      - name: valid_from_utc
+        data_type: timestamp with time zone
+        tests:
+          - not_null
+      - name: valid_to_utc
+        data_type: timestamp with time zone
+      - name: is_current
+        data_type: boolean
+        tests:
+          - not_null
 
   - name: dim_weather
-    columns: 
+    config:
+      contract:
+        enforced: true
+      tags: ["contract_critical", "incremental"]
+      meta:
+        sla: daily_contract
+        tier: shared
+    columns:
       - name: weather_key
+        data_type: text
         tests:
           - not_null
           - unique
-      - name: observed_at
+      - name: city
+        data_type: text
         tests:
           - not_null
-      - name: city
+      - name: observed_at
+        data_type: timestamp with time zone
+        tests:
+          - not_null
+      - name: temperature_c
+        data_type: double precision
+      - name: humidity_pct
+        data_type: double precision
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: wind_speed_ms
+        data_type: double precision
+        tests:
+          - non_negative
+      - name: precipitation_mm
+        data_type: double precision
+        tests:
+          - non_negative
+      - name: weather_code
+        data_type: integer
+      - name: weather_main
+        data_type: text
+      - name: weather_description
+        data_type: text
+      - name: hourly_forecast_at
+        data_type: timestamp with time zone
+      - name: hourly_temperature_c
+        data_type: double precision
+      - name: hourly_humidity_pct
+        data_type: double precision
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: hourly_wind_speed_ms
+        data_type: double precision
+        tests:
+          - non_negative
+      - name: hourly_precipitation_mm
+        data_type: double precision
+        tests:
+          - non_negative
+      - name: hourly_precipitation_probability_pct
+        data_type: double precision
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: hourly_weather_code
+        data_type: integer
+      - name: hourly_weather_main
+        data_type: text
+      - name: source
+        data_type: text
+      - name: snapshot_bucket_at_utc
+        data_type: timestamp with time zone
         tests:
           - not_null
 
@@ -99,21 +188,33 @@ models:
           - not_null
   
   - name: fct_station_status
+    config:
+      contract:
+        enforced: true
+      tags: ["contract_critical"]
+      meta:
+        sla: daily_contract
+        tier: shared
     columns:
       - name: fact_station_status_key
+        data_type: text
         tests:
           - not_null
           - unique
       - name: city
+        data_type: text
         tests:
           - not_null
       - name: station_id
+        data_type: text
         tests:
           - not_null
       - name: station_key
+        data_type: text
         tests:
           - not_null
       - name: station_version_key
+        data_type: text
         tests:
           - not_null
           - relationships:
@@ -121,9 +222,13 @@ models:
                 to: ref('dim_station')
                 field: station_version_key
       - name: snapshot_bucket_at_utc
+        data_type: timestamp with time zone
         tests:
           - not_null
+      - name: snapshot_bucket_at_paris
+        data_type: timestamp without time zone
       - name: date_id
+        data_type: integer
         tests:
           - not_null
           - relationships:
@@ -131,9 +236,81 @@ models:
                 to: ref('dim_date')
                 field: date_id
       - name: time_id
+        data_type: integer
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_time')
                 field: time_id
+      - name: last_reported_at_utc
+        data_type: timestamp with time zone
+      - name: last_reported_at_paris
+        data_type: timestamp without time zone
+      - name: num_bikes_available
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative
+      - name: num_docks_available
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative
+      - name: is_renting
+        data_type: smallint
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_returning
+        data_type: smallint
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+  - name: fct_station_inventory_capacity_anomalies
+    config:
+      tags: ["anomaly"]
+      meta:
+        sla: daily_contract
+        tier: supporting
+    columns:
+      - name: city
+        data_type: text
+        tests:
+          - not_null
+      - name: station_id
+        data_type: text
+        tests:
+          - not_null
+      - name: station_version_key
+        data_type: text
+        tests:
+          - not_null
+      - name: snapshot_bucket_at_utc
+        data_type: timestamp with time zone
+        tests:
+          - not_null
+      - name: num_bikes_available
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative
+      - name: num_docks_available
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative
+      - name: capacity
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative
+      - name: over_capacity_by
+        data_type: integer
+        tests:
+          - not_null
+          - non_negative

@@ -18,15 +18,34 @@ clean-targets:
 
 models:
   bikeshare_dbt:
+    +meta:
+      owner: data_platform
+      domain: bikeshare
     staging:
       +materialized: view
+      +tags: ["source_quality"]
+      +meta:
+        sla: best_effort
+        tier: supporting
     marts:
       +materialized: table
+      +tags: ["contract_critical"]
+      +meta:
+        sla: daily_contract
+        tier: shared
     intermediate:
       +materialized: table
+      +tags: ["contract_critical"]
+      +meta:
+        sla: daily_contract
+        tier: shared
     # Feature models intentionally set materialization per model because
     # historical feature tables and latest-serving projections have different
     # operating patterns.
-    features: {}
+    features:
+      +tags: ["contract_critical", "feature_store"]
+      +meta:
+        sla: daily_contract
+        tier: critical
     debug:
       +enabled: false

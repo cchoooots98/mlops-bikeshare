@@ -2,6 +2,10 @@ version: 2
 
 models:
   - name: stg_station_information
+    tests:
+      - duplicate_grain:
+          arguments:
+            columns: ["city", "snapshot_bucket_at_utc", "station_id"]
     columns:
       - name: station_info_pk
         tests:
@@ -38,6 +42,10 @@ models:
           - non_negative
 
   - name: stg_station_status
+    tests:
+      - duplicate_grain:
+          arguments:
+            columns: ["city", "snapshot_bucket_at_utc", "station_id"]
     columns:
       - name: station_status_pk
         tests:
@@ -52,6 +60,29 @@ models:
       - name: station_id
         tests:
           - not_null
+      - name: last_reported_at_utc
+        tests:
+          - not_null
+      - name: num_bikes_available
+        tests:
+          - not_null
+          - non_negative
+      - name: num_docks_available
+        tests:
+          - not_null
+          - non_negative
+      - name: is_renting
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_returning
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
       - name: station_key
         tests:
           - not_null
@@ -61,6 +92,10 @@ models:
                 field: station_key
 
   - name: stg_weather_current
+    tests:
+      - duplicate_grain:
+          arguments:
+            columns: ["city", "observed_at_utc"]
     columns:
       - name: weather_current_pk
         tests:
@@ -75,8 +110,24 @@ models:
       - name: observed_at_utc
         tests:
           - not_null
+      - name: humidity_pct
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: wind_speed_ms
+        tests:
+          - non_negative
+      - name: precipitation_mm
+        tests:
+          - non_negative
 
   - name: stg_weather_hourly
+    tests:
+      - duplicate_grain:
+          arguments:
+            columns: ["city", "snapshot_bucket_at_utc", "forecast_at_utc"]
     columns:
       - name: weather_hourly_pk
         tests:
@@ -91,8 +142,36 @@ models:
       - name: forecast_at_utc
         tests:
           - not_null
+      - name: forecast_horizon_min
+        tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 60
+      - name: humidity_pct
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: wind_speed_ms
+        tests:
+          - non_negative
+      - name: precipitation_mm
+        tests:
+          - non_negative
+      - name: precipitation_probability_pct
+        tests:
+          - value_between_or_null:
+              arguments:
+                min_value: 0
+                max_value: 100
 
   - name: stg_holidays
+    tests:
+      - duplicate_grain:
+          arguments:
+            columns: ["country_code", "holiday_date"]
     columns:
       - name: holiday_pk
         tests:

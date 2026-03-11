@@ -17,12 +17,12 @@ with incremental_state as (
     {% if is_incremental() %}
     select
         coalesce(
-            max(to_timestamp(dt, 'YYYY-MM-DD-HH24-MI')::timestamp at time zone 'UTC')
+            max({{ feature_dt_to_utc('dt') }})
                 - interval '{{ incremental_source_lookback_minutes }} minutes',
             '1900-01-01'::timestamptz
         ) as source_reprocess_from_utc,
         coalesce(
-            max(to_timestamp(dt, 'YYYY-MM-DD-HH24-MI')::timestamp at time zone 'UTC')
+            max({{ feature_dt_to_utc('dt') }})
                 - interval '{{ incremental_reprocess_buffer_minutes }} minutes',
             '1900-01-01'::timestamptz
         ) as output_reprocess_from_utc
@@ -63,8 +63,9 @@ base_source as (
         e.prev_num_bikes_available,
         e.prev_num_docks_available
     from {{ ref('int_station_status_enriched') }} e
+    where e.num_bikes_available + e.num_docks_available <= e.capacity
     {% if is_incremental() %}
-    where e.snapshot_bucket_at_utc >= (select source_reprocess_from_utc from incremental_state)
+      and e.snapshot_bucket_at_utc >= (select source_reprocess_from_utc from incremental_state)
     {% endif %}
 ),
 station_features as (
@@ -73,13 +74,13 @@ station_features as (
         station_id,
         station_key,
         snapshot_bucket_at_utc,
-        to_char(snapshot_bucket_at_utc at time zone 'UTC', 'YYYY-MM-DD-HH24-MI') as dt,
+        {{ feature_dt_from_utc('snapshot_bucket_at_utc') }} as dt,
         capacity,
         lat,
         lon,
         bikes,
         docks,
-        coalesce(minutes_since_prev_snapshot, 0.0) as minutes_since_prev_snapshot,
+        coalesce(minutes_since_prev_snapshot, 0.0)::double precision as minutes_since_prev_snapshot,
         least(
             1.0,
             greatest(
@@ -178,7 +179,7 @@ neighbor_aggregates as (
         cur.snapshot_bucket_at_utc,
         sum(n.neighbor_weight * nbr.bikes::double precision) as nbr_bikes_weighted,
         sum(n.neighbor_weight * nbr.docks::double precision) as nbr_docks_weighted,
-        coalesce(max(n.neighbor_count_within_radius), 0) as neighbor_count_within_radius
+        coalesce(max(n.neighbor_count_within_radius), 0)::integer as neighbor_count_within_radius
     from station_features cur
     left join {{ ref('int_station_neighbors') }} n
         on cur.city = n.city
@@ -250,7 +251,7 @@ assembled as (
             when coalesce(na.neighbor_count_within_radius, 0) > 0 then 1
             else 0
         end as has_neighbors_within_radius,
-        coalesce(na.neighbor_count_within_radius, 0) as neighbor_count_within_radius,
+        coalesce(na.neighbor_count_within_radius, 0)::integer as neighbor_count_within_radius,
         sf.hour,
         sf.dow,
         sf.is_weekend,
