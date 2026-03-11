@@ -6,7 +6,7 @@
 - Thresholds: stockout threshold = 2 bikes/docks.
 - Weather source: weather originates from OpenWeather One Call 3.0 raw payloads, lands in warehouse staging tables, and is summarized into `dim_weather` by dbt.
 - Neighbor strategy: K=5 nearest neighbors within radius 0.8 km, weighted by `1/distance`.
-- Ownership target: dbt will become the long-term owner of production features; Python remains the consumer of final feature tables.
+- Ownership: dbt is now the formal producer of warehouse feature tables; Python remains the consumer of final feature tables.
 
 ## Weather Features
 The curated weather dimension exposes one row per weather observation time with:
@@ -27,7 +27,7 @@ The curated weather dimension exposes one row per weather observation time with:
 - `hourly_weather_code`
 
 
-The planned feature layer will keep only the following weather fields as first-class model features:
+The implemented feature layer keeps only the following weather fields as first-class model features:
 
 - `temperature_c`
 - `humidity_pct`
@@ -62,7 +62,7 @@ Legacy weather feature fields to remove in the next feature migration:
   - `stg_weather_current`
   - `stg_weather_hourly`
   - dbt `dim_weather`
-- Planned next flow:
+- Implemented current feature flow:
   - dbt `intermediate/`
   - dbt `feat_station_snapshot_5min`
   - dbt `feat_station_snapshot_latest`
@@ -70,4 +70,4 @@ Legacy weather feature fields to remove in the next feature migration:
 ## Reproducibility
 - Re-running ingestion with the same snapshot bucket rewrites the same staging partition for that city and bucket.
 - Re-running dbt rebuilds the weather dimension deterministically from warehouse staging.
-- Future dbt feature models will consume only the `dim_weather` contract and will not reuse the legacy Athena weather schema.
+- The implemented dbt feature models consume the `dim_weather` contract and do not reuse the legacy Athena weather schema.

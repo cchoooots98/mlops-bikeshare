@@ -27,8 +27,8 @@ This document defines the dbt-first warehouse boundary for GBFS, weather, and ho
 
 `dim_date` is now owned by dbt. Holiday ingestion stops at `stg_holidays`.
 
-## Planned dbt Layers
-These layers are part of the target architecture but are not implemented in this phase.
+## Implemented dbt Layers
+These layers are implemented in the current repository and form the formal dbt producer layer for downstream ML consumers.
 
 ### Intermediate
 - `int_station_neighbors`
@@ -186,7 +186,7 @@ For each current-weather row, dbt joins hourly rows from the same `city + run_id
 - `snapshot_bucket_at_utc`
 
 ## Weather Feature Direction
-The planned dbt feature layer will consume the following weather columns from `dim_weather`:
+The implemented dbt feature layer consumes the following weather columns from `dim_weather`:
 
 - `temperature_c`
 - `humidity_pct`

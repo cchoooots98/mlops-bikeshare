@@ -7,7 +7,7 @@
 
 ## Data and Labels
 - Target source table: `analytics.feat_station_snapshot_5min` in Postgres/dbt.
-- Current repository state: the Python training code still reads `features_offline` (Athena external). Migrating training to dbt-owned feature tables is planned but not implemented in this phase.
+- Current repository state: the dbt producer layer is implemented in Postgres, but the Python training consumer still reads `features_offline` (Athena external). Consumer migration remains the next step.
 - Feature set: defined centrally in `schema.py -> FEATURE_COLUMNS`.
 - Labels:
   - `y_stockout_bikes_30`

@@ -112,7 +112,7 @@ The warehouse direction is now dbt-first:
 
 - Python ingestion owns raw landing and `public.stg_*` only
 - dbt owns curated dimensions such as `dim_weather` and `dim_date`
-- dbt `intermediate/` and `features/` layers are the planned home for future production feature engineering
+- dbt `intermediate/` and `features/` layers now own the formal warehouse feature engineering path
 
 Weather feature design now aligns to `dim_weather`. The curated weather contract keeps current-observation fields plus one merged hourly forecast row per ingest bucket:
 
