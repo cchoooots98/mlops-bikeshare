@@ -12,7 +12,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.orchestration.dbt_tasks import parse_select_models, run_feature_build
+from src.orchestration.dbt_tasks import parse_bool, parse_select_models, run_feature_build
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -23,11 +23,23 @@ def run_dbt_feature_build_task():
     select_models = parse_select_models(
         _get_setting("DBT_FEATURE_BUILD_SELECT", "DBT_FEATURE_BUILD_SELECT", ""),
     )
-    run_feature_build(
+    test_models = parse_select_models(
+        _get_setting("DBT_FEATURE_BUILD_TEST_SELECT", "DBT_FEATURE_BUILD_TEST_SELECT", ""),
+        default_models=select_models,
+    )
+    skip_tests = parse_bool(
+        _get_setting("DBT_FEATURE_BUILD_SKIP_TESTS", "DBT_FEATURE_BUILD_SKIP_TESTS", "false"),
+    )
+    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "1"))
+    summary = run_feature_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=select_models,
+        test_models=test_models,
+        threads=threads,
+        skip_tests=skip_tests,
     )
+    print(f"AIRFLOW_TASK_METRIC run_dbt_feature_build {summary}")
 
 
 default_args = {

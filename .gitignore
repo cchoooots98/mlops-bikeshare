@@ -35,5 +35,7 @@ src/package/
 dbt/.user.yml
 dbt/bikeshare_dbt/target/
 
+dbt/bikeshare_dbt/logs/
+
 # local planning attachments
 docs/plan_detail/
