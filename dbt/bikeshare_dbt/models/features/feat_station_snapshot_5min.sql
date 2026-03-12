@@ -2,7 +2,11 @@
     materialized='incremental',
     unique_key=['city', 'station_id', 'dt'],
     incremental_strategy='delete+insert',
-    on_schema_change='fail'
+    on_schema_change='fail',
+    post_hook=[
+        "create unique index if not exists idx_feat_station_snapshot_5min_pk on {{ this }} (city, station_id, dt)",
+        "create index if not exists idx_feat_station_snapshot_5min_station_dt on {{ this }} (city, station_id, dt desc)"
+    ]
 ) }}
 
 {% set stockout_threshold = var('stockout_threshold', 2) | int %}
@@ -126,51 +130,66 @@ station_features as (
         hourly_weather_code
     from base_source
 ),
-rolling_features as (
+station_features_windowed as (
     select
-        cur.city,
-        cur.station_id,
-        cur.station_key,
-        cur.snapshot_bucket_at_utc,
-        sum(
-            case
-                when hist.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc - interval '15 minutes'
-                    then hist.delta_bikes_5m
-                else 0.0
-            end
+        sf.*,
+        sum(delta_bikes_5m) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '15 minutes' preceding and current row
         ) as roll15_net_bikes,
-        sum(
-            case
-                when hist.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc - interval '30 minutes'
-                    then hist.delta_bikes_5m
-                else 0.0
-            end
+        sum(delta_bikes_5m) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '30 minutes' preceding and current row
         ) as roll30_net_bikes,
-        sum(hist.delta_bikes_5m) as roll60_net_bikes,
-        avg(
-            case
-                when hist.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc - interval '15 minutes'
-                    then hist.bikes::double precision
-            end
+        sum(delta_bikes_5m) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '{{ max_roll_window_minutes }} minutes' preceding and current row
+        ) as roll60_net_bikes,
+        avg(bikes::double precision) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '15 minutes' preceding and current row
         ) as roll15_bikes_mean,
-        avg(
-            case
-                when hist.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc - interval '30 minutes'
-                    then hist.bikes::double precision
-            end
+        avg(bikes::double precision) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '30 minutes' preceding and current row
         ) as roll30_bikes_mean,
-        avg(hist.bikes::double precision) as roll60_bikes_mean
-    from station_features cur
-    left join station_features hist
-        on cur.city = hist.city
-       and cur.station_id = hist.station_id
-       and hist.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc - interval '{{ max_roll_window_minutes }} minutes'
-       and hist.snapshot_bucket_at_utc <= cur.snapshot_bucket_at_utc
-    group by
-        cur.city,
-        cur.station_id,
-        cur.station_key,
-        cur.snapshot_bucket_at_utc
+        avg(bikes::double precision) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '{{ max_roll_window_minutes }} minutes' preceding and current row
+        ) as roll60_bikes_mean,
+        count(*) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '{{ snapshot_step_minutes }} minutes' following
+            and interval '{{ label_horizon_minutes }} minutes' following
+        ) as future_snapshot_count,
+        min(bikes) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '{{ snapshot_step_minutes }} minutes' following
+            and interval '{{ label_horizon_minutes }} minutes' following
+        ) as future_min_bikes_30,
+        min(docks) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+            range between interval '{{ snapshot_step_minutes }} minutes' following
+            and interval '{{ label_horizon_minutes }} minutes' following
+        ) as future_min_docks_30,
+        lead(bikes, {{ expected_future_snapshots }}) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+        ) as target_bikes_t30_raw,
+        lead(docks, {{ expected_future_snapshots }}) over (
+            partition by city, station_id
+            order by snapshot_bucket_at_utc
+        ) as target_docks_t30_raw
+    from station_features sf
 ),
 neighbor_aggregates as (
     select
@@ -180,45 +199,14 @@ neighbor_aggregates as (
         sum(n.neighbor_weight * nbr.bikes::double precision) as nbr_bikes_weighted,
         sum(n.neighbor_weight * nbr.docks::double precision) as nbr_docks_weighted,
         coalesce(max(n.neighbor_count_within_radius), 0)::integer as neighbor_count_within_radius
-    from station_features cur
+    from station_features_windowed cur
     left join {{ ref('int_station_neighbors') }} n
         on cur.city = n.city
        and cur.station_id = n.station_id
-    left join station_features nbr
+    left join station_features_windowed nbr
         on nbr.city = n.city
        and nbr.station_id = n.neighbor_station_id
        and nbr.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc
-    group by
-        cur.city,
-        cur.station_id,
-        cur.snapshot_bucket_at_utc
-),
-future_label_helpers as (
-    select
-        cur.city,
-        cur.station_id,
-        cur.snapshot_bucket_at_utc,
-        count(fut.snapshot_bucket_at_utc) as future_snapshot_count,
-        min(fut.bikes) as future_min_bikes_30,
-        min(fut.docks) as future_min_docks_30,
-        max(
-            case
-                when fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
-                    then fut.bikes
-            end
-        ) as target_bikes_t30,
-        max(
-            case
-                when fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
-                    then fut.docks
-            end
-        ) as target_docks_t30
-    from station_features cur
-    left join station_features fut
-        on cur.city = fut.city
-       and cur.station_id = fut.station_id
-       and fut.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc
-       and fut.snapshot_bucket_at_utc <= cur.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
     group by
         cur.city,
         cur.station_id,
@@ -239,12 +227,12 @@ assembled as (
         sf.util_docks,
         sf.delta_bikes_5m,
         sf.delta_docks_5m,
-        rf.roll15_net_bikes,
-        rf.roll30_net_bikes,
-        rf.roll60_net_bikes,
-        rf.roll15_bikes_mean,
-        rf.roll30_bikes_mean,
-        rf.roll60_bikes_mean,
+        sf.roll15_net_bikes,
+        sf.roll30_net_bikes,
+        sf.roll60_net_bikes,
+        sf.roll15_bikes_mean,
+        sf.roll30_bikes_mean,
+        sf.roll60_bikes_mean,
         na.nbr_bikes_weighted,
         na.nbr_docks_weighted,
         case
@@ -268,35 +256,27 @@ assembled as (
         sf.hourly_precipitation_probability_pct,
         sf.hourly_weather_code,
         case
-            when flh.future_snapshot_count = {{ expected_future_snapshots }}
-                then flh.target_bikes_t30
+            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+                then sf.target_bikes_t30_raw
         end as target_bikes_t30,
         case
-            when flh.future_snapshot_count = {{ expected_future_snapshots }}
-                then flh.target_docks_t30
+            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+                then sf.target_docks_t30_raw
         end as target_docks_t30,
         case
-            when flh.future_snapshot_count = {{ expected_future_snapshots }}
-                then case when flh.future_min_bikes_30 <= {{ stockout_threshold }} then 1 else 0 end
+            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+                then case when sf.future_min_bikes_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_bikes_30,
         case
-            when flh.future_snapshot_count = {{ expected_future_snapshots }}
-                then case when flh.future_min_docks_30 <= {{ stockout_threshold }} then 1 else 0 end
+            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+                then case when sf.future_min_docks_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_docks_30,
         sf.snapshot_bucket_at_utc
-    from station_features sf
-    inner join rolling_features rf
-        on sf.city = rf.city
-       and sf.station_id = rf.station_id
-       and sf.snapshot_bucket_at_utc = rf.snapshot_bucket_at_utc
+    from station_features_windowed sf
     inner join neighbor_aggregates na
         on sf.city = na.city
        and sf.station_id = na.station_id
        and sf.snapshot_bucket_at_utc = na.snapshot_bucket_at_utc
-    inner join future_label_helpers flh
-        on sf.city = flh.city
-       and sf.station_id = flh.station_id
-       and sf.snapshot_bucket_at_utc = flh.snapshot_bucket_at_utc
 )
 select
     city,

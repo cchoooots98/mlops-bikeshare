@@ -1,5 +1,8 @@
 {{ config(
-    materialized='table'
+    materialized='table',
+    post_hook=[
+        "create index if not exists idx_int_station_status_enriched_station_ts on {{ this }} (city, station_id, snapshot_bucket_at_utc)"
+    ]
 ) }}
 
 {% set weather_asof_tolerance_minutes = var('station_status_weather_asof_tolerance_minutes', 15) | int %}

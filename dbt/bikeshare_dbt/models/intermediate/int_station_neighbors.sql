@@ -1,5 +1,9 @@
 {{ config(
-    materialized='table'
+    materialized='table',
+    post_hook=[
+        "create index if not exists idx_int_station_neighbors_station on {{ this }} (city, station_id)",
+        "create index if not exists idx_int_station_neighbors_neighbor on {{ this }} (city, neighbor_station_id)"
+    ]
 ) }}
 
 {% set neighbor_k = var('station_neighbors_k', 5) | int %}
