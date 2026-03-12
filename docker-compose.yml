@@ -50,6 +50,25 @@ services:
       DBT_PASSWORD: "velib"
       DBT_DATABASE: "velib_dw"
       DBT_SCHEMA: "analytics"
+      DBT_THREADS: "1"
+      DBT_AIRFLOW_POOL: "dbt_warehouse_serial"
+      DBT_FEATURE_BUILD_SELECTOR: "hf_feature_build_models"
+      DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_smoke_tests"
+      DBT_FEATURE_BUILD_SKIP_TESTS: "false"
+      DBT_QUALITY_MODEL_SELECTOR: "quality_models"
+      DBT_QUALITY_TEST_SELECTOR: "quality_gate_tests"
+      DBT_SOURCE_FRESHNESS_SELECT: "source:raw_staging.stg_station_status source:raw_staging.stg_station_information source:raw_staging.stg_weather_current source:raw_staging.stg_weather_hourly source:raw_staging.stg_holidays"
+      DBT_WEATHER_CURRENT_WARN_MINUTES: "30"
+      DBT_WEATHER_CURRENT_ERROR_MINUTES: "120"
+      DBT_WEATHER_HOURLY_WARN_MINUTES: "30"
+      DBT_WEATHER_HOURLY_ERROR_MINUTES: "120"
+      DBT_WEATHER_MIN_FORECAST_COVERAGE_MINUTES: "30"
+      DBT_CAPACITY_MISMATCH_WARN_RATE: "0.005"
+      DBT_CAPACITY_MISMATCH_ERROR_RATE: "0.02"
+      DBT_DUPLICATE_WARN_RATE: "0.001"
+      DBT_DUPLICATE_ERROR_RATE: "0.01"
+      DBT_QUALITY_LOOKBACK_HOURS: "2"
+      DBT_STATION_INFORMATION_QUALITY_LOOKBACK_DAYS: "2"
       AWS_DEFAULT_REGION: eu-west-3
       AWS_PROFILE: Shirley-fr
       AWS_SDK_LOAD_CONFIG: "1"
@@ -65,7 +84,7 @@ services:
       - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
       - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
     command: >
-      bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true"
+      bash -c "airflow db migrate && (airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true) && (airflow pools set dbt_warehouse_serial 1 'Serialize dbt warehouse mutations' || true)"
 
   airflow-webserver:
     image: apache/airflow:2.10.3

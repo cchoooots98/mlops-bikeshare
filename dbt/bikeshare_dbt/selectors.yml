@@ -1,0 +1,28 @@
+selectors:
+  - name: hf_feature_build_models
+    definition:
+      union:
+        - method: fqn
+          value: feat_station_snapshot_5min
+          parents: true
+        - method: fqn
+          value: feat_station_snapshot_latest
+          parents: true
+
+  - name: hf_smoke_tests
+    definition:
+      method: tag
+      value: hf_smoke
+
+  - name: quality_models
+    definition:
+      method: fqn
+      value: fct_station_inventory_capacity_anomalies
+
+  - name: quality_gate_tests
+    definition:
+      union:
+        - method: tag
+          value: quality_gate
+        - method: fqn
+          value: fct_station_inventory_capacity_anomalies
