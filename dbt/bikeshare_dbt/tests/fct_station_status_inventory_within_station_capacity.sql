@@ -1,4 +1,4 @@
-{{ config(severity='warn') }}
+{{ config(severity='warn', tags=['diagnostic']) }}
 
 select
     f.city,

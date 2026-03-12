@@ -1,12 +1,15 @@
 {% set lookback_hours = env_var('DBT_QUALITY_LOOKBACK_HOURS', '2') | int %}
-{% set warn_rate = env_var('DBT_CAPACITY_MISMATCH_WARN_RATE', '0.005') %}
-{% set error_rate = env_var('DBT_CAPACITY_MISMATCH_ERROR_RATE', '0.02') %}
+{% set warn_rate = env_var('DBT_CAPACITY_MISMATCH_WARN_RATE', '0.005') | float %}
+{% set error_rate = env_var('DBT_CAPACITY_MISMATCH_ERROR_RATE', '0.02') | float %}
+{% set rate_scale = 1000000 %}
+{% set warn_rate_scaled = (warn_rate * rate_scale) | round(0) | int %}
+{% set error_rate_scaled = (error_rate * rate_scale) | round(0) | int %}
 
 {{ config(
     tags=['quality_gate'],
-    fail_calc='coalesce(max(observed_rate), 0.0)',
-    warn_if='> ' ~ warn_rate,
-    error_if='> ' ~ error_rate
+    fail_calc='coalesce(max((observed_rate * ' ~ rate_scale ~ ')::bigint), 0)',
+    warn_if='> ' ~ warn_rate_scaled,
+    error_if='> ' ~ error_rate_scaled
 ) }}
 
 with recent_rows as (

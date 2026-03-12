@@ -1,4 +1,4 @@
-{{ config(tags=['quality_gate']) }}
+{{ config(tags=['deep_quality']) }}
 
 {% set radius_km = var('station_neighbors_radius_km', 0.8) | float %}
 

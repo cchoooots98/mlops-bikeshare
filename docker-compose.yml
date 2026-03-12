@@ -38,6 +38,8 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      # Airflow 2.10.3 still emits this deprecation warning internally even when the new key is used.
+      PYTHONWARNINGS: "ignore::FutureWarning:airflow.configuration"
       _PIP_ADDITIONAL_REQUIREMENTS: "pandas==2.1.4 psycopg2-binary==2.9.10 requests==2.32.3 dbt-postgres==1.8.2"
       GBFS_BASE_URL: "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json"
       GBFS_CITY: "paris"

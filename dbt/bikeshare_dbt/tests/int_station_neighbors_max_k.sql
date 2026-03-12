@@ -1,4 +1,4 @@
-{{ config(tags=['quality_gate']) }}
+{{ config(tags=['deep_quality']) }}
 
 {% set neighbor_k = var('station_neighbors_k', 5) | int %}
 

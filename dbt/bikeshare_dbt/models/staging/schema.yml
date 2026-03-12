@@ -6,6 +6,8 @@ models:
       - duplicate_grain:
           arguments:
             columns: ["city", "snapshot_bucket_at_utc", "station_id"]
+          config:
+            tags: ["quality_gate"]
     columns:
       - name: station_info_pk
         tests:
@@ -46,6 +48,8 @@ models:
       - duplicate_grain:
           arguments:
             columns: ["city", "snapshot_bucket_at_utc", "station_id"]
+          config:
+            tags: ["quality_gate"]
     columns:
       - name: station_status_pk
         tests:
@@ -96,6 +100,8 @@ models:
       - duplicate_grain:
           arguments:
             columns: ["city", "observed_at_utc"]
+          config:
+            tags: ["quality_gate"]
     columns:
       - name: weather_current_pk
         tests:
@@ -128,6 +134,8 @@ models:
       - duplicate_grain:
           arguments:
             columns: ["city", "snapshot_bucket_at_utc", "forecast_at_utc"]
+          config:
+            tags: ["quality_gate"]
     columns:
       - name: weather_hourly_pk
         tests:
@@ -172,6 +180,8 @@ models:
       - duplicate_grain:
           arguments:
             columns: ["country_code", "holiday_date"]
+          config:
+            tags: ["quality_gate"]
     columns:
       - name: holiday_pk
         tests:

@@ -1,0 +1,79 @@
+import os
+import sys
+from datetime import timedelta
+
+import pendulum
+from airflow import DAG
+from airflow.models import Variable
+from airflow.operators.python import PythonOperator
+
+AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
+if AIRFLOW_HOME not in sys.path:
+    sys.path.append(AIRFLOW_HOME)
+
+from src.orchestration.dbt_tasks import parse_selector, run_quality_tests
+
+
+def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
+    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
+
+
+def _get_pool_name() -> str:
+    return _get_setting("DBT_AIRFLOW_POOL", "DBT_AIRFLOW_POOL", "dbt_warehouse_serial")
+
+
+def run_dbt_deep_quality_tests_task():
+    summary = run_quality_tests(
+        project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
+        profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
+        selector=parse_selector(
+            _get_setting("DBT_DEEP_QUALITY_TEST_SELECTOR", "DBT_DEEP_QUALITY_TEST_SELECTOR", ""),
+            "deep_quality_tests",
+        ),
+        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
+    )
+    print(f"AIRFLOW_TASK_METRIC run_dbt_deep_quality_tests {summary}")
+
+
+def run_dbt_diagnostic_tests_task():
+    summary = run_quality_tests(
+        project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
+        profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
+        selector=parse_selector(
+            _get_setting("DBT_DIAGNOSTIC_TEST_SELECTOR", "DBT_DIAGNOSTIC_TEST_SELECTOR", ""),
+            "diagnostic_tests",
+        ),
+        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
+    )
+    print(f"AIRFLOW_TASK_METRIC run_dbt_diagnostic_tests {summary}")
+
+
+default_args = {
+    "owner": "airflow",
+    "retries": 1,
+    "retry_delay": timedelta(minutes=10),
+}
+
+start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
+
+with DAG(
+    dag_id="dbt_diagnostic_daily",
+    start_date=start,
+    schedule="47 2 * * *",
+    catchup=False,
+    max_active_runs=1,
+    default_args=default_args,
+    tags=["dbt", "quality", "diagnostic", "daily"],
+) as dag:
+    deep_quality_tests = PythonOperator(
+        task_id="run_dbt_deep_quality_tests",
+        python_callable=run_dbt_deep_quality_tests_task,
+        pool=_get_pool_name(),
+    )
+    diagnostic_tests = PythonOperator(
+        task_id="run_dbt_diagnostic_tests",
+        python_callable=run_dbt_diagnostic_tests_task,
+        pool=_get_pool_name(),
+    )
+
+    deep_quality_tests >> diagnostic_tests
