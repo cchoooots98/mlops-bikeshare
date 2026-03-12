@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with city_latest as (
     select
         city,

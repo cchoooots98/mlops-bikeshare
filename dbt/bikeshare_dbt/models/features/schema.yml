@@ -11,6 +11,8 @@ models:
         tier: critical
     tests:
       - columns_match_contract:
+          config:
+            tags: ["hf_smoke"]
           arguments:
             required_columns:
               - temperature_c
@@ -224,6 +226,8 @@ models:
         tier: critical
     tests:
       - columns_match_contract:
+          config:
+            tags: ["hf_smoke"]
           arguments:
             required_columns:
               - city

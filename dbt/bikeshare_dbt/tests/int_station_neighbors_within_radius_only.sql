@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 {% set radius_km = var('station_neighbors_radius_km', 0.8) | float %}
 
 select

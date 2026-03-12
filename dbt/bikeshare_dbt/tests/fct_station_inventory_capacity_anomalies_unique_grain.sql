@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with duplicates as (
     select
         city,

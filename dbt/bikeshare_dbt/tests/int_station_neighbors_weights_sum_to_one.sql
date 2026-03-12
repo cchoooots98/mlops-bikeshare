@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with violations as (
     select
         station_key,

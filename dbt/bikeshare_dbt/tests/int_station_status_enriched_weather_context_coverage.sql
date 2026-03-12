@@ -1,4 +1,4 @@
-{{ config(severity='warn') }}
+{{ config(severity='warn', tags=['quality_gate']) }}
 
 {% set max_missing_weather_ratio = var('int_station_status_enriched_max_missing_weather_context_ratio', 0.05) | float %}
 

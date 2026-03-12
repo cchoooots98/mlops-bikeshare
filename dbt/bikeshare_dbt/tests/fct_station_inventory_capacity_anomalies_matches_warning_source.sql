@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with warning_source as (
     select
         f.city,

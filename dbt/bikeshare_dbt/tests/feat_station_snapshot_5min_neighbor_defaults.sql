@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with stations_without_neighbors as (
     select
         f.city,

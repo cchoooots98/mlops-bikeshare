@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 {% set neighbor_k = var('station_neighbors_k', 5) | int %}
 
 with violations as (

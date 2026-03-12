@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with expected_targets as (
     select
         cur.city,

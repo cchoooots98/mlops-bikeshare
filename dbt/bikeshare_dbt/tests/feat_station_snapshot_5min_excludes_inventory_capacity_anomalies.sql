@@ -1,3 +1,5 @@
+{{ config(tags=['hf_smoke']) }}
+
 with overlapping_rows as (
     select
         f.city,

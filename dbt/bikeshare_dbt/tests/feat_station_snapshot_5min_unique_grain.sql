@@ -1,3 +1,5 @@
+{{ config(tags=['hf_smoke']) }}
+
 with duplicates as (
     select
         city,

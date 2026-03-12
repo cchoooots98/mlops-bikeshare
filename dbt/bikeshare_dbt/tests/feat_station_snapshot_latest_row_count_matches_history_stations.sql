@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with history_counts as (
     select
         city,

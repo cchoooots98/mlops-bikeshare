@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 select
     city,
     station_id,

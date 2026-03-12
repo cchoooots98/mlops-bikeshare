@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 {% set neighbor_k = var('station_neighbors_k', 5) | int %}
 {% set radius_km = var('station_neighbors_radius_km', 0.8) | float %}
 {% set earth_radius_km = 6371.0088 %}

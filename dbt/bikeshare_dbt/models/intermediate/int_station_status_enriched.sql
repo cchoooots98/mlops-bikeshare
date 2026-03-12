@@ -5,7 +5,7 @@
     ]
 ) }}
 
-{% set weather_asof_tolerance_minutes = var('station_status_weather_asof_tolerance_minutes', 15) | int %}
+{% set weather_asof_tolerance_minutes = var('station_status_weather_asof_tolerance_minutes', 30) | int %}
 
 with fact_base as (
     select *

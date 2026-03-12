@@ -1,3 +1,5 @@
+{{ config(tags=['hf_smoke']) }}
+
 with violations as (
     select
         latest.city,
