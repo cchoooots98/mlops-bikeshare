@@ -53,6 +53,8 @@ with DAG(
         external_task_id=None,
         allowed_states=["success"],
         failed_states=["failed"],
+        execution_delta=timedelta(minutes=5),
+        check_existence=True,
         mode="reschedule",
         poke_interval=30,
         timeout=15 * 60,
