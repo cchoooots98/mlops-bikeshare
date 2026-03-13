@@ -5,12 +5,17 @@ variable "aws_region" {
 
 variable "aws_profile" {
   type    = string
-  default = "Shirley"
+  default = null
 }
 
-variable "sagemaker_endpoint_name" {
-  type    = string
-  default = "" # keep empty until you actually deploy an endpoint
+variable "sagemaker_endpoints" {
+  type = map(string)
+  default = {
+    bikes_staging = "bikeshare-bikes-staging"
+    bikes_prod    = "bikeshare-bikes-prod"
+    docks_staging = "bikeshare-docks-staging"
+    docks_prod    = "bikeshare-docks-prod"
+  }
 }
 
 variable "github_owner" {
@@ -36,6 +41,18 @@ variable "env" {
   default = "dev"
 }
 
+variable "city" {
+  type        = string
+  description = "City dimension used for target-aware custom metrics and dashboards"
+  default     = "paris"
+}
+
+variable "alarm_email_endpoint" {
+  type        = string
+  description = "Optional email address to subscribe to the monitoring SNS topic"
+  default     = null
+}
+
 # 下面三项虽然当前 backend.tf 没有引用，但保留做参数化也可以。
 variable "tf_state_bucket" {
   type    = string
@@ -58,10 +75,10 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   # Data lake bucket: <repo>-<account>-<region>
   data_bucket_name     = "${var.repo_name}-${local.account_id}-${var.aws_region}"
-  cw_namespace         = "MLOps/Bikeshare"
+  cw_namespace         = "Bikeshare/Model"
   glue_db_name         = replace(var.repo_name, "-", "_")
   ecr_repo_name        = var.repo_name
-  lambda_function_name = "${var.repo_name}-placeholder"
+  lambda_function_name = "${var.repo_name}-router"
   s3_prefixes          = ["raw/", "curated/", "features/", "inference/", "monitoring/"]
 
   default_tags = {

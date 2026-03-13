@@ -1,4 +1,4 @@
-
+# GitHub OIDC provider
 
 # GitHub OIDC provider
 resource "aws_iam_openid_connect_provider" "github" {
