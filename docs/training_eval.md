@@ -1,64 +1,44 @@
-# Training & Evaluation - Step 4
+# Training And Evaluation
 
-## Objectives
-- Train a first binary classifier to predict 30-minute stockout risk per station.
-- Keep experiments traceable in MLflow.
-- Maintain an architecture that can migrate cleanly to dbt-owned production feature tables.
+## Contract
+- Offline training consumes `analytics.feat_station_snapshot_5min`.
+- Feature order is defined by `src/features/schema.py -> FEATURE_COLUMNS`.
+- Training outputs a local model package:
+  - `package_manifest.json`
+  - `model/`
+  - `artifacts/`
 
-## Data and Labels
-- Target source table: `analytics.feat_station_snapshot_5min` in Postgres/dbt.
-- Current repository state: the dbt producer layer is implemented in Postgres, but the Python training consumer still reads `features_offline` (Athena external). Consumer migration remains the next step.
-- Feature set: defined centrally in `schema.py -> FEATURE_COLUMNS`.
-- Labels:
-  - `y_stockout_bikes_30`
-  - `y_stockout_docks_30`
-- Numeric targets:
-  - `target_bikes_t30` (diagnostic exact `t+30m` value)
-  - `target_docks_t30` (diagnostic exact `t+30m` value)
+## Training Responsibilities
+`src.training.train` is responsible for:
+- loading Postgres feature slices
+- validating feature and label contracts
+- temporal split
+- class-balance checks for train and validation
+- model fit and evaluation
+- MLflow logging
+- local model package creation
 
-Label semantics:
-- `y_stockout_*_30 = 1` if any snapshot in `(t, t+30m]` has bikes or docks `<= 2`.
-- The project is classification-first; `target_*_t30` is retained for diagnostics, not as the primary model objective.
+## Guardrails
+- Training fails if train or validation slices are empty.
+- Training fails if either split contains only one class.
+- Non-nullable features are checked with:
+  - per-column missing-rate threshold
+  - overall missing-rate threshold
+- Threshold selection is validation-only.
 
-## Direction of Travel
-- dbt is the long-term owner of production feature generation.
-- Python training will later become a consumer of dbt feature tables instead of an Athena-built offline table.
-- The long-term weather feature contract follows `dim_weather`, not the legacy Athena weather schema.
+## Retrain Responsibilities
+`src.orchestration.retrain` is responsible for:
+- refreshing dbt feature tables
+- checking feature freshness
+- running candidate training
+- rejecting low-quality candidates
+- registering the candidate in MLflow
+- updating the local package manifest with registry metadata
+- writing a candidate summary to `model_dir/candidates/retrain_summary.json`
 
-## Weather Feature Direction
-Target weather feature columns:
+It does not perform deployment.
 
-- `temperature_c`
-- `humidity_pct`
-- `wind_speed_ms`
-- `precipitation_mm`
-- `weather_code`
-- `hourly_temperature_c`
-- `hourly_humidity_pct`
-- `hourly_wind_speed_ms`
-- `hourly_precipitation_mm`
-- `hourly_precipitation_probability_pct`
-- `hourly_weather_code`
-
-Deprecated weather feature columns:
-
-- `temp_c`
-- `precip_mm`
-- `wind_kph`
-- `rhum_pct`
-- `pres_hpa`
-- `wind_dir_deg`
-- `wind_gust_kph`
-- `snow_mm`
-
-## Temporal Split
-- Train on earlier timestamps and validate on later timestamps.
-- Keep a gap window between train and validation slices to reduce leakage from rolling features.
-
-## Metrics
-- Primary metric: PR-AUC on validation.
-- Overfitting check: gap between train PR-AUC and validation PR-AUC.
-- Threshold selection: optimize on validation, not on training data.
-
-## Current Execution Note
-The current code path and CLI examples still reflect the existing Athena-based training implementation. Those commands remain valid until the later feature-layer migration is implemented.
+## Inference Responsibilities
+- Inference resolves the active package through deployment state.
+- It then loads threshold, target metadata, and feature contract from `package_manifest.json`.
+- Retrain summaries are not part of inference configuration anymore.

@@ -203,7 +203,7 @@
   - `holiday_name`
 
 ## Planned Feature-Layer Contract
-- The current repository still contains Athena-based feature build, training, and dashboard paths for the later MLOps stages.
+- Formal feature generation is dbt-owned. Python training and online prediction consume the Postgres feature tables and no longer rebuild formal features in Athena/Python.
 - The warehouse direction is to let dbt own curated and later feature-facing weather/date logic.
 - This does not mean the downstream MLOps work is removed; it means the warehouse contract should stay explicit.
 
@@ -236,6 +236,8 @@ Deprecated weather feature columns:
 - Station duplicate protection is keyed by `city + snapshot_bucket_at` for both station staging tables.
 - Weather duplicate protection is keyed by `city + snapshot_bucket_at` in `stg_weather_current`.
 - Holiday duplicate protection is keyed by `country_code + holiday_date` within the yearly load.
+- Cross-table station inventory sanity is enforced after capacity is available from `dim_station`, not in raw-facing staging.
+- `fct_station_status` rejects station snapshots where `num_bikes_available + num_docks_available > station_inventory_capacity_multiplier * capacity`; the default multiplier is `2` and downstream models inherit that filter.
 
 ## Error Handling
 - Reject bad batches and log task failure in Airflow.
