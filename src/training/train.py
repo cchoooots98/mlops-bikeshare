@@ -3,6 +3,7 @@ import json
 import math
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +53,7 @@ DT_FORMAT = "%Y-%m-%d-%H-%M"
 INPUT_TS_FORMAT = "%Y-%m-%d %H:%M"
 FEATURE_CONTRACT_VERSION = "v1_dim_weather_aligned"
 TRAINING_RESULT_PREFIX = "TRAINING_RESULT_JSON::"
+PYFUNC_MODEL_CODE_PATH = Path(__file__).with_name("mlflow_prob_model.py")
 
 
 @dataclass(frozen=True)
@@ -115,18 +117,6 @@ class TrainConfig:
             "verbosity": -1,
         }
     )
-
-
-class ProbWrapper(mlflow.pyfunc.PythonModel):
-    def __init__(self, base_model, feature_names: Sequence[str]):
-        self._model = base_model
-        self._feature_names = list(feature_names)
-
-    def predict(self, context, model_input):
-        if not isinstance(model_input, pd.DataFrame):
-            model_input = pd.DataFrame(model_input, columns=self._feature_names)
-        features = model_input[self._feature_names].astype("float64")
-        return self._model.predict_proba(features)[:, 1]
 
 
 def normalize_timestamp(ts: str) -> str:
@@ -323,6 +313,61 @@ def _ensure_binary_classes(y_values: np.ndarray, split_name: str, label_column: 
         )
 
 
+def _native_model_filename(model_type: str) -> str:
+    if model_type == "xgboost":
+        return "native_model.json"
+    if model_type == "lightgbm":
+        return "native_model.txt"
+    raise ValueError(f"unsupported model_type: {model_type}")
+
+
+def _write_native_model_artifact(model, model_type: str, destination: Path) -> None:
+    if model_type == "xgboost":
+        booster = model.get_booster() if hasattr(model, "get_booster") else model
+        booster.save_model(str(destination))
+        return
+
+    if model_type == "lightgbm":
+        booster = getattr(model, "booster_", model)
+        booster.save_model(str(destination))
+        return
+
+    raise ValueError(f"unsupported model_type: {model_type}")
+
+
+def _save_or_log_pyfunc_probability_model(
+    *,
+    model,
+    model_type: str,
+    feature_names: Sequence[str],
+    signature,
+    input_example: pd.DataFrame,
+    save_path: str | None = None,
+    log_name: str | None = None,
+) -> None:
+    if bool(save_path) == bool(log_name):
+        raise ValueError("provide exactly one of save_path or log_name")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        native_model_path = Path(temp_dir) / _native_model_filename(model_type)
+        _write_native_model_artifact(model, model_type, native_model_path)
+
+        common_kwargs = {
+            "python_model": str(PYFUNC_MODEL_CODE_PATH),
+            "artifacts": {"native_model": str(native_model_path)},
+            "model_config": {
+                "model_type": model_type,
+                "feature_names": list(feature_names),
+            },
+            "signature": signature,
+            "input_example": input_example,
+        }
+        if save_path:
+            mlflow.pyfunc.save_model(path=save_path, **common_kwargs)
+        else:
+            mlflow.pyfunc.log_model(name=log_name, **common_kwargs)
+
+
 def _save_local_package(
     *,
     eval_summary: dict,
@@ -340,11 +385,13 @@ def _save_local_package(
 
     sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
     signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
-    mlflow.pyfunc.save_model(
-        path=str(model_dir),
-        python_model=ProbWrapper(model, FEATURE_COLUMNS),
+    _save_or_log_pyfunc_probability_model(
+        model=model,
+        model_type=eval_summary["model_type"],
+        feature_names=FEATURE_COLUMNS,
         signature=signature,
         input_example=sample_x,
+        save_path=str(model_dir),
     )
 
     manifest = build_package_manifest(eval_summary, package_dir)
@@ -464,11 +511,13 @@ def run_training_pipeline(data_config: DataConfig, train_config: TrainConfig) ->
 
         sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
         signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
-        mlflow.pyfunc.log_model(
-            artifact_path="model",
-            python_model=ProbWrapper(model, FEATURE_COLUMNS),
+        _save_or_log_pyfunc_probability_model(
+            model=model,
+            model_type=train_config.model_type,
+            feature_names=FEATURE_COLUMNS,
             signature=signature,
             input_example=sample_x,
+            log_name="model",
         )
 
         eval_summary = {
