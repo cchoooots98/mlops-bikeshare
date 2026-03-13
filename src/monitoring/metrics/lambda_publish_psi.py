@@ -6,7 +6,7 @@
 #   3) Compute PSI per feature (numeric via histogram, categorical via top_values)
 #   4) Aggregate PSI across features (max by default to be conservative)
 #   5) Publish a single custom metric "PSI" to CloudWatch with dimensions:
-#         EndpointName, City
+#         Environment, EndpointName, City, TargetName
 #
 # Cost notes:
 #   - We publish ONE datapoint per run (hourly) -> cheapest custom metrics usage.
@@ -41,8 +41,10 @@
 # Environment variables (must be set on the Lambda):
 #   MONITOR_OUTPUT_PREFIX    -> e.g. s3://.../monitoring/data-quality/
 #   BASELINE_STATISTICS_URI  -> e.g. s3://.../monitoring/data-quality/baseline/statistics.json
-#   ENDPOINT_NAME            -> e.g. bikeshare-prod
+#   ENDPOINT_NAME            -> e.g. bikeshare-bikes-prod
 #   CITY                     -> e.g. paris
+#   TARGET_NAME              -> e.g. bikes
+#   SERVING_ENVIRONMENT      -> e.g. production
 #   AGGREGATOR               -> "max" (default) or "mean"
 #   LOG_TOPK                 -> optional, top-K features by PSI to log (default 5)
 #
@@ -204,8 +206,10 @@ def handler(event, context):
     # ----------- Read env -----------
     monitor_prefix = os.getenv("MONITOR_OUTPUT_PREFIX")  # s3://.../monitoring/data-quality/
     baseline_uri = os.getenv("BASELINE_STATISTICS_URI")  # s3://.../baseline/statistics.json
-    endpoint_name = os.getenv("ENDPOINT_NAME", "bikeshare-prod")
+    endpoint_name = os.getenv("ENDPOINT_NAME", "bikeshare-bikes-prod")
     city = os.getenv("CITY", "paris")
+    target_name = os.getenv("TARGET_NAME", "bikes")
+    environment = os.getenv("SERVING_ENVIRONMENT", "production")
     aggregator = os.getenv("AGGREGATOR", "max").lower()  # "max" or "mean"
     log_topk = int(os.getenv("LOG_TOPK", "5"))
 
@@ -280,13 +284,22 @@ def handler(event, context):
                     "Value": float(final_si := final_psi),
                     "Unit": "None",
                     "Dimensions": [
+                        {"Name": "Environment", "Value": environment},
                         {"Name": "EndpointName", "Value": endpoint_name},
                         {"Name": "City", "Value": city},
+                        {"Name": "TargetName", "Value": target_name},
                     ],
                 }
             ],
         )
-        logger.info(f"Published PSI={final_si:.4f} for EndpointName={endpoint_name}, City={city}")
+        logger.info(
+            "Published PSI=%0.4f for Environment=%s, EndpointName=%s, City=%s, TargetName=%s",
+            final_si,
+            environment,
+            endpoint_name,
+            city,
+            target_name,
+        )
     except ClientError as e:
         logger.error(f"Failed to publish metric: {e}")
         raise

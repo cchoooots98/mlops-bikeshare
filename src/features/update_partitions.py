@@ -9,7 +9,7 @@ Designed to replace expensive 'MSCK REPAIR TABLE' calls.
 - Locally for ad-hoc repair: `python -m src.features.update_partitions`
 
 Environment variables (configure in Lambda console or PowerShell):
-  REGION=eu-west-3
+  AWS_REGION=eu-west-3
   ATHENA_WORKGROUP=primary
   ATHENA_OUTPUT=s3://<bucket>/athena_results/
   DB=mlops_bikeshare
@@ -174,7 +174,7 @@ def _build_sql_batch(
 
 def run_once(now_utc: dt.datetime = None) -> dict:
     """Main logic that can be reused from Lambda handler or local CLI."""
-    region = _env("REGION")
+    region = _env("AWS_REGION")
     workgroup = _env("ATHENA_WORKGROUP")
     output_s3 = _env("ATHENA_OUTPUT")
     db = _env("DB")

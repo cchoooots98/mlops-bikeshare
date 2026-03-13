@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pipelines import deploy_via_sagemaker_sdk, export_and_upload_model, promote
+from pipelines import deploy_via_sagemaker_sdk, export_and_upload_model, promote, rollback
 from src.model_package import (
     activate_package,
     ensure_package_dir,
@@ -55,12 +55,13 @@ def _write_package(tmp_path) -> Path:
 
 def test_package_manifest_round_trip_and_activation(tmp_path):
     package_dir = _write_package(tmp_path)
-    deployment_state_path = activate_package(package_dir, tmp_path / "deployments" / "local.json", source="pytest")
+    deployment_state_path = activate_package(package_dir, tmp_path / "deployments" / "bikes" / "local.json", source="pytest")
 
     manifest = load_package_manifest(package_dir)
     deployment_state = load_deployment_state(deployment_state_path)
 
     assert manifest["model_name"] == "paris_model"
+    assert deployment_state["target_name"] == "bikes"
     assert deployment_state["package_dir"] == str(package_dir.resolve())
     assert resolve_active_package_dir(deployment_state_path=deployment_state_path) == package_dir.resolve()
 
@@ -111,7 +112,7 @@ def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_pat
     result = deploy_via_sagemaker_sdk.main(
         [
             "--endpoint-name",
-            "bikeshare-staging",
+            "bikeshare-bikes-staging",
             "--role-arn",
             "arn:aws:iam::123456789012:role/sm-exec",
             "--image-uri",
@@ -127,25 +128,26 @@ def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_pat
             "--environment",
             "staging",
             "--deployment-state-path",
-            str(tmp_path / "deployments" / "staging.json"),
+            str(tmp_path / "deployments" / "bikes" / "staging.json"),
         ]
     )
 
     deployment_state = load_deployment_state(result["deployment_state_path"])
     assert deployment_state["environment"] == "staging"
+    assert deployment_state["endpoint_name"] == "bikeshare-bikes-staging"
     assert any(item[0] == "create_model" for item in calls)
 
 
 def test_promote_copies_deployment_state_to_target_environment(tmp_path):
     package_dir = _write_package(tmp_path)
-    source_state_path = activate_package(package_dir, tmp_path / "deployments" / "staging.json", source="pytest")
+    source_state_path = activate_package(package_dir, tmp_path / "deployments" / "bikes" / "staging.json", source="pytest")
 
     result = promote.main(
         [
             "--source-deployment-state-path",
             str(source_state_path),
             "--target-deployment-state-path",
-            str(tmp_path / "deployments" / "prod.json"),
+            str(tmp_path / "deployments" / "bikes" / "production.json"),
             "--target-environment",
             "production",
         ]
@@ -154,3 +156,46 @@ def test_promote_copies_deployment_state_to_target_environment(tmp_path):
     promoted_state = load_deployment_state(result["target_deployment_state_path"])
     assert promoted_state["environment"] == "production"
     assert promoted_state["package_dir"] == str(package_dir.resolve())
+
+
+def test_rollback_restores_previous_deployment_state(tmp_path):
+    package_dir = _write_package(tmp_path)
+    current_state_path = Path(
+        activate_package(package_dir, tmp_path / "deployments" / "bikes" / "production.json", source="pytest")
+    )
+
+    previous_package_dir = ensure_package_dir("paris_model_prev", "run-122", root_dir=tmp_path / "packages")
+    (previous_package_dir / "model" / "MLmodel").write_text("artifact_path: model\n", encoding="utf-8")
+    previous_manifest = {
+        **load_package_manifest(package_dir),
+        "model_name": "paris_model_prev",
+        "run_id": "run-122",
+        "paths": {
+            "package_dir": str(previous_package_dir.resolve()),
+            "model_dir": str((previous_package_dir / "model").resolve()),
+            "package_manifest_path": str((previous_package_dir / "package_manifest.json").resolve()),
+            "artifacts_dir": str((previous_package_dir / "artifacts").resolve()),
+        },
+    }
+    write_package_manifest(previous_package_dir, previous_manifest)
+    previous_state_path = Path(
+        activate_package(previous_package_dir, tmp_path / "deployments" / "bikes" / "previous_prod.json", source="pytest")
+    )
+
+    result = rollback.main(
+        [
+            "--target-name",
+            "bikes",
+            "--environment",
+            "production",
+            "--from-state",
+            str(current_state_path),
+            "--to-state",
+            str(previous_state_path),
+        ]
+    )
+
+    restored_state = load_deployment_state(result["restored_deployment_state_path"])
+    assert restored_state["source"] == "rollback"
+    assert restored_state["environment"] == "production"
+    assert restored_state["package_dir"] == str(previous_package_dir.resolve())

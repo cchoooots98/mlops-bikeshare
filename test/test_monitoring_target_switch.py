@@ -1,8 +1,10 @@
 import pandas as pd
 
+from src.config import quality_key
 from src.model_target import target_spec_from_predict_bikes
 from src.monitoring import quality_backfill
 from src.monitoring.metrics import publish_custom_metrics
+from src.monitoring.metrics.metrics_helper import build_metric_dimensions
 from src.monitoring.schedules import build_GroundTruth_from_parquet as ground_truth
 
 
@@ -68,3 +70,24 @@ def test_publish_custom_metrics_resolves_docks_columns():
 
     assert publish_custom_metrics.resolve_quality_columns(df) == ("y_stockout_docks_30", "yhat_docks")
 
+
+def test_quality_key_is_target_partitioned():
+    assert quality_key("paris", "2026-03-11-10-05", "docks") == (
+        "monitoring/quality/target=docks/city=paris/ds=2026-03-11/part-2026-03-11-10-05.parquet"
+    )
+
+
+def test_metric_dimensions_include_environment_and_target():
+    dims = build_metric_dimensions(
+        endpoint="bikeshare-docks-prod",
+        city="paris",
+        target_name="docks",
+        environment="production",
+    )
+
+    assert dims == [
+        {"Name": "Environment", "Value": "production"},
+        {"Name": "EndpointName", "Value": "bikeshare-docks-prod"},
+        {"Name": "City", "Value": "paris"},
+        {"Name": "TargetName", "Value": "docks"},
+    ]

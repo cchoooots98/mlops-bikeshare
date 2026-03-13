@@ -2,29 +2,93 @@
   "widgets": [
     {
       "type": "metric",
-      "x": 0, "y": 0, "width": 12, "height": 6,
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
       "properties": {
         "region": "eu-west-3",
-        "title": "Quality (staging, paris) — PR-AUC & F1 (24h rolling)",
+        "title": "Quality (bikes staging, paris)",
         "view": "timeSeries",
         "period": 300,
         "metrics": [
-          [ "Bikeshare/Model", "PR-AUC-24h", "EndpointName", "bikeshare-staging", "City", "paris", { "stat": "Average" } ],
-          [ ".", "F1-24h", ".", ".", ".", ".", { "stat": "Average", "yAxis": "right" } ]
+          [
+            "Bikeshare/Model",
+            "PR-AUC-24h",
+            "Environment",
+            "staging",
+            "EndpointName",
+            "bikeshare-bikes-staging",
+            "City",
+            "paris",
+            "TargetName",
+            "bikes",
+            {
+              "stat": "Average"
+            }
+          ],
+          [
+            ".",
+            "F1-24h",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "yAxis": "right"
+            }
+          ]
         ]
       }
     },
     {
       "type": "metric",
-      "x": 12, "y": 0, "width": 12, "height": 6,
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
       "properties": {
         "region": "eu-west-3",
-        "title": "Hit-Rate & Samples (staging, paris) — 24h rolling",
+        "title": "Heartbeat and sample volume (bikes staging, paris)",
         "view": "timeSeries",
         "period": 300,
         "metrics": [
-          [ "Bikeshare/Model", "ThresholdHitRate-24h", "EndpointName", "bikeshare-staging", "City", "paris", { "stat": "Average" } ],
-          [ ".", "Samples-24h", ".", ".", ".", ".", { "stat": "Average", "yAxis": "right" } ]
+          [
+            "Bikeshare/Model",
+            "PredictionHeartbeat",
+            "Environment",
+            "staging",
+            "EndpointName",
+            "bikeshare-bikes-staging",
+            "City",
+            "paris",
+            "TargetName",
+            "bikes",
+            {
+              "stat": "Sum"
+            }
+          ],
+          [
+            ".",
+            "Samples-24h",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "yAxis": "right"
+            }
+          ]
         ]
       }
     }

@@ -1,20 +1,11 @@
 """
-Lightweight CloudWatch metrics helper used across the project.
+CloudWatch metrics helper for target-aware production monitoring.
 
-Goals:
-- Single place to publish custom metrics with consistent dimensions
-  (EndpointName, City) so the Streamlit dashboard and alarms "just work".
-- Small, dependency-free (only boto3) and safe on Windows runners and Lambda.
-- Retry on throttling and skip None/NaN values gracefully.
-
-Usage:
-    from src.monitoring.metrics.metrics_helper import (
-        put_metric, put_metrics_bulk, publish_heartbeat
-    )
-
-    put_metric("PR-AUC-24h", 0.9582)           # Unit defaults to "None"
-    put_metric("Samples-24h", 12345, "Count")
-    publish_heartbeat()                        # One count per successful batch
+All formal metrics use the same dimensions:
+- Environment
+- EndpointName
+- City
+- TargetName
 """
 
 from __future__ import annotations
@@ -27,35 +18,40 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
-# ---- Centralized configuration (keeps staging/prod flips simple) ----
+
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-3")
 CW_NAMESPACE = os.getenv("CW_NS", "Bikeshare/Model")
-DEFAULT_ENDPOINT = os.getenv("SM_ENDPOINT", "bikeshare-prod")
+DEFAULT_ENDPOINT = os.getenv("SM_ENDPOINT", "bikeshare-bikes-prod")
 DEFAULT_CITY = os.getenv("CITY", "paris")
+DEFAULT_TARGET = os.getenv("TARGET_NAME", "bikes")
+DEFAULT_ENVIRONMENT = os.getenv("SERVING_ENVIRONMENT", "production")
 
-# Create one global client (boto3 is thread-safe for simple use cases).
 _CW = boto3.client("cloudwatch", region_name=AWS_REGION)
 
 
-def _dims(endpoint: Optional[str] = None, city: Optional[str] = None) -> List[Dict[str, str]]:
-    """Build the required CloudWatch dimensions for our dashboards/alarms."""
+def build_metric_dimensions(
+    *,
+    endpoint: Optional[str] = None,
+    city: Optional[str] = None,
+    target_name: Optional[str] = None,
+    environment: Optional[str] = None,
+) -> List[Dict[str, str]]:
     return [
+        {"Name": "Environment", "Value": environment or DEFAULT_ENVIRONMENT},
         {"Name": "EndpointName", "Value": endpoint or DEFAULT_ENDPOINT},
         {"Name": "City", "Value": city or DEFAULT_CITY},
+        {"Name": "TargetName", "Value": target_name or DEFAULT_TARGET},
     ]
 
 
-def _is_finite_number(x: object) -> bool:
-    """Return True if x is a finite float/int (skip None/NaN/inf)."""
+def _is_finite_number(value: object) -> bool:
     try:
-        xf = float(x)
-        return math.isfinite(xf)
+        return math.isfinite(float(value))
     except Exception:
         return False
 
 
 def _put_with_retry(metric_data: List[Dict], namespace: str = CW_NAMESPACE, max_attempts: int = 3) -> None:
-    """Publish metric data with a tiny retry loop for throttling."""
     attempt = 0
     while True:
         try:
@@ -65,7 +61,6 @@ def _put_with_retry(metric_data: List[Dict], namespace: str = CW_NAMESPACE, max_
             attempt += 1
             if attempt >= max_attempts:
                 raise
-            # Exponential backoff on throttling or transient errors.
             time.sleep(1.5 * attempt)
 
 
@@ -76,28 +71,27 @@ def put_metric(
     *,
     endpoint: Optional[str] = None,
     city: Optional[str] = None,
+    target_name: Optional[str] = None,
+    environment: Optional[str] = None,
     timestamp=None,
 ) -> None:
-    """
-    Publish a single scalar metric with our standard dimensions.
-
-    - Skips None/NaN/inf silently (so callers don't need to guard every call).
-    - Unit can be "None", "Count", "Milliseconds", etc.
-    """
     if not _is_finite_number(value):
         return
 
-    md = [
-        {
-            "MetricName": name,
-            "Value": float(value),
-            "Unit": unit,
-            "Dimensions": _dims(endpoint, city),
-        }
-    ]
+    metric = {
+        "MetricName": name,
+        "Value": float(value),
+        "Unit": unit,
+        "Dimensions": build_metric_dimensions(
+            endpoint=endpoint,
+            city=city,
+            target_name=target_name,
+            environment=environment,
+        ),
+    }
     if timestamp is not None:
-        md[0]["Timestamp"] = timestamp
-    _put_with_retry(md)
+        metric["Timestamp"] = timestamp
+    _put_with_retry([metric])
 
 
 def put_metrics_bulk(
@@ -105,20 +99,17 @@ def put_metrics_bulk(
     *,
     endpoint: Optional[str] = None,
     city: Optional[str] = None,
+    target_name: Optional[str] = None,
+    environment: Optional[str] = None,
     timestamp=None,
 ) -> None:
-    """
-    Publish multiple (name, value, unit) tuples in one CloudWatch call.
-
-    Example:
-        put_metrics_bulk([
-            ("PR-AUC-24h", 0.9582, "None"),
-            ("F1-24h", 0.856, "None"),
-            ("Samples-24h", 12345, "Count"),
-        ])
-    """
-    md: List[Dict] = []
-    dims = _dims(endpoint, city)
+    dimensions = build_metric_dimensions(
+        endpoint=endpoint,
+        city=city,
+        target_name=target_name,
+        environment=environment,
+    )
+    metric_data: List[Dict] = []
     for name, value, unit in items:
         if not _is_finite_number(value):
             continue
@@ -126,19 +117,28 @@ def put_metrics_bulk(
             "MetricName": name,
             "Value": float(value),
             "Unit": unit,
-            "Dimensions": dims,
+            "Dimensions": dimensions,
         }
         if timestamp is not None:
             item["Timestamp"] = timestamp
-        md.append(item)
+        metric_data.append(item)
+    if metric_data:
+        _put_with_retry(metric_data)
 
-    if md:
-        _put_with_retry(md)
 
-
-def publish_heartbeat(*, endpoint: Optional[str] = None, city: Optional[str] = None) -> None:
-    """
-    Publish one "PredictionHeartbeat" Count=1.
-    Call this after each successful prediction batch (or once per 10–15 min).
-    """
-    put_metric("PredictionHeartbeat", 1, "Count", endpoint=endpoint, city=city)
+def publish_heartbeat(
+    *,
+    endpoint: Optional[str] = None,
+    city: Optional[str] = None,
+    target_name: Optional[str] = None,
+    environment: Optional[str] = None,
+) -> None:
+    put_metric(
+        "PredictionHeartbeat",
+        1,
+        "Count",
+        endpoint=endpoint,
+        city=city,
+        target_name=target_name,
+        environment=environment,
+    )

@@ -7,9 +7,10 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.config import prediction_key, prediction_prefix, quality_key
 from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine, load_training_actuals_for_dt
 from src.model_target import PredictionTargetSpec, target_spec_from_name, target_spec_from_predict_bikes
-from src.utils.config import load_runtime_settings
+from src.config import load_runtime_settings
 
 MATURITY_MINUTES = 30
 BACKFILL_MINUTES = 120
@@ -46,15 +47,6 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str) -> None:
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
-def _prediction_key(city: str, dt: str) -> str:
-    return f"inference/city={city}/dt={dt}/predictions.parquet"
-
-
-def _quality_key(city: str, dt: str) -> str:
-    ds = dt[:10]
-    return f"monitoring/quality/city={city}/ds={ds}/part-{dt}.parquet"
-
-
 def _make_candidate_dts(latest_dt_str: str, now_utc: datetime) -> List[str]:
     base = datetime.strptime(latest_dt_str, "%Y-%m-%d-%H-%M").replace(tzinfo=timezone.utc)
     out = []
@@ -66,8 +58,8 @@ def _make_candidate_dts(latest_dt_str: str, now_utc: datetime) -> List[str]:
     return out
 
 
-def _list_prediction_dts(bucket: str, city: str) -> list[str]:
-    prefix = f"inference/city={city}/dt="
+def _list_prediction_dts(bucket: str, city: str, target_name: str) -> list[str]:
+    prefix = prediction_prefix(city, target_name)
     paginator = _s3().get_paginator("list_objects_v2")
     dts = set()
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -167,7 +159,7 @@ def main():
     )
     engine = create_pg_engine(pg_config)
 
-    prediction_dts = _list_prediction_dts(settings.bucket, settings.city)
+    prediction_dts = _list_prediction_dts(settings.bucket, settings.city, settings.target_name)
     if not prediction_dts:
         print("[quality] no predictions found; nothing to backfill")
         return
@@ -177,8 +169,8 @@ def main():
     shards_written = 0
 
     for dt_pred in candidates:
-        pred_key = _prediction_key(settings.city, dt_pred)
-        qual_key = _quality_key(settings.city, dt_pred)
+        pred_key = prediction_key(settings.city, dt_pred, settings.target_name)
+        qual_key = quality_key(settings.city, dt_pred, settings.target_name)
         if _object_exists(settings.bucket, qual_key) or not _object_exists(settings.bucket, pred_key):
             continue
 
@@ -187,6 +179,8 @@ def main():
             continue
 
         target_spec = _resolve_target_spec(preds, settings.predict_bikes)
+        pred_key = prediction_key(settings.city, dt_pred, target_spec.target_name)
+        qual_key = quality_key(settings.city, dt_pred, target_spec.target_name)
         acts = _load_actuals_for_dt(engine, pg_config, settings.city, dt_pred, target_spec)
         if acts.empty:
             continue

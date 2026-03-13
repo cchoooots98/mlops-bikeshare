@@ -7,41 +7,47 @@
 #>
 
 param(
-  [string]$Region        = $env:AWS_REGION,          # e.g., eu-west-3
+  [string]$AWS_REGION        = $env:AWS_REGION,          # e.g., eu-west-3
   [string]$EndpointName  = $(if ($env:SM_ENDPOINT) { $env:SM_ENDPOINT } else { $env:ENDPOINT_NAME }),  # prefer SM_ENDPOINT, else ENDPOINT_NAME
-  [string]$City          = $env:CITY                 # e.g., paris
+  [string]$City          = $env:CITY,                # e.g., paris
+  [string]$TargetName    = $(if ($env:TARGET_NAME) { $env:TARGET_NAME } else { "bikes" }),
+  [string]$Environment   = $(if ($env:SERVING_ENVIRONMENT) { $env:SERVING_ENVIRONMENT } else { "production" })
 )
 
 $ErrorActionPreference = "Stop"
-if (-not $Region -or $Region -eq "") { $Region = "eu-west-3" }
-if (-not $EndpointName -or $EndpointName -eq "") { $EndpointName = "bikeshare-prod" }
+if (-not $AWS_REGION -or $AWS_REGION -eq "") { $AWS_REGION = "eu-west-3" }
+if (-not $EndpointName -or $EndpointName -eq "") { $EndpointName = "bikeshare-bikes-prod" }
 if (-not $City -or $City -eq "") { $City = "paris" }
+if (-not $TargetName -or $TargetName -eq "") { $TargetName = "bikes" }
+if (-not $Environment -or $Environment -eq "") { $Environment = "production" }
 $env:AWS_PAGER = ""
 
-Write-Host "INFO: Target endpoint '$EndpointName' in region '$Region'"
+Write-Host "INFO: Target endpoint '$EndpointName' in region '$AWS_REGION'"
 
 # --- If endpoint already exists and is InService, just publish heartbeat and exit. ---
 try {
-  $status = aws sagemaker describe-endpoint --region $Region --endpoint-name $EndpointName --query 'EndpointStatus' --output text 2>$null
+  $status = aws sagemaker describe-endpoint --region $AWS_REGION --endpoint-name $EndpointName --query 'EndpointStatus' --output text 2>$null
 } catch { $status = "MISSING" }
 
 if ($status -eq "InService") {
   Write-Host "INFO: Endpoint already InService. Publishing heartbeat..."
   $payload = @"
 [
-  {
-    "MetricName": "PredictionHeartbeat",
-    "Value": 1,
-    "Unit": "Count",
-    "Dimensions": [
-      { "Name": "EndpointName", "Value": "$EndpointName" },
-      { "Name": "City", "Value": "$City" }
-    ]
-  }
+      {
+        "MetricName": "PredictionHeartbeat",
+        "Value": 1,
+        "Unit": "Count",
+        "Dimensions": [
+          { "Name": "Environment", "Value": "$Environment" },
+          { "Name": "EndpointName", "Value": "$EndpointName" },
+          { "Name": "City", "Value": "$City" },
+          { "Name": "TargetName", "Value": "$TargetName" }
+        ]
+      }
 ]
 "@
   $payload | Out-File -FilePath .\_cw_boot.json -Encoding ascii
-  aws cloudwatch put-metric-data --region $Region --namespace "Bikeshare/Model" --metric-data file://_cw_boot.json
+  aws cloudwatch put-metric-data --region $AWS_REGION --namespace "Bikeshare/Model" --metric-data file://_cw_boot.json
   Remove-Item .\_cw_boot.json -Force
   Write-Host "SUCCESS: Demo endpoint ready: $EndpointName"
   exit 0
@@ -67,14 +73,14 @@ if ($ECR -and $TAR -and $ROLE -and $INST) {
     --image-uri "$ECR" `
     --model-data "$TAR" `
     --instance-type "$INST" `
-    --region "$Region"
+    --region "$AWS_REGION"
 
 } else {
   Write-Host "INFO: Missing one of ECR_IMAGE_URI / S3_MODEL_TAR / SM_EXECUTION_ROLE_Arn / INSTANCE_TYPE."
   Write-Host "INFO: Falling back to reuse the latest EndpointConfig created by GA."
 
   # Comment: Pick the most recent EndpointConfig that contains the endpoint name.
-  $cfgJson = aws sagemaker list-endpoint-configs --region $Region --name-contains $EndpointName `
+  $cfgJson = aws sagemaker list-endpoint-configs --region $AWS_REGION --name-contains $EndpointName `
     --query 'sort_by(EndpointConfigs, &CreationTime)[-1].EndpointConfigName' --output json 2>$null
   $cfgName = ""
   if ($LASTEXITCODE -eq 0 -and $cfgJson) {
@@ -91,18 +97,18 @@ if ($ECR -and $TAR -and $ROLE -and $INST) {
   Write-Host "INFO: Reusing EndpointConfig '$cfgName'"
 
   # Comment: Create or update endpoint with the chosen config.
-  $existingCount = aws sagemaker list-endpoints --region $Region --name-contains $EndpointName `
+  $existingCount = aws sagemaker list-endpoints --region $AWS_REGION --name-contains $EndpointName `
     --query "length(Endpoints[?EndpointName=='$EndpointName'])" --output text 2>$null
 
   if ($existingCount -eq "0") {
-    aws sagemaker create-endpoint --region $Region --endpoint-name $EndpointName --endpoint-config-name $cfgName | Out-Null
+    aws sagemaker create-endpoint --region $AWS_REGION --endpoint-name $EndpointName --endpoint-config-name $cfgName | Out-Null
   } else {
-    aws sagemaker update-endpoint --region $Region --endpoint-name $EndpointName --endpoint-config-name $cfgName | Out-Null
+    aws sagemaker update-endpoint --region $AWS_REGION --endpoint-name $EndpointName --endpoint-config-name $cfgName | Out-Null
   }
 }
 
 Write-Host "INFO: Waiting for endpoint to be InService..."
-aws sagemaker wait endpoint-in-service --region $Region --endpoint-name $EndpointName
+aws sagemaker wait endpoint-in-service --region $AWS_REGION --endpoint-name $EndpointName
 
 # --- Publish one heartbeat metric so dashboards are not empty. ---
 $payload2 = @"
@@ -112,14 +118,16 @@ $payload2 = @"
     "Value": 1,
     "Unit": "Count",
     "Dimensions": [
+      { "Name": "Environment", "Value": "$Environment" },
       { "Name": "EndpointName", "Value": "$EndpointName" },
-      { "Name": "City", "Value": "$City" }
+      { "Name": "City", "Value": "$City" },
+      { "Name": "TargetName", "Value": "$TargetName" }
     ]
   }
 ]
 "@
 $payload2 | Out-File -FilePath .\_cw_boot.json -Encoding ascii
-aws cloudwatch put-metric-data --region $Region --namespace "Bikeshare/Model" --metric-data file://_cw_boot.json
+aws cloudwatch put-metric-data --region $AWS_REGION --namespace "Bikeshare/Model" --metric-data file://_cw_boot.json
 Remove-Item .\_cw_boot.json -Force
 
 Write-Host "SUCCESS: Demo endpoint ready: $EndpointName"

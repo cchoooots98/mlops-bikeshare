@@ -1,6 +1,6 @@
 # test/check_gate.py
-# Purpose: Gate for Prod promotion. Fetch last 24h metrics from CloudWatch and enforce admission thresholds.
-# Run: python test/check_gate.py --endpoint bikeshare-staging --city paris --region eu-west-3
+# Purpose: Gate for target-specific promotion. Fetch last 24h metrics from CloudWatch and enforce admission thresholds.
+# Run: python test/check_gate.py --endpoint bikeshare-bikes-staging --city paris --region eu-west-3 --target-name bikes --environment staging
 
 import argparse
 import sys
@@ -42,20 +42,35 @@ def avg(values):
     return sum(values) / len(values) if values else None
 
 
-def main():
+def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--endpoint", required=True, help="EndpointName, e.g., bikeshare-staging")
+    ap.add_argument("--endpoint", required=True, help="EndpointName, e.g., bikeshare-bikes-staging")
     ap.add_argument("--city", required=True, help="City dim for custom metrics, e.g., paris")
     ap.add_argument("--region", required=True, help="AWS region, e.g., eu-west-3")
-    args = ap.parse_args()
+    ap.add_argument("--target-name", required=True, choices=["bikes", "docks"])
+    ap.add_argument(
+        "--environment",
+        required=True,
+        choices=["staging", "production"],
+        help="CloudWatch Environment dimension. Pass staging for staging endpoints and production for prod endpoints.",
+    )
+    return ap.parse_args()
+
+
+def main():
+    args = parse_args()
 
     cw = boto3.client("cloudwatch", region_name=args.region)
 
     # --- Custom namespace KPIs from your Step 9/dashboard ---
-    # Namespace and dimensions match your app/docs: Bikeshare/Model with {EndpointName, City}
-    # Ref: architecture.md and dashboard.py
+    # Namespace and dimensions match the formal target-aware monitoring contract.
     ns = "Bikeshare/Model"
-    dims_full = {"EndpointName": args.endpoint, "City": args.city}
+    dims_full = {
+        "Environment": args.environment,
+        "EndpointName": args.endpoint,
+        "City": args.city,
+        "TargetName": args.target_name,
+    }
 
     pr_auc = get_series(cw, ns, "PR-AUC-24h", dims_full, stat="Average")
     f1 = get_series(cw, ns, "F1-24h", dims_full, stat="Average")

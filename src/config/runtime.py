@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.model_package import DEFAULT_DEPLOYMENT_STATE_PATH
+from src.config.naming import DEFAULT_DEPLOYMENT_STATE_ROOT, deployment_state_path, endpoint_name, resolve_target_name
 from src.model_target import parse_bool_value
 
 
@@ -16,6 +16,8 @@ class RuntimeSettings:
     city: str
     bucket: str
     sm_endpoint: str
+    serving_environment: str
+    target_name: str
     pg_host: str
     pg_port: int
     pg_db: str
@@ -25,12 +27,14 @@ class RuntimeSettings:
     training_feature_table: str
     online_feature_table: str
     model_package_dir: str | None
+    deployment_state_root: str
     deployment_state_path: str
     predict_bikes: bool = True
     cw_namespace: str = "Bikeshare/Model"
     athena_output: str | None = None
     athena_workgroup: str | None = None
     athena_database: str | None = None
+    dev_mode: bool = False
 
 
 def _load_local_defaults() -> dict:
@@ -60,10 +64,10 @@ def _setting(name: str, default: str | None = None, *, aliases: tuple[str, ...] 
 
 
 def load_runtime_settings() -> RuntimeSettings:
-    pg_host = _setting("PGHOST")
-    pg_db = _setting("PGDATABASE")
-    pg_user = _setting("PGUSER")
-    pg_password = _setting("PGPASSWORD")
+    pg_host = _setting("PGHOST", aliases=("DW_HOST",))
+    pg_db = _setting("PGDATABASE", aliases=("DW_DB",))
+    pg_user = _setting("PGUSER", aliases=("DW_USER",))
+    pg_password = _setting("PGPASSWORD", aliases=("DW_PASSWORD",))
     missing = [
         name
         for name, value in (
@@ -77,13 +81,37 @@ def load_runtime_settings() -> RuntimeSettings:
     if missing:
         raise ValueError(f"missing required runtime settings: {missing}")
 
+    target_name = resolve_target_name(
+        predict_bikes=_setting("PREDICT_BIKES"),
+        target_name=_setting("TARGET_NAME"),
+    )
+    predict_bikes = parse_bool_value(_setting("PREDICT_BIKES", str(target_name == "bikes").lower()), default=True)
+    serving_environment = str(_setting("SERVING_ENVIRONMENT", "local"))
+    deployment_root = str(_setting("DEPLOYMENT_STATE_ROOT", str(DEFAULT_DEPLOYMENT_STATE_ROOT)))
+    resolved_deployment_state_path = _setting("DEPLOYMENT_STATE_PATH")
+    if resolved_deployment_state_path in {None, ""}:
+        resolved_deployment_state_path = str(
+            deployment_state_path(
+                target_name=target_name,
+                environment=serving_environment,
+                root=deployment_root,
+            )
+        )
+
     return RuntimeSettings(
         aws_region=str(_setting("AWS_REGION", "eu-west-3", aliases=("REGION",))),
-        city=str(_setting("CITY", "paris")),
-        bucket=str(_setting("BUCKET", "")),
-        sm_endpoint=str(_setting("SM_ENDPOINT", "bikeshare-prod")),
+        city=str(_setting("CITY", "paris", aliases=("WEATHER_CITY",))),
+        bucket=str(_setting("BUCKET", "", aliases=("RAW_S3_BUCKET",))),
+        sm_endpoint=str(
+            _setting(
+                "SM_ENDPOINT",
+                _setting("ENDPOINT_NAME", endpoint_name(target_name=target_name, environment=serving_environment)),
+            )
+        ),
+        serving_environment=serving_environment,
+        target_name=target_name,
         pg_host=str(pg_host),
-        pg_port=int(_setting("PGPORT", "5432")),
+        pg_port=int(_setting("PGPORT", "5432", aliases=("DW_PORT",))),
         pg_db=str(pg_db),
         pg_user=str(pg_user),
         pg_password=str(pg_password),
@@ -95,16 +123,18 @@ def load_runtime_settings() -> RuntimeSettings:
             _setting("ONLINE_FEATURE_TABLE", "feat_station_snapshot_latest", aliases=("SERVING_FEATURE_TABLE",))
         ),
         model_package_dir=_setting("MODEL_PACKAGE_DIR"),
+        deployment_state_root=deployment_root,
         deployment_state_path=str(
             _setting(
                 "DEPLOYMENT_STATE_PATH",
-                str(DEFAULT_DEPLOYMENT_STATE_PATH),
+                resolved_deployment_state_path,
                 aliases=("MODEL_METADATA_PATH", "RETRAIN_MANIFEST_PATH"),
             )
         ),
-        predict_bikes=parse_bool_value(_setting("PREDICT_BIKES", "true"), default=True),
+        predict_bikes=predict_bikes,
         cw_namespace=str(_setting("CW_NS", "Bikeshare/Model")),
         athena_output=_setting("ATHENA_OUTPUT"),
         athena_workgroup=_setting("ATHENA_WORKGROUP"),
         athena_database=_setting("ATHENA_DATABASE"),
+        dev_mode=parse_bool_value(_setting("DEV_MODE", "false"), default=False),
     )

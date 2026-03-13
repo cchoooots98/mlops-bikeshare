@@ -5,7 +5,7 @@ from sagemaker import image_uris
 
 region = "eu-west-3"
 bucket = "mlops-bikeshare-387706002632-eu-west-3"
-endpoint_name = "bikeshare-staging"
+endpoint_name = "bikeshare-bikes-staging"
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"
 
 # Set up session with profile
@@ -41,7 +41,7 @@ sm.create_model_quality_job_definition(
     },
     ModelQualityJobInput={
         "EndpointInput": {
-            "EndpointName": "bikeshare-staging",
+            "EndpointName": endpoint_name,
             "LocalPath": "/opt/ml/processing/input_data",
             "S3InputMode": "File",
             "ProbabilityAttribute": "predictions",

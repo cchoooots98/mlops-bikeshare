@@ -1,8 +1,6 @@
--r requirements.in   
+-c requirements.txt
 ruff  
 pytest
 black
 moto[s3]>=5
 pip-tools<7.5
-ydata-profiling
-dbt-postgres

@@ -7,10 +7,12 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.config import prediction_key
+from src.monitoring.metrics.metrics_helper import publish_heartbeat
 from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.inference.featurize_online import build_online_features
 from src.model_target import PredictionTargetSpec, target_spec_from_metadata
-from src.utils.config import load_runtime_settings
+from src.config import load_runtime_settings
 
 
 def _s3():
@@ -27,10 +29,6 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str) -> None:
     pq.write_table(table, buf)
     buf.seek(0)
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
-
-
-def _prediction_key(city: str, dt: str) -> str:
-    return f"inference/city={city}/dt={dt}/predictions.parquet"
 
 
 def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
@@ -127,20 +125,6 @@ def _predict_rowwise_threaded(
     return out
 
 
-def publish_heartbeat(endpoint_name: str, city: str, aws_region: str):
-    boto3.client("cloudwatch", region_name=aws_region).put_metric_data(
-        Namespace="Bikeshare/Model",
-        MetricData=[
-            {
-                "MetricName": "PredictionHeartbeat",
-                "Value": 1,
-                "Unit": "Count",
-                "Dimensions": [{"Name": "EndpointName", "Value": endpoint_name}, {"Name": "City", "Value": city}],
-            }
-        ],
-    )
-
-
 def main():
     settings = load_runtime_settings()
     if not settings.bucket:
@@ -164,11 +148,16 @@ def main():
     )
 
     for dt_value, shard in predictions.groupby("dt", sort=True):
-        key = _prediction_key(city, str(dt_value))
+        key = prediction_key(city, str(dt_value), metadata["target_name"])
         _write_parquet_s3(shard.drop(columns=["city"]), settings.bucket, key)
         print(f"[predictor] wrote {len(shard)} rows to s3://{settings.bucket}/{key}")
 
-    publish_heartbeat(endpoint_name=endpoint, city=city, aws_region=settings.aws_region)
+    publish_heartbeat(
+        endpoint=endpoint,
+        city=city,
+        target_name=metadata["target_name"],
+        environment=settings.serving_environment,
+    )
 
 
 if __name__ == "__main__":

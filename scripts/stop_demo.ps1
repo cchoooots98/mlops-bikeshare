@@ -7,7 +7,7 @@
 
 param(
   # Comment: Region and endpoint can come from env or be passed explicitly.
-  [string]$Region = $env:AWS_REGION,
+  [string]$AWS_REGION = $env:AWS_REGION,
   [string]$Endpoint = $env:SM_ENDPOINT
 )
 
@@ -15,19 +15,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Comment: Sensible defaults.
-if (-not $Region -or $Region -eq "") { $Region = "eu-west-3" }
+if (-not $AWS_REGION -or $AWS_REGION -eq "") { $AWS_REGION = "eu-west-3" }
 if (-not $Endpoint -or $Endpoint -eq "") {
-  Write-Host "ERROR: Set SM_ENDPOINT env or pass -Endpoint bikeshare-prod"
+  Write-Host "ERROR: Set SM_ENDPOINT env or pass -Endpoint bikeshare-bikes-prod"
   exit 1
 }
 
 # Comment: Ensure AWS CLI does not use a pager.
 $env:AWS_PAGER = ""
 
-Write-Host "INFO: Checking endpoint '$Endpoint' in region '$Region'..."
+Write-Host "INFO: Checking endpoint '$Endpoint' in region '$AWS_REGION'..."
 
 # Comment: Check if the endpoint exists (returns "0" or "1").
-$exists = aws sagemaker list-endpoints --region $Region --name-contains $Endpoint --query "length(Endpoints[?EndpointName=='$Endpoint'])" --output text 2>$null
+$exists = aws sagemaker list-endpoints --region $AWS_REGION --name-contains $Endpoint --query "length(Endpoints[?EndpointName=='$Endpoint'])" --output text 2>$null
 if ($LASTEXITCODE -ne 0) {
   Write-Host "ERROR: AWS CLI error while listing endpoints. Check your credentials/region."
   aws sts get-caller-identity 2>$null | Out-Null
@@ -40,13 +40,13 @@ if ($exists -eq "0") {
 }
 
 Write-Host "INFO: Deleting endpoint '$Endpoint'..."
-aws sagemaker delete-endpoint --region $Region --endpoint-name $Endpoint 2>$null
+aws sagemaker delete-endpoint --region $AWS_REGION --endpoint-name $Endpoint 2>$null
 # Comment: If AWS returns a non-zero because it is already deleting, we will still poll below.
 
 # Comment: Poll for disappearance (max ~2.5 minutes).
 for ($i = 0; $i -lt 30; $i++) {
   Start-Sleep -Seconds 5
-  $exists = aws sagemaker list-endpoints --region $Region --name-contains $Endpoint --query "length(Endpoints[?EndpointName=='$Endpoint'])" --output text 2>$null
+  $exists = aws sagemaker list-endpoints --region $AWS_REGION --name-contains $Endpoint --query "length(Endpoints[?EndpointName=='$Endpoint'])" --output text 2>$null
   if ($exists -eq "0") { break }
 }
 

@@ -36,14 +36,17 @@ from src.model_package import (
     MODEL_DIRNAME,
     build_model_card_text,
     build_package_manifest,
+    default_package_root_for_target,
     ensure_package_dir,
     write_json_file,
     write_package_manifest,
 )
 from src.model_target import parse_bool_value, target_spec_from_predict_bikes
 
+DEFAULT_LOCAL_MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
+
 if not os.environ.get("MLFLOW_TRACKING_URI"):
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    mlflow.set_tracking_uri(DEFAULT_LOCAL_MLFLOW_TRACKING_URI)
 
 DT_FORMAT = "%Y-%m-%d-%H-%M"
 INPUT_TS_FORMAT = "%Y-%m-%d %H:%M"
@@ -526,11 +529,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--city", required=True)
     parser.add_argument("--start", required=True, help="UTC window start in 'YYYY-MM-DD HH:MM'")
     parser.add_argument("--end", required=True, help="UTC window end in 'YYYY-MM-DD HH:MM'")
-    parser.add_argument("--pg-host", default=env_or_default("PGHOST"))
-    parser.add_argument("--pg-port", default=env_or_default("PGPORT", "5432"), type=int)
-    parser.add_argument("--pg-db", default=env_or_default("PGDATABASE"))
-    parser.add_argument("--pg-user", default=env_or_default("PGUSER"))
-    parser.add_argument("--pg-password", default=env_or_default("PGPASSWORD"))
+    parser.add_argument("--pg-host", default=env_or_default("PGHOST", aliases=("DW_HOST",)))
+    parser.add_argument("--pg-port", default=env_or_default("PGPORT", "5432", aliases=("DW_PORT",)), type=int)
+    parser.add_argument("--pg-db", default=env_or_default("PGDATABASE", aliases=("DW_DB",)))
+    parser.add_argument("--pg-user", default=env_or_default("PGUSER", aliases=("DW_USER",)))
+    parser.add_argument("--pg-password", default=env_or_default("PGPASSWORD", aliases=("DW_PASSWORD",)))
     parser.add_argument("--pg-schema", default=env_or_default("PGSCHEMA", "analytics"))
     parser.add_argument("--feature-table", default=env_or_default("FEATURE_TABLE", "feat_station_snapshot_5min"))
     parser.add_argument("--predict-bikes", default=env_or_default("PREDICT_BIKES", "true"), choices=["true", "false"])
@@ -539,8 +542,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gap-minutes", type=int, default=60)
     parser.add_argument("--beta", type=float, default=2.0)
     parser.add_argument("--random-state", type=int, default=42)
-    parser.add_argument("--experiment", default="bikeshare-step4")
-    parser.add_argument("--package-root", default=str(DEFAULT_PACKAGE_ROOT))
+    parser.add_argument(
+        "--experiment",
+        default=env_or_default("TRAINING_EXPERIMENT", "bikeshare-step4", aliases=("MLFLOW_EXPERIMENT_NAME",)),
+    )
+    parser.add_argument("--package-root", default=None, help="Optional package root. Defaults to model_dir/packages/<target>.")
     parser.add_argument(
         "--run-reason",
         default="manual",
@@ -553,15 +559,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def env_or_default(key: str, default: str | None = None) -> str | None:
-    value = os.environ.get(key)
-    if value not in {None, ""}:
-        return value
+def env_or_default(key: str, default: str | None = None, *, aliases: Sequence[str] = ()) -> str | None:
+    for candidate in (key, *aliases):
+        value = os.environ.get(candidate)
+        if value not in {None, ""}:
+            return value
     return default
 
 
 def main(argv: Sequence[str] | None = None) -> dict:
     args = parse_args(argv)
+    predict_bikes = parse_bool_value(args.predict_bikes, default=True)
     data_config = DataConfig(
         city=args.city,
         start=args.start,
@@ -575,7 +583,7 @@ def main(argv: Sequence[str] | None = None) -> dict:
         feature_table=args.feature_table,
     )
     train_config = TrainConfig(
-        predict_bikes=parse_bool_value(args.predict_bikes, default=True),
+        predict_bikes=predict_bikes,
         model_type=args.model_type,
         valid_ratio=args.valid_ratio,
         gap_minutes=args.gap_minutes,
@@ -583,7 +591,7 @@ def main(argv: Sequence[str] | None = None) -> dict:
         beta=args.beta,
         experiment=args.experiment,
         run_reason=args.run_reason,
-        package_root=args.package_root,
+        package_root=args.package_root or str(default_package_root_for_target(target_spec_from_predict_bikes(predict_bikes).target_name)),
     )
     result = run_training_pipeline(data_config, train_config)
     print(TRAINING_RESULT_PREFIX + json.dumps(result, sort_keys=True))

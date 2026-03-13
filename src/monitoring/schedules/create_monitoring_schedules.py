@@ -8,7 +8,7 @@ from sagemaker import image_uris
 
 region = "eu-west-3"
 bucket = "mlops-bikeshare-387706002632-eu-west-3"  # EDIT
-endpoint_name = "bikeshare-staging"  # EDIT
+endpoint_name = "bikeshare-bikes-staging"  # EDIT
 role_arn = "arn:aws:iam::387706002632:role/mlops-bikeshare-sagemaker-exec"  # EDIT
 
 

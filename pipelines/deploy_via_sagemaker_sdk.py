@@ -24,7 +24,7 @@ def ts_suffix() -> str:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Deploy/update a SageMaker endpoint from a model package.")
-    parser.add_argument("--endpoint-name", required=True, help="Endpoint name, e.g. bikeshare-staging")
+    parser.add_argument("--endpoint-name", required=True, help="Endpoint name, e.g. bikeshare-bikes-staging")
     parser.add_argument("--role-arn", required=True, help="SageMaker execution role ARN")
     parser.add_argument("--image-uri", required=True, help="Inference container image URI")
     parser.add_argument("--package-s3-uri", default=None, help="S3 URI to a packaged model tar.gz")
@@ -111,11 +111,18 @@ def maybe_write_deployment_state(
     package_dir: str | None,
     environment: str,
     deployment_state_path: str | None,
+    endpoint_name: str,
 ) -> str | None:
     if not package_dir or not deployment_state_path:
         return None
     manifest = load_package_manifest(package_dir)
-    state = build_deployment_state(package_dir, manifest, environment=environment, source="sagemaker_deploy")
+    state = build_deployment_state(
+        package_dir,
+        manifest,
+        environment=environment,
+        source="sagemaker_deploy",
+        endpoint_name=endpoint_name,
+    )
     return write_deployment_state(deployment_state_path, state)
 
 
@@ -140,6 +147,7 @@ def main(argv: Sequence[str] | None = None) -> dict:
         package_dir=args.package_dir,
         environment=args.environment,
         deployment_state_path=args.deployment_state_path,
+        endpoint_name=args.endpoint_name,
     )
     result = {
         "endpoint_name": args.endpoint_name,

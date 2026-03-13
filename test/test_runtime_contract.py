@@ -1,0 +1,87 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from src.config import load_runtime_settings
+from src.model_package import default_package_root_for_target
+from src.training import train
+
+
+def test_runtime_settings_accept_legacy_aliases(monkeypatch, tmp_path):
+    runtime_defaults = {
+        "Variables": {
+            "AWS_REGION": "eu-west-3",
+            "RAW_S3_BUCKET": "legacy-bucket",
+            "WEATHER_CITY": "paris",
+            "DW_HOST": "legacy-host",
+            "DW_PORT": "15432",
+            "DW_DB": "legacy-db",
+            "DW_USER": "legacy-user",
+            "DW_PASSWORD": "legacy-password",
+        }
+    }
+    config_path = tmp_path / "env.json"
+    config_path.write_text(json.dumps(runtime_defaults), encoding="utf-8")
+
+    monkeypatch.setattr("src.config.runtime.DEFAULT_RUNTIME_CONFIG_PATH", config_path)
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    monkeypatch.delenv("CITY", raising=False)
+    monkeypatch.delenv("BUCKET", raising=False)
+
+    settings = load_runtime_settings()
+
+    assert settings.pg_host == "legacy-host"
+    assert settings.pg_port == 15432
+    assert settings.pg_db == "legacy-db"
+    assert settings.pg_user == "legacy-user"
+    assert settings.pg_password == "legacy-password"
+    assert settings.city == "paris"
+    assert settings.bucket == "legacy-bucket"
+
+
+@pytest.mark.parametrize(
+    ("predict_bikes", "expected_root"),
+    [
+        (True, default_package_root_for_target("bikes")),
+        (False, default_package_root_for_target("docks")),
+    ],
+)
+def test_train_main_defaults_package_root_by_target(monkeypatch, predict_bikes, expected_root):
+    captured = {}
+
+    def fake_run_training_pipeline(data_config, train_config):
+        captured["package_root"] = train_config.package_root
+        return {"ok": True}
+
+    monkeypatch.setattr(train, "run_training_pipeline", fake_run_training_pipeline)
+
+    result = train.main(
+        [
+            "--city",
+            "paris",
+            "--start",
+            "2026-03-01 00:00",
+            "--end",
+            "2026-03-01 01:00",
+            "--pg-host",
+            "localhost",
+            "--pg-port",
+            "15432",
+            "--pg-db",
+            "velib_dw",
+            "--pg-user",
+            "velib",
+            "--pg-password",
+            "velib",
+            "--predict-bikes",
+            str(predict_bikes).lower(),
+        ]
+    )
+
+    assert result == {"ok": True}
+    assert Path(captured["package_root"]) == expected_root

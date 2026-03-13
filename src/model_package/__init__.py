@@ -1,6 +1,8 @@
 from src.model_package.store import (
     ARTIFACTS_DIRNAME,
+    DEFAULT_BIKES_PACKAGE_ROOT,
     DEFAULT_DEPLOYMENT_STATE_PATH,
+    DEFAULT_DOCKS_PACKAGE_ROOT,
     DEFAULT_PACKAGE_ROOT,
     MODEL_DIRNAME,
     PACKAGE_MANIFEST_FILENAME,
@@ -9,6 +11,7 @@ from src.model_package.store import (
     build_model_card_text,
     build_package_manifest,
     compute_package_sha256,
+    default_package_root_for_target,
     ensure_package_dir,
     load_deployment_state,
     load_package_manifest,
@@ -21,7 +24,9 @@ from src.model_package.store import (
 
 __all__ = [
     "ARTIFACTS_DIRNAME",
+    "DEFAULT_BIKES_PACKAGE_ROOT",
     "DEFAULT_DEPLOYMENT_STATE_PATH",
+    "DEFAULT_DOCKS_PACKAGE_ROOT",
     "DEFAULT_PACKAGE_ROOT",
     "MODEL_DIRNAME",
     "PACKAGE_MANIFEST_FILENAME",
@@ -30,6 +35,7 @@ __all__ = [
     "build_model_card_text",
     "build_package_manifest",
     "compute_package_sha256",
+    "default_package_root_for_target",
     "ensure_package_dir",
     "load_deployment_state",
     "load_package_manifest",

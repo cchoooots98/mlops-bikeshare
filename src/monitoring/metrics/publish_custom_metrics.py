@@ -12,6 +12,7 @@ import boto3
 import numpy as np
 import pandas as pd
 
+from src.config import quality_prefix, resolve_target_name
 from src.model_target import parse_bool_value, target_spec_from_name, target_spec_from_predict_bikes
 from src.monitoring.metrics.metrics_helper import put_metrics_bulk
 
@@ -166,7 +167,7 @@ def main():
     parser.add_argument(
         "--quality-prefix",
         required=True,
-        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/city=paris",
+        help="S3 prefix root that contains ds=YYYY-MM-DD partitions, e.g., monitoring/quality/target=bikes/city=paris",
     )
     parser.add_argument("--endpoint", required=True, help="Endpoint name as a metric dimension")
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "eu-west-3"))
@@ -174,10 +175,25 @@ def main():
     parser.add_argument("--namespace", default="Bikeshare/Model")
     parser.add_argument("--city-dimension", default="paris", help="Optional extra CloudWatch dimension City=<value>")
     parser.add_argument("--predict-bikes", default=None, choices=["true", "false"])
+    parser.add_argument("--target-name", default=None, choices=["bikes", "docks"])
+    parser.add_argument("--environment", default=os.environ.get("SERVING_ENVIRONMENT", "production"))
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute metrics and print the payload without publishing to CloudWatch.",
+    )
     args = parser.parse_args()
 
+    target_name = resolve_target_name(
+        predict_bikes=args.predict_bikes,
+        target_name=args.target_name,
+    )
+    quality_root = args.quality_prefix
+    if quality_root == "AUTO":
+        quality_root = quality_prefix(args.city_dimension, target_name)
+
     # Load data (use 'dt' as the time column)
-    df = load_quality_dataframe(args.bucket, args.quality_prefix, time_col_hint="dt")
+    df = load_quality_dataframe(args.bucket, quality_root, time_col_hint="dt")
     if df.empty:
         print("No quality data found for the last 24h. Skipping metric publish.")
         return
@@ -199,34 +215,31 @@ def main():
         f"HitRate@{args.threshold}={hit_rate:.4f}, N={samples}"
     )
 
+    metric_payload = [
+        ("PR-AUC-24h", pr_auc, "None"),
+        ("F1-24h", f1, "None"),
+        ("ThresholdHitRate-24h", hit_rate, "None"),
+        ("Samples-24h", samples, "Count"),
+    ]
+    if args.dry_run:
+        print(
+            "Dry run only. Prepared 4 metrics for namespace "
+            f"'{args.namespace}' with dimensions "
+            f"Environment={args.environment}, EndpointName={args.endpoint}, City={args.city_dimension}, TargetName={target_name}."
+        )
+        return
+
     put_metrics_bulk(
-        [
-            ("PR-AUC-24h", pr_auc, "None"),
-            ("F1-24h", f1, "None"),
-            ("ThresholdHitRate-24h", hit_rate, "None"),
-            ("Samples-24h", samples, "Count"),
-        ],
+        metric_payload,
         endpoint=args.endpoint,
         city=args.city_dimension,
+        target_name=target_name,
+        environment=args.environment,
     )
-
-    # Build CloudWatch dimensions
-    dims = [{"Name": "EndpointName", "Value": args.endpoint}]
-    if args.city_dimension:
-        dims.append({"Name": "City", "Value": args.city_dimension})
-
-    cw = boto3.client("cloudwatch", region_name=args.region)
-    now = datetime.utcnow()
-
-    metric_data = [
-        {"MetricName": "PR-AUC-24h", "Dimensions": dims, "Timestamp": now, "Value": pr_auc, "Unit": "None"},
-        {"MetricName": "F1-24h", "Dimensions": dims, "Timestamp": now, "Value": f1, "Unit": "None"},
-        {"MetricName": "ThresholdHitRate-24h", "Dimensions": dims, "Timestamp": now, "Value": hit_rate, "Unit": "None"},
-        {"MetricName": "Samples-24h", "Dimensions": dims, "Timestamp": now, "Value": samples, "Unit": "Count"},
-    ]
-
-    cw.put_metric_data(Namespace=args.namespace, MetricData=metric_data)
-    print(f"Published 4 metrics to CloudWatch namespace '{args.namespace}' with dimensions {dims}.")
+    print(
+        "Published 4 metrics to CloudWatch namespace "
+        f"'{args.namespace}' for target={target_name}, environment={args.environment}, endpoint={args.endpoint}."
+    )
 
 
 if __name__ == "__main__":

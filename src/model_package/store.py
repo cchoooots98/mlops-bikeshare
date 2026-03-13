@@ -14,7 +14,9 @@ PACKAGE_MANIFEST_FILENAME = "package_manifest.json"
 MODEL_DIRNAME = "model"
 ARTIFACTS_DIRNAME = "artifacts"
 DEFAULT_PACKAGE_ROOT = Path("model_dir") / "packages"
-DEFAULT_DEPLOYMENT_STATE_PATH = Path("model_dir") / "deployments" / "local.json"
+DEFAULT_BIKES_PACKAGE_ROOT = DEFAULT_PACKAGE_ROOT / "bikes"
+DEFAULT_DOCKS_PACKAGE_ROOT = DEFAULT_PACKAGE_ROOT / "docks"
+DEFAULT_DEPLOYMENT_STATE_PATH = Path("model_dir") / "deployments" / "bikes" / "local.json"
 
 _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 _REQUIRED_PACKAGE_FIELDS = {
@@ -45,6 +47,8 @@ _REQUIRED_PACKAGE_FIELDS = {
 _REQUIRED_DEPLOYMENT_FIELDS = {
     "deployment_state_version",
     "environment",
+    "predict_bikes",
+    "target_name",
     "package_dir",
     "package_manifest_path",
     "model_name",
@@ -76,6 +80,15 @@ def ensure_package_dir(model_name: str, run_id: str, root_dir: str | os.PathLike
     (package_dir / MODEL_DIRNAME).mkdir(parents=True, exist_ok=True)
     (package_dir / ARTIFACTS_DIRNAME).mkdir(parents=True, exist_ok=True)
     return package_dir
+
+
+def default_package_root_for_target(target_name: str) -> Path:
+    normalized = target_name.strip().lower()
+    if normalized == "bikes":
+        return DEFAULT_BIKES_PACKAGE_ROOT
+    if normalized == "docks":
+        return DEFAULT_DOCKS_PACKAGE_ROOT
+    raise ValueError(f"unsupported package target: {target_name}")
 
 
 def build_package_manifest(summary: Mapping[str, Any], package_dir: str | os.PathLike[str]) -> dict[str, Any]:
@@ -228,11 +241,14 @@ def build_deployment_state(
     *,
     environment: str = "local",
     source: str = "manual",
+    endpoint_name: str | None = None,
 ) -> dict[str, Any]:
     package_path = Path(package_dir).resolve()
     state = {
         "deployment_state_version": "1",
         "environment": environment,
+        "predict_bikes": bool(manifest["predict_bikes"]),
+        "target_name": manifest["target_name"],
         "package_dir": str(package_path),
         "package_manifest_path": str(resolve_package_manifest_path(package_path).resolve()),
         "model_name": manifest["model_name"],
@@ -243,6 +259,8 @@ def build_deployment_state(
         "updated_at_utc": _utc_now(),
         "source": source,
     }
+    if endpoint_name:
+        state["endpoint_name"] = endpoint_name
     validate_deployment_state(state)
     return state
 

@@ -1,17 +1,18 @@
-boto3
+
 requests
 pandas
 numpy
 pywin32==311 ; platform_system == "Windows"
+
 awswrangler
 lightgbm
 seaborn
 xgboost
-s3fs
+
+
 PyAthena
 holidays
 scikit-learn
-sagemaker
 orjson
 sqlalchemy
 psycopg2-binary

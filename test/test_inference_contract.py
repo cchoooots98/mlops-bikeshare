@@ -6,10 +6,11 @@ import pandas as pd
 import pytest
 
 from src.features.schema import FEATURE_COLUMNS
+from src.config import deployment_state_path, prediction_key
 from src.inference import featurize_online, predictor
 from src.model_package import activate_package, ensure_package_dir, write_package_manifest
 from src.model_target import target_spec_from_predict_bikes
-from src.utils.config import RuntimeSettings
+from src.config import RuntimeSettings
 
 _SMOKE_SPEC = importlib.util.spec_from_file_location(
     "repo_smoke_invoke",
@@ -25,7 +26,9 @@ def _runtime_settings(tmp_path) -> RuntimeSettings:
         aws_region="eu-west-3",
         city="paris",
         bucket="unit-test-bucket",
-        sm_endpoint="bikeshare-staging",
+        sm_endpoint="bikeshare-bikes-staging",
+        serving_environment="staging",
+        target_name="bikes",
         pg_host="localhost",
         pg_port=5432,
         pg_db="velib_dw",
@@ -35,8 +38,10 @@ def _runtime_settings(tmp_path) -> RuntimeSettings:
         training_feature_table="feat_station_snapshot_5min",
         online_feature_table="feat_station_snapshot_latest",
         model_package_dir=None,
-        deployment_state_path=str(tmp_path / "deployments" / "local.json"),
+        deployment_state_root=str(tmp_path / "deployments"),
+        deployment_state_path=str(tmp_path / "deployments" / "bikes" / "local.json"),
         predict_bikes=True,
+        dev_mode=False,
     )
 
 
@@ -86,9 +91,7 @@ def _write_package(tmp_path, *, feature_columns=None, predict_bikes=True) -> tup
         },
     }
     write_package_manifest(package_dir, manifest)
-    deployment_state_path = Path(
-        activate_package(package_dir, tmp_path / "deployments" / "local.json", source="pytest")
-    )
+    deployment_state_path = Path(activate_package(package_dir, tmp_path / "deployments" / "bikes" / "local.json", source="pytest"))
     return package_dir, deployment_state_path
 
 
@@ -103,7 +106,7 @@ def test_smoke_invoke_payload_matches_feature_contract():
 def test_load_prediction_manifest_requires_threshold_and_target(tmp_path, predict_bikes, expected_label):
     _write_package(tmp_path, predict_bikes=predict_bikes)
 
-    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "local.json")
+    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "bikes" / "local.json")
 
     assert metadata["label"] == expected_label
     assert metadata["best_threshold"] == 0.37
@@ -114,7 +117,7 @@ def test_load_prediction_manifest_uses_package_feature_columns_without_runtime_c
     package_columns = ["util_bikes", "minutes_since_prev_snapshot"]
     _write_package(tmp_path, feature_columns=package_columns)
 
-    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "local.json")
+    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "bikes" / "local.json")
 
     assert metadata["feature_columns"] == package_columns
 
@@ -183,3 +186,20 @@ def test_formal_codepaths_do_not_reference_legacy_feature_builder():
         content = (Path(__file__).resolve().parents[1] / path).read_text(encoding="utf-8")
         for pattern in forbidden:
             assert pattern not in content, f"{path} still references legacy pattern: {pattern}"
+
+
+def test_prediction_key_is_target_partitioned():
+    assert prediction_key("paris", "2026-03-11-10-05", "bikes") == (
+        "inference/target=bikes/city=paris/dt=2026-03-11-10-05/predictions.parquet"
+    )
+    assert prediction_key("paris", "2026-03-11-10-05", "docks") == (
+        "inference/target=docks/city=paris/dt=2026-03-11-10-05/predictions.parquet"
+    )
+
+
+def test_deployment_state_path_is_target_specific(tmp_path):
+    assert deployment_state_path(
+        target_name="bikes",
+        environment="production",
+        root=tmp_path / "deployments",
+    ) == tmp_path / "deployments" / "bikes" / "production.json"
