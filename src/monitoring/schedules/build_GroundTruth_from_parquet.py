@@ -28,6 +28,8 @@ import boto3
 import pandas as pd
 import pyarrow.parquet as pq
 
+from src.model_target import parse_bool_value, target_spec_from_name, target_spec_from_predict_bikes
+
 # -------------------- Configuration --------------------
 BUCKET = "mlops-bikeshare-387706002632-eu-west-3"  # S3 bucket name
 QUALITY_PREFIX = "monitoring/quality/city=paris"  # where parquet lives
@@ -48,6 +50,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--start", required=True, help="Start timestamp inclusive, format YYYY-MM-DD-HH")
     p.add_argument("--end", required=True, help="End timestamp inclusive, format YYYY-MM-DD-HH")
+    p.add_argument("--predict-bikes", default=None, choices=["true", "false"])
     return p.parse_args()
 
 
@@ -105,6 +108,24 @@ def write_jsonl_to_s3(key: str, lines: List[dict]) -> None:
     s3.put_object(Bucket=BUCKET, Key=key, Body=buf.getvalue().encode("utf-8"))
 
 
+def resolve_label_column(df: pd.DataFrame, predict_bikes: bool | None = None) -> str:
+    if predict_bikes is not None:
+        return target_spec_from_predict_bikes(predict_bikes).label_column
+
+    if "prediction_target" in df.columns:
+        target_values = df["prediction_target"].dropna().astype(str).str.lower().unique().tolist()
+        if len(target_values) == 1:
+            return target_spec_from_name(target_values[0]).label_column
+        if len(target_values) > 1:
+            raise ValueError(f"quality parquet must contain exactly one prediction_target, got {target_values}")
+
+    if "y_stockout_bikes_30" in df.columns and "y_stockout_docks_30" not in df.columns:
+        return "y_stockout_bikes_30"
+    if "y_stockout_docks_30" in df.columns and "y_stockout_bikes_30" not in df.columns:
+        return "y_stockout_docks_30"
+    raise ValueError("could not infer ground-truth label column from quality parquet")
+
+
 # -------------------- Core logic --------------------
 def main():
     args = parse_args()
@@ -112,6 +133,7 @@ def main():
     end_dt = datetime.strptime(args.end, "%Y-%m-%d-%H")
     if end_dt < start_dt:
         raise ValueError("end must be >= start")
+    predict_bikes = None if args.predict_bikes is None else parse_bool_value(args.predict_bikes)
 
     # Pre-compute target hours and day partitions we need to look at.
     hours = hour_range(start_dt, end_dt)
@@ -141,21 +163,23 @@ def main():
         frames = []
         for key in parts:
             df = read_parquet_s3_to_df(key)
+            label_column = resolve_label_column(df, predict_bikes)
 
             # Validate required columns exist
-            missing = [c for c in ("inferenceId", "y_stockout_bikes_30") if c not in df.columns]
+            missing = [c for c in ("inferenceId", label_column) if c not in df.columns]
             if missing:
                 raise KeyError(f"Missing columns {missing} in {key}")
 
             # Keep only needed columns
-            frames.append(df[["inferenceId", "y_stockout_bikes_30"]])
+            frames.append(df[["inferenceId", label_column]])
 
         if not frames:
             print(f"[{hour_dt:%Y-%m-%d %H}:00] No rows after filtering. Skip.")
             continue
 
         joined = pd.concat(frames, ignore_index=True)
-        joined = joined.dropna(subset=["inferenceId", "y_stockout_bikes_30"])
+        label_column = resolve_label_column(joined, predict_bikes)
+        joined = joined.dropna(subset=["inferenceId", label_column])
 
         # Build JSONL lines (eventId = inferenceId; no capture alignment)
         lines: List[dict] = []
@@ -163,7 +187,7 @@ def main():
             inference_id = str(getattr(rec, "inferenceId"))
             # Normalize label to int 0/1
             try:
-                label_int = int(float(getattr(rec, "y_stockout_bikes_30")))
+                label_int = int(float(getattr(rec, label_column)))
             except Exception:
                 # Skip rows with invalid labels
                 continue

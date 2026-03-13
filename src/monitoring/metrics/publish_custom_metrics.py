@@ -12,6 +12,7 @@ import boto3
 import numpy as np
 import pandas as pd
 
+from src.model_target import parse_bool_value, target_spec_from_name, target_spec_from_predict_bikes
 from src.monitoring.metrics.metrics_helper import put_metrics_bulk
 
 # ---------- Metric helpers (no heavy sklearn dependency) ----------
@@ -131,6 +132,31 @@ def load_quality_dataframe(bucket: str, prefix_root: str, time_col_hint: str = "
     return df
 
 
+def resolve_quality_columns(df: pd.DataFrame, predict_bikes: bool | None = None) -> tuple[str, str]:
+    if predict_bikes is not None:
+        target_spec = target_spec_from_predict_bikes(predict_bikes)
+        return target_spec.label_column, target_spec.score_column
+
+    if "prediction_target" in df.columns:
+        target_values = df["prediction_target"].dropna().astype(str).str.lower().unique().tolist()
+        if len(target_values) == 1:
+            target_spec = target_spec_from_name(target_values[0])
+            return target_spec.label_column, target_spec.score_column
+        if len(target_values) > 1:
+            raise ValueError(f"quality data must contain exactly one prediction_target, got {target_values}")
+
+    if {"y_stockout_bikes_30", "y_stockout_docks_30"}.issubset(df.columns):
+        raise RuntimeError("quality data exposes both label columns without prediction_target disambiguation")
+    if {"yhat_bikes", "yhat_docks"}.issubset(df.columns):
+        raise RuntimeError("quality data exposes both score columns without prediction_target disambiguation")
+
+    label_col = _auto_pick_column(df, ["y_stockout_bikes_30", "y_stockout_docks_30"])
+    score_col = _auto_pick_column(df, ["yhat_bikes", "yhat_docks"])
+    if label_col is None or score_col is None:
+        raise RuntimeError(f"Expected side-specific label/score columns not found. Have: {list(df.columns)}")
+    return label_col, score_col
+
+
 # ---------- Main ----------
 
 
@@ -147,6 +173,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.15, help="Probability threshold for F1/hit-rate")
     parser.add_argument("--namespace", default="Bikeshare/Model")
     parser.add_argument("--city-dimension", default="paris", help="Optional extra CloudWatch dimension City=<value>")
+    parser.add_argument("--predict-bikes", default=None, choices=["true", "false"])
     args = parser.parse_args()
 
     # Load data (use 'dt' as the time column)
@@ -155,15 +182,8 @@ def main():
         print("No quality data found for the last 24h. Skipping metric publish.")
         return
 
-    # Your concrete columns:
-    #  - label: y_stockout_bikes_30
-    #  - score: yhat_bikes
-    label_col = "y_stockout_bikes_30"
-    score_col = "yhat_bikes"
-    if label_col not in df.columns or score_col not in df.columns:
-        raise RuntimeError(
-            f"Expected columns not found. Have: {list(df.columns)}. " f"Need '{label_col}' and '{score_col}'."
-        )
+    predict_bikes = None if args.predict_bikes is None else parse_bool_value(args.predict_bikes)
+    label_col, score_col = resolve_quality_columns(df, predict_bikes)
 
     y_true = df[label_col].astype(int).to_numpy(copy=False)
     y_score = df[score_col].astype(float).to_numpy(copy=False)

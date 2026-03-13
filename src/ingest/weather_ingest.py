@@ -30,11 +30,6 @@ def floor_to_10min(ts: datetime) -> datetime:
     return ts.replace(minute=(ts.minute // 10) * 10)
 
 
-def _target_bucket_utc(now_utc: datetime | None = None) -> datetime:
-    now_utc = now_utc or datetime.now(timezone.utc)
-    return floor_to_10min(now_utc)
-
-
 def _coords_for_city(city: str) -> tuple[float, float]:
     coords = CITY_COORDS.get(city.lower().strip())
     if not coords:
@@ -105,17 +100,44 @@ def _validate_openweather_payload(payload: dict) -> None:
         raise ValueError("OpenWeather payload hourly must be a list")
 
 
+def _snapshot_bucket_from_payload(payload: dict) -> datetime:
+    observed_at = _to_utc(payload.get("current", {}).get("dt"))
+    if observed_at is None:
+        raise ValueError("OpenWeather current block missing valid dt")
+    return floor_to_10min(observed_at)
+
+
+def _ingest_metadata(
+    payload: dict,
+    *,
+    ingested_at: pd.Timestamp | None = None,
+) -> dict[str, object]:
+    ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
+    snapshot_bucket_at = datetime.fromisoformat(
+        payload["_meta_ingest"]["snapshot_bucket_at_utc"]
+    ).astimezone(timezone.utc)
+    source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
+    current = payload.get("current", {})
+    observed_at = _to_utc(current.get("dt"))
+    if observed_at is None:
+        raise ValueError("OpenWeather current block missing valid dt")
+    return {
+        "ingested_at": ingested_at,
+        "snapshot_bucket_at": snapshot_bucket_at,
+        "source": source,
+        "observed_at": observed_at,
+    }
+
+
 def fetch_weather_payload(
     *,
     city: str,
     api_key: str,
     timeout_sec: int = 30,
-    target_bucket_utc: datetime | None = None,
 ) -> dict:
     if not api_key:
         raise RuntimeError("OPENWEATHER_API_KEY is required for weather ingestion")
 
-    snapshot_bucket_at = target_bucket_utc or _target_bucket_utc()
     lat, lon = _coords_for_city(city)
     response = requests.get(
         OPENWEATHER_BASE_URL,
@@ -131,6 +153,7 @@ def fetch_weather_payload(
     response.raise_for_status()
     payload = response.json()
     _validate_openweather_payload(payload)
+    snapshot_bucket_at = _snapshot_bucket_from_payload(payload)
     payload["_meta_ingest"] = {
         "source": "openweather-onecall-3.0",
         "city": city,
@@ -179,24 +202,16 @@ def weather_current_dataframe(
     run_id: str,
     ingested_at: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
-    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
-    source_last_updated = int(payload.get("_meta_ingest", {}).get("fetched_at_utc", int(time.time())))
-    source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
-
+    metadata = _ingest_metadata(payload, ingested_at=ingested_at)
     current = payload.get("current", {})
-    observed_at = _to_utc(current.get("dt"))
-    if observed_at is None:
-        raise ValueError("OpenWeather current block missing valid dt")
     current_weather = _weather_summary(current)
 
     row = {
         "run_id": run_id,
-        "ingested_at": ingested_at,
-        "source_last_updated": source_last_updated,
+        "ingested_at": metadata["ingested_at"],
         "city": city,
-        "snapshot_bucket_at": snapshot_bucket_at,
-        "observed_at": observed_at,
+        "snapshot_bucket_at": metadata["snapshot_bucket_at"],
+        "observed_at": metadata["observed_at"],
         "temperature_c": current.get("temp"),
         "humidity_pct": current.get("humidity"),
         "wind_speed_ms": current.get("wind_speed"),
@@ -204,7 +219,7 @@ def weather_current_dataframe(
         "weather_code": current_weather["weather_code"],
         "weather_main": current_weather["weather_main"],
         "weather_description": current_weather["weather_description"],
-        "source": source,
+        "source": metadata["source"],
     }
     return pd.DataFrame([row])
 
@@ -216,14 +231,9 @@ def weather_hourly_dataframe(
     run_id: str,
     ingested_at: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
-    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
-    source_last_updated = int(payload.get("_meta_ingest", {}).get("fetched_at_utc", int(time.time())))
-    source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
+    metadata = _ingest_metadata(payload, ingested_at=ingested_at)
     current = payload.get("current", {})
-    observed_at = _to_utc(current.get("dt"))
-    if observed_at is None:
-        raise ValueError("OpenWeather current block missing valid dt")
+    observed_at = metadata["observed_at"]
     window_end = observed_at + pd.Timedelta(hours=1)
 
     rows = []
@@ -237,13 +247,12 @@ def weather_hourly_dataframe(
         rows.append(
             {
                 "run_id": run_id,
-                "ingested_at": ingested_at,
-                "source_last_updated": source_last_updated,
+                "ingested_at": metadata["ingested_at"],
                 "city": city,
-                "snapshot_bucket_at": snapshot_bucket_at,
+                "snapshot_bucket_at": metadata["snapshot_bucket_at"],
                 "observed_at": observed_at,
                 "forecast_at": forecast_at,
-                "forecast_horizon_min": int((forecast_at - snapshot_bucket_at).total_seconds() // 60),
+                "forecast_horizon_min": int((forecast_at - observed_at).total_seconds() // 60),
                 "temperature_c": hourly_row.get("temp"),
                 "humidity_pct": hourly_row.get("humidity"),
                 "wind_speed_ms": hourly_row.get("wind_speed"),
@@ -252,7 +261,7 @@ def weather_hourly_dataframe(
                 "weather_code": summary["weather_code"],
                 "weather_main": summary["weather_main"],
                 "weather_description": summary["weather_description"],
-                "source": source,
+                "source": metadata["source"],
             }
         )
     return pd.DataFrame(rows)
@@ -263,7 +272,6 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
     CREATE TABLE IF NOT EXISTS stg_weather_current (
       run_id               TEXT NOT NULL,
       ingested_at          TIMESTAMPTZ NOT NULL,
-      source_last_updated  BIGINT,
       city                 TEXT NOT NULL,
       snapshot_bucket_at   TIMESTAMPTZ NOT NULL,
       observed_at          TIMESTAMPTZ NOT NULL,
@@ -281,7 +289,6 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
     CREATE TABLE IF NOT EXISTS stg_weather_hourly (
       run_id                          TEXT NOT NULL,
       ingested_at                     TIMESTAMPTZ NOT NULL,
-      source_last_updated             BIGINT,
       city                            TEXT NOT NULL,
       snapshot_bucket_at              TIMESTAMPTZ NOT NULL,
       observed_at                     TIMESTAMPTZ NOT NULL,
@@ -307,7 +314,6 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
     alter_sqls = [
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS run_id TEXT;",
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMPTZ;",
-        "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS source_last_updated BIGINT;",
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS city TEXT;",
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;",
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;",
@@ -321,7 +327,6 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
         "ALTER TABLE stg_weather_current ADD COLUMN IF NOT EXISTS source TEXT;",
         "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS run_id TEXT;",
         "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMPTZ;",
-        "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS source_last_updated BIGINT;",
         "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS city TEXT;",
         "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;",
         "ALTER TABLE stg_weather_hourly ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;",
@@ -360,29 +365,46 @@ def ensure_weather_staging_tables(conn_uri: str) -> None:
                 )
             conn.execute(text(current_table_sql))
             conn.execute(text(hourly_table_sql))
+            conn.execute(text("ALTER TABLE stg_weather_current DROP COLUMN IF EXISTS source_last_updated;"))
+            conn.execute(text("ALTER TABLE stg_weather_hourly DROP COLUMN IF EXISTS source_last_updated;"))
             for stmt in alter_sqls:
                 conn.execute(text(stmt))
+            conn.execute(
+                text(
+                    """
+                    UPDATE stg_weather_current
+                    SET snapshot_bucket_at = to_timestamp(
+                        floor(extract(epoch from observed_at) / 600.0) * 600
+                    )
+                    WHERE observed_at IS NOT NULL
+                      AND (
+                          snapshot_bucket_at IS NULL
+                          OR snapshot_bucket_at <> to_timestamp(
+                              floor(extract(epoch from observed_at) / 600.0) * 600
+                          )
+                      )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE stg_weather_hourly
+                    SET snapshot_bucket_at = to_timestamp(
+                        floor(extract(epoch from observed_at) / 600.0) * 600
+                    )
+                    WHERE observed_at IS NOT NULL
+                      AND (
+                          snapshot_bucket_at IS NULL
+                          OR snapshot_bucket_at <> to_timestamp(
+                              floor(extract(epoch from observed_at) / 600.0) * 600
+                          )
+                      )
+                    """
+                )
+            )
             for stmt in index_sqls:
                 conn.execute(text(stmt))
-    finally:
-        engine.dispose()
-
-
-def weather_snapshot_exists(conn_uri: str, *, city: str, snapshot_bucket_at_utc: datetime) -> bool:
-    sql = text(
-        """
-        SELECT 1
-        FROM stg_weather_current
-        WHERE city = :city
-          AND snapshot_bucket_at = :snapshot_bucket_at
-        LIMIT 1
-        """
-    )
-    engine = create_engine(conn_uri, pool_pre_ping=True)
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(sql, {"city": city, "snapshot_bucket_at": snapshot_bucket_at_utc}).first()
-            return row is not None
     finally:
         engine.dispose()
 
@@ -438,14 +460,12 @@ def ingest_weather_dual_write(
     raw_bucket: str,
     api_key: str,
     timeout_sec: int = 30,
-    target_bucket_utc: datetime | None = None,
 ) -> dict:
     ensure_weather_staging_tables(conn_uri)
     payload = fetch_weather_payload(
         city=city,
         api_key=api_key,
         timeout_sec=timeout_sec,
-        target_bucket_utc=target_bucket_utc,
     )
     raw_result = persist_weather_raw_to_s3(
         payload,
@@ -478,7 +498,6 @@ def handler(event, context):
         city=city,
         api_key=api_key,
         timeout_sec=int(os.getenv("WEATHER_HTTP_TIMEOUT_SEC", "30")),
-        target_bucket_utc=_target_bucket_utc(),
     )
     raw_result = persist_weather_raw_to_s3(
         payload,
