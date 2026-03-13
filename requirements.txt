@@ -95,6 +95,8 @@ lightgbm==4.6.0
     # via -r requirements.in
 markdown-it-py==4.0.0
     # via rich
+mlflow
+    # via -r requirements.in
 matplotlib==3.10.6
     # via seaborn
 mdurl==0.1.2

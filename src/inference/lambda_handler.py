@@ -28,7 +28,7 @@ def handler(event, context):
     try:
         import sklearn  # lazy import to ensure present
 
-        from src.inference import predictor  # imports build_features -> sklearn BallTree
+        from src.inference import predictor
 
         predictor.main()
         return {

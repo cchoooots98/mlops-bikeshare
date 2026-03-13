@@ -15,3 +15,4 @@ sagemaker
 orjson
 sqlalchemy
 psycopg2-binary
+mlflow

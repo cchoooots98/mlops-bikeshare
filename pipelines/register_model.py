@@ -1,48 +1,89 @@
-# pipelines/register_model.py
-# Purpose: Register a trained model (artifact path "model") from an MLflow run
-# into the MLflow Model Registry, and (optionally) transition it to a stage.
-#
-# Usage (PowerShell):
-#   python pipelines/register_model.py `
-#       --run-id <RUN_ID_FROM_TRAINING> `
-#       --model-name bikeshare_risk `
-#       --stage Staging
-#
-# Notes:
-# - This script assumes $env:MLFLOW_TRACKING_URI is set (e.g., sqlite:///mlflow.db).
-# - "model-name" becomes the registry name (shared across all versions).
-
 import argparse
+import json
+from typing import Sequence
 
 import mlflow
 
+REGISTER_RESULT_PREFIX = "REGISTER_RESULT_JSON::"
 
-def main():
-    parser = argparse.ArgumentParser(description="Register an MLflow model version from a run.")
-    parser.add_argument("--run-id", required=True, help="MLflow run_id that produced the 'model' artifact.")
-    parser.add_argument("--model-name", required=True, help="MLflow Model Registry name, e.g., 'bikeshare_risk'.")
-    parser.add_argument(
-        "--stage", default=None, help="Optional stage to transition to, e.g., 'Staging' or 'Production'."
-    )
-    args = parser.parse_args()
 
-    # Build the runs:/ URI pointing to the logged model artifact.
-    source = f"runs:/{args.run_id}/model"
+def parse_version_tags(raw_tags: Sequence[str] | None) -> dict[str, str]:
+    tags = {}
+    for item in raw_tags or []:
+        if "=" not in item:
+            raise ValueError(f"invalid --version-tag value: {item}")
+        key, value = item.split("=", 1)
+        tags[key] = value
+    return tags
 
-    # Create a new version in the Model Registry (or use existing name, version increments automatically).
-    mv = mlflow.register_model(model_uri=source, name=args.model_name)
-    print(f"Registered model version: name={args.model_name}, version={mv.version}")
 
-    # Optionally, set the stage (e.g., mark this version as Staging)
-    if args.stage:
-        client = mlflow.tracking.MlflowClient()
+def set_alias_or_fallback(client: mlflow.tracking.MlflowClient, model_name: str, version: str, alias: str) -> None:
+    if hasattr(client, "set_registered_model_alias"):
+        client.set_registered_model_alias(model_name, alias, version)
+        return
+    client.set_model_version_tag(model_name, version, f"alias.{alias}", "true")
+
+
+def register_model_version(
+    run_id: str,
+    model_name: str,
+    artifact_path: str = "model",
+    stage: str | None = None,
+    alias: str | None = None,
+    version_tags: dict[str, str] | None = None,
+) -> dict:
+    source = f"runs:/{run_id}/{artifact_path}"
+    model_version = mlflow.register_model(model_uri=source, name=model_name)
+    client = mlflow.tracking.MlflowClient()
+
+    if stage:
         client.transition_model_version_stage(
-            name=args.model_name,
-            version=mv.version,
-            stage=args.stage,
-            archive_existing_versions=False,  # do not auto-archive older versions
+            name=model_name,
+            version=model_version.version,
+            stage=stage,
+            archive_existing_versions=False,
         )
-        print(f"Transitioned model to stage: {args.stage}")
+
+    if alias:
+        set_alias_or_fallback(client, model_name, str(model_version.version), alias)
+
+    for key, value in (version_tags or {}).items():
+        client.set_model_version_tag(model_name, model_version.version, key, value)
+
+    result = {
+        "run_id": run_id,
+        "model_name": model_name,
+        "artifact_path": artifact_path,
+        "version": str(model_version.version),
+        "stage": stage,
+        "alias": alias,
+        "version_tags": version_tags or {},
+    }
+    print(REGISTER_RESULT_PREFIX + json.dumps(result, sort_keys=True))
+    return result
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Register an MLflow model version from a run.")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--model-name", required=True)
+    parser.add_argument("--artifact-path", default="model")
+    parser.add_argument("--stage", default=None)
+    parser.add_argument("--alias", default=None)
+    parser.add_argument("--version-tag", action="append", default=[])
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> dict:
+    args = parse_args(argv)
+    return register_model_version(
+        run_id=args.run_id,
+        model_name=args.model_name,
+        artifact_path=args.artifact_path,
+        stage=args.stage,
+        alias=args.alias,
+        version_tags=parse_version_tags(args.version_tag),
+    )
 
 
 if __name__ == "__main__":

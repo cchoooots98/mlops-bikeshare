@@ -1,151 +1,84 @@
-# pipelines/deploy_via_sagemaker_sdk.py
-# Purpose: Create/Update a SageMaker endpoint with robust logging.
-# Works with a BYOC image (e.g., mlflow-pyfunc) + a model tar in S3.
-# All steps are commented in English.
-
 import argparse
 import datetime as dt
+import json
 import re
 import sys
 import time
+from pathlib import Path
+from typing import Sequence
 
 import boto3
 import botocore
 from botocore.exceptions import ClientError
 
+from src.model_package import (
+    build_deployment_state,
+    load_package_manifest,
+    write_deployment_state,
+)
+
 
 def ts_suffix() -> str:
-    """Return a UTC timestamp suffix to make unique names on every deploy."""
     return dt.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 
 
-def parse_args():
-    """Parse CLI arguments passed from your PowerShell command."""
-    p = argparse.ArgumentParser(description="Deploy/Update a SageMaker endpoint")
-    p.add_argument("--endpoint-name", required=True, help="Endpoint name, e.g., bikeshare-staging")
-    p.add_argument("--role-arn", required=True, help="SageMaker execution role ARN")
-    p.add_argument("--image-uri", required=True, help="ECR image URI for inference container")
-    p.add_argument("--model-data", required=True, help="S3 URI to model.tar.gz")
-    p.add_argument("--instance-type", required=True, help="e.g., ml.m5.large")
-    p.add_argument("--region", required=True, help="AWS region, e.g., eu-west-3")
-    return p.parse_args()
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Deploy/update a SageMaker endpoint from a model package.")
+    parser.add_argument("--endpoint-name", required=True, help="Endpoint name, e.g. bikeshare-staging")
+    parser.add_argument("--role-arn", required=True, help="SageMaker execution role ARN")
+    parser.add_argument("--image-uri", required=True, help="Inference container image URI")
+    parser.add_argument("--package-s3-uri", default=None, help="S3 URI to a packaged model tar.gz")
+    parser.add_argument("--model-data", default=None, help="Deprecated alias of --package-s3-uri")
+    parser.add_argument("--package-dir", default=None, help="Optional local model package directory for deployment metadata.")
+    parser.add_argument("--instance-type", required=True, help="Instance type, e.g. ml.m5.large")
+    parser.add_argument("--region", required=True, help="AWS region, e.g. eu-west-3")
+    parser.add_argument("--environment", default="staging", help="Deployment environment label.")
+    parser.add_argument("--deployment-state-path", default=None, help="Optional local deployment state JSON path.")
+    return parser.parse_args(argv)
 
 
-def assert_image_region_matches(image_uri: str, region: str):
-    """
-    Basic guard: ECR image must be from the same region as the endpoint.
-    Example image: 3877....dkr.ecr.eu-west-3.amazonaws.com/mlflow-pyfunc:3.3.2-v5
-    """
-    m = re.search(r"\.ecr\.([a-z0-9-]+)\.amazonaws\.com/", image_uri)
-    if not m:
+def assert_image_region_matches(image_uri: str, region: str) -> None:
+    match = re.search(r"\.ecr\.([a-z0-9-]+)\.amazonaws\.com/", image_uri)
+    if not match:
         print(f"[WARN] Could not parse region from ECR image URI: {image_uri}")
         return
-    image_region = m.group(1)
+    image_region = match.group(1)
     if image_region != region:
-        raise ValueError(f"ECR image is in {image_region}, but --region is {region}. " "They must match.")
+        raise ValueError(f"ECR image is in {image_region}, but --region is {region}. They must match.")
 
 
-def create_model(sm, model_name: str, image_uri: str, model_data_s3: str, exec_role_arn: str):
-    """
-    Create a new SageMaker Model resource. We always create a fresh one
-    (with a timestamp in the name) because Model resources are immutable.
-    """
-    print(f"[INFO] Creating Model: {model_name}")
-    try:
-        sm.create_model(
-            ModelName=model_name,
-            PrimaryContainer={
-                "Image": image_uri,
-                "ModelDataUrl": model_data_s3,
-                # You can pass environment variables here if your container expects any
-                "Environment": {},
-            },
-            ExecutionRoleArn=exec_role_arn,
-        )
-    except botocore.exceptions.ClientError as e:
-        print("[ERROR] create_model failed:")
-        print(e.response)
-        raise
+def create_model(sm, model_name: str, image_uri: str, package_s3_uri: str, exec_role_arn: str) -> None:
+    sm.create_model(
+        ModelName=model_name,
+        PrimaryContainer={"Image": image_uri, "ModelDataUrl": package_s3_uri, "Environment": {}},
+        ExecutionRoleArn=exec_role_arn,
+    )
 
 
-def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, instance_type: str):
-    """
-    Create a new EndpointConfig with the provided Model.
-    """
-    print(f"[INFO] Creating EndpointConfig: {endpoint_config_name}")
-    try:
-        sm.create_endpoint_config(
-            EndpointConfigName=endpoint_config_name,
-            ProductionVariants=[
-                {
-                    "VariantName": "AllTraffic",
-                    "ModelName": model_name,
-                    "InitialInstanceCount": 1,
-                    "InstanceType": instance_type,
-                    # Increase startup timeout for slower images
-                    "ContainerStartupHealthCheckTimeoutInSeconds": 600,
-                }
-            ],
-            DataCaptureConfig={
-                # Enable traffic capture
-                "EnableCapture": True,
-                # 100 = capture all requests; reduce if traffic is high
-                "InitialSamplingPercentage": 100,
-                # Send captured payloads to this S3 prefix
-                # >>> EDIT to your bucket <<< e.g. mlops-bikeshare-...-eu-west-3
-                "DestinationS3Uri": f"s3://mlops-bikeshare-387706002632-eu-west-3/datacapture/endpoint={endpoint_config_name}/",
-                # Capture both request (inputs) and response (outputs)
-                "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
-                # Tell SageMaker which content-types to capture
-                "CaptureContentTypeHeader": {"JsonContentTypes": ["application/json"], "CsvContentTypes": ["text/csv"]},
-            },
-        )
-    except botocore.exceptions.ClientError as e:
-        print("[ERROR] create_endpoint_config failed:")
-        print(e.response)
-        raise
-
-
-def wait_in_service(sm, endpoint_name: str):
-    """
-    Wait for the endpoint to become InService. If it fails, print FailureReason.
-    """
-    print("[INFO] Waiting for endpoint to become InService ...")
-    waiter = sm.get_waiter("endpoint_in_service")
-    try:
-        waiter.wait(EndpointName=endpoint_name)
-        print("[OK] Endpoint InService")
-    except botocore.exceptions.WaiterError:
-        # When the waiter fails, we try to print the FailureReason
-        print("[ERROR] WaiterError: endpoint did not become InService.")
-        try:
-            desc = sm.describe_endpoint(EndpointName=endpoint_name)
-            status = desc.get("EndpointStatus", "Unknown")
-            reason = desc.get("FailureReason", "N/A")
-            print(f"[INFO] Current status: {status}")
-            print(f"[INFO] FailureReason: {reason}")
-        except botocore.exceptions.ClientError as e:
-            # If we get ValidationException here, endpoint never got created
-            print("[ERROR] describe_endpoint after waiter failure also failed:")
-            print(e.response)
-        # Re-raise to make the process non-zero exit for CI/CD visibility
-        raise
+def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, instance_type: str) -> None:
+    sm.create_endpoint_config(
+        EndpointConfigName=endpoint_config_name,
+        ProductionVariants=[
+            {
+                "VariantName": "AllTraffic",
+                "ModelName": model_name,
+                "InitialInstanceCount": 1,
+                "InstanceType": instance_type,
+                "ContainerStartupHealthCheckTimeoutInSeconds": 600,
+            }
+        ],
+    )
 
 
 def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, poll_sec: int = 15) -> str:
-    """
-    Wait until endpoint is NOT in a progress state like Creating/Updating/RollingBack/Deleting.
-    Returns the final status (e.g., 'InService', 'Failed', 'OutOfService', or 'NonExistent').
-    """
     progress = {"Creating", "Updating", "SystemUpdating", "RollingBack", "Deleting"}
     deadline = time.time() + timeout_sec
     while True:
         try:
             desc = sm.describe_endpoint(EndpointName=endpoint_name)
             status = desc.get("EndpointStatus", "Unknown")
-        except ClientError as e:
-            # If the endpoint truly does not exist, treat as ready to create
-            if e.response.get("Error", {}).get("Code") == "ValidationException":
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ValidationException":
                 return "NonExistent"
             raise
         if status not in progress:
@@ -155,78 +88,74 @@ def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, p
         time.sleep(poll_sec)
 
 
-def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str):
-    """
-    Update the endpoint if it exists; otherwise create it.
-    Now robust against 'Cannot update in-progress endpoint'.
-    """
+def upsert_endpoint(sm, endpoint_name: str, endpoint_config_name: str) -> None:
     try:
-        sm.describe_endpoint(EndpointName=endpoint_name)  # exists -> we'll update
-        print(f"[INFO] Updating Endpoint: {endpoint_name}")
-        status = wait_until_not_in_progress(sm, endpoint_name)
-        print(f"[INFO] Endpoint status before update: {status}")
-        try:
-            sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
-        except ClientError as e:
-            msg = e.response.get("Error", {}).get("Message", "")
-            if "Cannot update in-progress endpoint" in msg:
-                print("[WARN] In progress again; waiting and retrying once ...")
-                status = wait_until_not_in_progress(sm, endpoint_name)
-                print(f"[INFO] Endpoint status before retry: {status}")
-                sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
-            else:
-                print("[ERROR] update_endpoint failed:")
-                print(e.response)
-                raise
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        msg = e.response.get("Error", {}).get("Message", "")
-        if code == "ValidationException" and "Could not find endpoint" in msg:
-            print(f"[INFO] Creating Endpoint: {endpoint_name}")
+        sm.describe_endpoint(EndpointName=endpoint_name)
+        wait_until_not_in_progress(sm, endpoint_name)
+        sm.update_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
+    except ClientError as exc:
+        message = exc.response.get("Error", {}).get("Message", "")
+        if exc.response.get("Error", {}).get("Code") == "ValidationException" and "Could not find endpoint" in message:
             sm.create_endpoint(EndpointName=endpoint_name, EndpointConfigName=endpoint_config_name)
-        else:
-            print("[ERROR] update_endpoint failed; not creating because endpoint exists or another error occurred.")
-            print(e.response)
-            raise
+            return
+        raise
 
 
-def main():
-    args = parse_args()
+def wait_in_service(sm, endpoint_name: str) -> None:
+    waiter = sm.get_waiter("endpoint_in_service")
+    waiter.wait(EndpointName=endpoint_name)
+
+
+def maybe_write_deployment_state(
+    *,
+    package_dir: str | None,
+    environment: str,
+    deployment_state_path: str | None,
+) -> str | None:
+    if not package_dir or not deployment_state_path:
+        return None
+    manifest = load_package_manifest(package_dir)
+    state = build_deployment_state(package_dir, manifest, environment=environment, source="sagemaker_deploy")
+    return write_deployment_state(deployment_state_path, state)
+
+
+def main(argv: Sequence[str] | None = None) -> dict:
+    args = parse_args(argv)
+    package_s3_uri = args.package_s3_uri or args.model_data
+    if not package_s3_uri:
+        raise ValueError("provide --package-s3-uri (or deprecated --model-data)")
     assert_image_region_matches(args.image_uri, args.region)
 
-    # Create SDK clients
     sm = boto3.client("sagemaker", region_name=args.region)
-
-    # Create unique names so we never collide with immutable resources
     suffix = ts_suffix()
     model_name = f"{args.endpoint_name}-model-{suffix}"
     endpoint_config_name = f"{args.endpoint_name}-config-{suffix}"
 
-    # 1) Create Model
-    create_model(
-        sm=sm,
-        model_name=model_name,
-        image_uri=args.image_uri,
-        model_data_s3=args.model_data,
-        exec_role_arn=args.role_arn,
-    )
-
-    # 2) Create EndpointConfig
-    create_endpoint_config(
-        sm=sm, endpoint_config_name=endpoint_config_name, model_name=model_name, instance_type=args.instance_type
-    )
-
-    wait_until_not_in_progress(sm=sm, endpoint_name=args.endpoint_name)
-
-    # 3) Update/Create Endpoint and wait
-    upsert_endpoint(sm=sm, endpoint_name=args.endpoint_name, endpoint_config_name=endpoint_config_name)
+    create_model(sm, model_name, args.image_uri, package_s3_uri, args.role_arn)
+    create_endpoint_config(sm, endpoint_config_name, model_name, args.instance_type)
+    wait_until_not_in_progress(sm, args.endpoint_name)
+    upsert_endpoint(sm, args.endpoint_name, endpoint_config_name)
     wait_in_service(sm, args.endpoint_name)
+    state_path = maybe_write_deployment_state(
+        package_dir=args.package_dir,
+        environment=args.environment,
+        deployment_state_path=args.deployment_state_path,
+    )
+    result = {
+        "endpoint_name": args.endpoint_name,
+        "environment": args.environment,
+        "endpoint_config_name": endpoint_config_name,
+        "model_name": model_name,
+        "package_s3_uri": package_s3_uri,
+        "deployment_state_path": state_path,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return result
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        # Ensure a non-zero exit code and print a readable error
-        print(f"[FATAL] Deployment failed: {e}")
+    except Exception as exc:
+        print(f"[FATAL] Deployment failed: {exc}")
         sys.exit(1)
