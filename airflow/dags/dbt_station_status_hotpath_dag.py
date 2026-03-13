@@ -32,17 +32,17 @@ def _get_pool_name() -> str:
 
 
 def _get_city() -> str:
-    return _get_setting("WEATHER_CITY", "WEATHER_CITY", _get_setting("GBFS_CITY", "GBFS_CITY", "paris"))
+    return _get_setting("CITY", "CITY", _get_setting("GBFS_CITY", "WEATHER_CITY", "paris"))
 
 
 def _build_hotpath_model_vars(context: dict) -> dict[str, object]:
     return {
         "hotpath_window_end_utc": context["data_interval_end"].astimezone(pendulum.UTC).isoformat(),
         "station_status_rebuild_lookback_minutes": int(
-            _get_setting("DBT_STATION_STATUS_REBUILD_LOOKBACK_MINUTES", "DBT_STATION_STATUS_REBUILD_LOOKBACK_MINUTES", "15"),
+            _get_setting("DBT_STATION_STATUS_REBUILD_LOOKBACK_MINUTES", "DBT_STATION_STATUS_REBUILD_LOOKBACK_MINUTES", "60"),
         ),
         "enrich_rebuild_lookback_minutes": int(
-            _get_setting("DBT_ENRICH_REBUILD_LOOKBACK_MINUTES", "DBT_ENRICH_REBUILD_LOOKBACK_MINUTES", "30"),
+            _get_setting("DBT_ENRICH_REBUILD_LOOKBACK_MINUTES", "DBT_ENRICH_REBUILD_LOOKBACK_MINUTES", "120"),
         ),
     }
 

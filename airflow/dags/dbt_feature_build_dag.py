@@ -34,7 +34,7 @@ def _build_feature_model_vars(context: dict) -> dict[str, object]:
     return {
         "feature_window_end_utc": context["data_interval_end"].astimezone(pendulum.UTC).isoformat(),
         "feature_rebuild_lookback_minutes": int(
-            _get_setting("DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "30"),
+            _get_setting("DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "180"),
         ),
     }
 
