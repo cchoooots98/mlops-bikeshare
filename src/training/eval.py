@@ -1,122 +1,53 @@
-# -*- coding: utf-8 -*-
-"""
-Post-training evaluation utilities:
-1) (Optional) Re-run threshold selection if you saved predictions.
-2) Generate model_card.md by auto-filling metrics, context, and assumptions.
-
-Run after training/train.py finishes and logs eval_summary.json.
-"""
-
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+from typing import Sequence
 
-MODEL_CARD_TEMPLATE = """# Model Card — {model_name}
+import mlflow
 
-## Overview
-- **Use case**: Predict short-term ({horizon} min) stockout risk for {target_side} at bikeshare stations.
-- **Business objective**: Enable proactive rebalancing to reduce customer dissatisfaction and lost trips.
-- **Owner**: {owner}
-- **Date**: {date_utc}
-
-## Data
-- **City**: {city}
-- **Time window (UTC)**: {time_start} → {time_end}
-- **Sample sizes**: train={n_train}, valid={n_valid}
-- **Feature source**: `features_offline` (Athena external table; partitioned by `city`, `dt`)
-- **Feature list (first 10)**: {features_head} (total {features_count})
-- **Labels**: {label}
-
-## Modeling
-- **Algorithm**: {model_type}
-- **Primary metric**: PR-AUC (validation) = **{pr_auc_valid:.3f}**
-- **Train PR-AUC**: {pr_auc_train:.3f}; **Overfit gap**: {overfit_gap:.3f} (target < 0.10)
-- **Threshold (Fβ, β={beta})**: {best_threshold:.2f}
-  - Precision={best_precision:.3f}, Recall={best_recall:.3f}, Fβ={best_fbeta:.3f}
-
-## Assumptions & Limitations
-- Assumes 5-minute gridded station status and a dbt-built weather dimension aligned to UTC current snapshots plus next-hour forecast summaries.
-- Neighbor features based on spatial BallTree and inverse-distance weighting.
-- Labels defined as stockout if any inventory value in `(t, t+30m]` is `<= threshold`.
-- Temporal split ensures validation comes strictly after training period with a gap to reduce leakage.
-
-## Risks
-- **Concept drift** (demand shifts, special events, policy changes).
-- **Data delays or outages** (GBFS feed, weather source).
-- **Imbalanced labels** — monitor precision/recall and threshold regularly.
-
-## Fairness & Ethics
-- Model focuses on station-level operational KPIs; does not infer protected attributes about individuals.
-- Ensure equitable service levels across neighborhoods; monitor outcomes for systematic bias.
-
-## Monitoring Plan
-- Track PR-AUC (rolling window), precision, recall at deployed threshold.
-- Alert on metric degradation or data freshness issues.
-- Periodic re-training schedule (e.g., weekly) with backtests.
-
-## Reproducibility
-- **MLflow experiment**: {experiment}
-- **Run ID**: {run_id}
-- **Code**: `training/train.py`, `training/eval.py`
-- **Data schema**: `schema.py`
-
-"""
+from src.model_package import build_model_card_text
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--eval-json", default="eval_summary.json", help="Path to eval_summary.json from training run")
-    ap.add_argument("--output", default="model_card.md", help="Output model card path")
-    ap.add_argument("--owner", default="MLOps Team")
-    ap.add_argument("--horizon", type=int, default=30)
-    ap.add_argument("--target-side", default="bikes (stockout)")
-    args = ap.parse_args()
+def load_eval_summary(eval_json: str | None, run_id: str | None, artifact_path: str) -> dict:
+    if bool(eval_json) == bool(run_id):
+        raise ValueError("provide exactly one of --eval-json or --run-id")
 
-    if not os.path.exists(args.eval_json):
-        raise FileNotFoundError(f"Cannot find {args.eval_json}. Run training first.")
+    if eval_json:
+        if not os.path.exists(eval_json):
+            raise FileNotFoundError(f"cannot find eval summary file: {eval_json}")
+        with open(eval_json, "r", encoding="utf-8") as handle:
+            return json.load(handle)
 
-    with open(args.eval_json, "r", encoding="utf-8") as f:
-        ev = json.load(f)
+    local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=artifact_path)
+    with open(local_path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
 
-    # Build the card text
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    features = ev.get("features", [])
-    features_head = ", ".join(features[:10])
 
-    card = MODEL_CARD_TEMPLATE.format(
-        model_name=f"{ev['model_type']}-{ev['label']}",
-        horizon=args.horizon,
-        target_side=args.target_side,
-        owner=args.owner,
-        date_utc=now,
-        city=ev["city"],
-        time_start=ev["time_start"],
-        time_end=ev["time_end"],
-        n_train=ev["n_train"],
-        n_valid=ev["n_valid"],
-        features_head=features_head,
-        features_count=len(features),
-        label=ev["label"],
-        model_type=ev["model_type"],
-        pr_auc_valid=ev["pr_auc_valid"],
-        pr_auc_train=ev["pr_auc_train"],
-        overfit_gap=ev["overfit_gap"],
-        beta=ev["beta"],
-        best_threshold=ev["best_threshold"],
-        best_precision=ev["best_precision"],
-        best_recall=ev["best_recall"],
-        best_fbeta=ev["best_fbeta"],
-        experiment="bikeshare-step4",
-        run_id=ev["run_id"],
-    )
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate a model card from eval_summary.")
+    parser.add_argument("--eval-json", default=None, help="Local eval_summary.json path.")
+    parser.add_argument("--run-id", default=None, help="MLflow run_id to download eval_summary from.")
+    parser.add_argument("--artifact-path", default="eval/eval_summary.json")
+    parser.add_argument("--output", default="model_card.md")
+    parser.add_argument("--owner", default="MLOps Team")
+    parser.add_argument("--horizon", type=int, default=30)
+    parser.add_argument("--target-side", default="bikes or docks")
+    return parser.parse_args(argv)
 
-    with open(args.output, "w", encoding="utf-8") as f:
-        f.write(card)
+
+def main(argv: Sequence[str] | None = None) -> str:
+    args = parse_args(argv)
+    summary = load_eval_summary(args.eval_json, args.run_id, args.artifact_path)
+    if "target_name" not in summary and args.target_side:
+        summary = {**summary, "target_name": args.target_side}
+    card = build_model_card_text(summary, owner=args.owner, horizon=args.horizon)
+
+    with open(args.output, "w", encoding="utf-8") as handle:
+        handle.write(card)
 
     print(f"[OK] Wrote model card to {args.output}")
+    return args.output
 
 
 if __name__ == "__main__":
     main()
-

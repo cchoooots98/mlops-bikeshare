@@ -1,232 +1,264 @@
-# -*- coding: utf-8 -*-
-"""
-Train a binary classifier (XGBoost or LightGBM) for bike/dock stockout within 30 minutes,
-using a time-based train/validation split and MLflow autologging.
-Everything is commented in English for clarity.
-"""
 import argparse
+import json
+import math
 import os
-from dataclasses import dataclass
-from typing import List, Optional
+import shutil
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Iterable, Sequence
 
 import lightgbm as lgb
-
-# Visualization for artifacts
-import matplotlib.pyplot as plt
-
-# Tracking
+import matplotlib
 import mlflow
 import mlflow.pyfunc
-import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import seaborn as sns
-
-# Tree models
 import xgboost as xgb
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from mlflow.models.signature import infer_signature
-
-# AWS Athena connector
-from pyathena import connect
-
-# Metrics & plots
 from sklearn.metrics import average_precision_score, confusion_matrix, precision_recall_curve
 
-# Project schema (feature list, labels, required base cols, validator)
-from src.features.schema import (
-    FEATURE_COLUMNS,
-    LABEL_COLUMNS,
-    REQUIRED_BASE,
-    validate_feature_df,
+from src.features.postgres_store import (
+    PostgresFeatureConfig,
+    build_feature_select_query as build_postgres_feature_select_query,
+    create_pg_engine,
+    list_unique_dt_postgres,
+    load_training_slice,
+    validate_identifier,
 )
+from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, REQUIRED_BASE
+from src.model_package import (
+    ARTIFACTS_DIRNAME,
+    DEFAULT_PACKAGE_ROOT,
+    MODEL_DIRNAME,
+    build_model_card_text,
+    build_package_manifest,
+    ensure_package_dir,
+    write_json_file,
+    write_package_manifest,
+)
+from src.model_target import parse_bool_value, target_spec_from_predict_bikes
 
-# -------------------------------------------------------------------
-# MLflow tracking setup
-# -------------------------------------------------------------------
-# If the environment already defines MLFLOW_TRACKING_URI (e.g., to a local UI server or remote),
-# we respect it. Otherwise, default to a lightweight local SQLite file-store (Windows-friendly).
 if not os.environ.get("MLFLOW_TRACKING_URI"):
-    # Stored in repo working dir; works fine with `mlflow ui` or reading artifacts locally.
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
+DT_FORMAT = "%Y-%m-%d-%H-%M"
+INPUT_TS_FORMAT = "%Y-%m-%d %H:%M"
+FEATURE_CONTRACT_VERSION = "v1_dim_weather_aligned"
+TRAINING_RESULT_PREFIX = "TRAINING_RESULT_JSON::"
 
-# ------------------------
-# Config dataclasses
-# ------------------------
-@dataclass
+
+@dataclass(frozen=True)
 class DataConfig:
     city: str
-    start: str  # 'YYYY-MM-DD HH:MM' UTC
-    end: str  # 'YYYY-MM-DD HH:MM' UTC
-    athena_database: str
-    athena_workgroup: str = "primary"
-    athena_output: Optional[str] = None
-    region: str = "eu-west-3"
+    start: str
+    end: str
+    pg_host: str
+    pg_port: int
+    pg_db: str
+    pg_user: str
+    pg_password: str
+    pg_schema: str = "analytics"
+    feature_table: str = "feat_station_snapshot_5min"
+
+
+@dataclass(frozen=True)
+class TemporalSplit:
+    train_end_dt: str
+    valid_start_dt: str
+    split_index: int
+    valid_start_index: int
+    gap_ticks: int
 
 
 @dataclass
 class TrainConfig:
-    label: str = "y_stockout_bikes_30"  # or "y_stockout_docks_30"
-    model_type: str = "xgboost"  # "xgboost" or "lightgbm"
-    valid_ratio: float = 0.2  # later time slice used for validation
-    gap_minutes: int = 60  # anti-leakage time gap between train/valid
+    predict_bikes: bool = True
+    model_type: str = "xgboost"
+    valid_ratio: float = 0.2
+    gap_minutes: int = 60
     random_state: int = 42
-    beta: float = 2.0  # F-beta (β=2 emphasizes recall)
+    beta: float = 2.0
     experiment: str = "bikeshare-step4"
-    # Keep this name EXACTLY as used below to avoid keyword mismatch
-    use_sm_experiments_autolog: bool = False
-    class_weight: Optional[float] = None  # e.g., positive class weight for imbalance
-    xgb_params: dict = None  # baseline XGBoost params
-    lgb_params: dict = None  # baseline LightGBM params
+    run_reason: str = "manual"
+    package_root: str = str(DEFAULT_PACKAGE_ROOT)
+    xgb_params: dict = field(
+        default_factory=lambda: {
+            "n_estimators": 500,
+            "max_depth": 6,
+            "learning_rate": 0.05,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "reg_alpha": 0.0,
+            "reg_lambda": 1.0,
+            "tree_method": "hist",
+            "n_jobs": 0,
+        }
+    )
+    lgb_params: dict = field(
+        default_factory=lambda: {
+            "n_estimators": 800,
+            "num_leaves": 63,
+            "max_depth": -1,
+            "learning_rate": 0.05,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "min_child_samples": 20,
+            "reg_alpha": 0.0,
+            "reg_lambda": 1.0,
+            "verbosity": -1,
+        }
+    )
 
 
 class ProbWrapper(mlflow.pyfunc.PythonModel):
-    """Wrapper so that .predict() returns P(y=1) instead of hard 0/1 labels."""
-
-    def __init__(self, base_model, feature_names):
-        # Store trained classifier and the feature list
-        self._m = base_model
-        self._feat = feature_names
+    def __init__(self, base_model, feature_names: Sequence[str]):
+        self._model = base_model
+        self._feature_names = list(feature_names)
 
     def predict(self, context, model_input):
-        # Ensure DataFrame input with exact feature order
         if not isinstance(model_input, pd.DataFrame):
-            model_input = pd.DataFrame(model_input, columns=self._feat)
-        X = model_input[self._feat].astype("float64")
-        # Return probability for positive class
-        return self._m.predict_proba(X)[:, 1]
+            model_input = pd.DataFrame(model_input, columns=self._feature_names)
+        features = model_input[self._feature_names].astype("float64")
+        return self._model.predict_proba(features)[:, 1]
 
 
-# ------------------------
-# Athena helpers
-# ------------------------
-def athena_conn(region: str, workgroup: str, s3_staging_dir: Optional[str], schema_name: str):
-    """
-    Create a PyAthena connection. If s3_staging_dir is provided, use it for query results;
-    otherwise rely on workgroup settings.
-    """
-    if s3_staging_dir:
-        return connect(region_name=region, s3_staging_dir=s3_staging_dir, work_group=workgroup, schema_name=schema_name)
-    return connect(region_name=region, work_group=workgroup, schema_name=schema_name)
+def normalize_timestamp(ts: str) -> str:
+    return datetime.strptime(ts, INPUT_TS_FORMAT).strftime(DT_FORMAT)
 
 
-# def load_features_offline(cnx, city: str, start_ts: str, end_ts: str, db: str) -> pd.DataFrame:
-#     """
-#     Read a time window from the Athena external table features_offline (Step 3 output).
-#     """
-#     sql = f"""
-#     SELECT *
-#     FROM {db}.features_offline
-#     WHERE city = '{city}'
-#       AND parse_datetime(dt, 'yyyy-MM-dd-HH-mm')
-#           BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
-#     """
-#     return pd.read_sql(sql, cnx)
+def build_feature_source_name(data_config: DataConfig) -> str:
+    return f"{validate_identifier(data_config.pg_schema)}.{validate_identifier(data_config.feature_table)}"
 
 
-def list_unique_dt(cnx, db: str, city: str, start_ts: str, end_ts: str) -> list:
-    """
-    Fetch only the distinct 'dt' strings in the requested window.
-    This is tiny (minutes) compared to full rows.
-    """
-    sql = f"""
-    SELECT DISTINCT dt
-    FROM {db}.features_offline
-    WHERE city = '{city}'
-      AND parse_datetime(dt, 'yyyy-MM-dd-HH-mm')
-          BETWEEN TIMESTAMP '{start_ts}:00' AND TIMESTAMP '{end_ts}:00'
-    ORDER BY dt
-    """
-    # This result is small; safe to load
-    s = pd.read_sql(sql, cnx)["dt"].tolist()
-    return s
+def build_model_name(city: str, label: str, model_type: str) -> str:
+    return f"{city}_{label}_{model_type}"
 
 
-def load_slice(cnx, db: str, city: str, features: list, labels: list, dt_cond_sql: str) -> pd.DataFrame:
-    """
-    Load a train OR valid slice with all schema-required columns:
-    REQUIRED_BASE + features + all labels.
-    We quote & alias every identifier to keep exact column names.
-    """
-    # Build the select list in the schema order
-    select_cols = list(REQUIRED_BASE) + list(features) + list(labels)
+def build_feature_select_query(schema_name: str, table_name: str, select_columns: Sequence[str]) -> str:
+    return build_postgres_feature_select_query(
+        schema_name,
+        table_name,
+        select_columns,
+        "city = :city AND dt >= :start_dt AND dt <= :end_dt",
+        "ORDER BY dt, station_id",
+    )
 
-    # Deduplicate while preserving order
+
+def dedupe_columns(columns: Iterable[str]) -> list[str]:
     seen = set()
-    select_cols = [c for c in select_cols if not (c in seen or seen.add(c))]
-
-    # Quote and alias each identifier: "col" AS "col"
-    select_list = ", ".join([f'"{c}" AS "{c}"' for c in select_cols])
-
-    sql = f"""
-    SELECT {select_list}
-    FROM {db}.features_offline
-    WHERE "city" = '{city}' AND ({dt_cond_sql})
-    """
-    return pd.read_sql(sql, cnx)
+    ordered = []
+    for column in columns:
+        if column in seen:
+            continue
+        seen.add(column)
+        ordered.append(column)
+    return ordered
 
 
-# ------------------------
-# Evaluation helpers
-# ------------------------
-def pick_threshold_fbeta(y_true: np.ndarray, y_prob: np.ndarray, beta: float):
-    """
-    Grid-search thresholds in [0.01, 0.99] to maximize F-beta.
-    Return (best_threshold, metrics_at_best).
-    """
-    best_t = 0.5
+def build_pg_config(data_config: DataConfig) -> PostgresFeatureConfig:
+    return PostgresFeatureConfig(
+        pg_host=data_config.pg_host,
+        pg_port=data_config.pg_port,
+        pg_db=data_config.pg_db,
+        pg_user=data_config.pg_user,
+        pg_password=data_config.pg_password,
+        pg_schema=data_config.pg_schema,
+        training_table=data_config.feature_table,
+    )
+
+
+def load_slice_postgres(
+    engine,
+    data_config: DataConfig,
+    select_columns: Sequence[str],
+    start_dt: str,
+    end_dt: str,
+) -> pd.DataFrame:
+    return load_training_slice(
+        engine,
+        build_pg_config(data_config),
+        data_config.city,
+        start_dt,
+        end_dt,
+        select_columns=select_columns,
+    )
+
+
+def compute_temporal_split(dt_list: Sequence[str], valid_ratio: float, gap_minutes: int) -> TemporalSplit:
+    if len(dt_list) < 3:
+        raise RuntimeError("not enough time points for temporal split; widen --start/--end")
+    if not 0 < valid_ratio < 1:
+        raise ValueError(f"valid_ratio must be between 0 and 1, got {valid_ratio}")
+    if gap_minutes < 0:
+        raise ValueError(f"gap_minutes must be non-negative, got {gap_minutes}")
+
+    n_items = len(dt_list)
+    split_index = int(math.floor(n_items * (1.0 - valid_ratio)))
+    split_index = min(max(split_index, 1), n_items - 1)
+    gap_ticks = int(math.ceil(gap_minutes / 5.0))
+    valid_start_index = min(split_index + gap_ticks, n_items - 1)
+    return TemporalSplit(
+        train_end_dt=dt_list[split_index - 1],
+        valid_start_dt=dt_list[valid_start_index],
+        split_index=split_index,
+        valid_start_index=valid_start_index,
+        gap_ticks=gap_ticks,
+    )
+
+
+def pick_threshold_fbeta(y_true: np.ndarray, y_prob: np.ndarray, beta: float) -> tuple[float, dict]:
+    best_threshold = 0.5
     best_score = -1.0
-    best = {}
-
+    best_metrics = {}
     pr_auc = average_precision_score(y_true, y_prob)
 
-    for t in np.linspace(0.01, 0.99, 99):
-        y_pred = (y_prob >= t).astype(int)
+    for threshold in np.linspace(0.01, 0.99, 99):
+        y_pred = (y_prob >= threshold).astype(int)
         tp = np.sum((y_true == 1) & (y_pred == 1))
         fp = np.sum((y_true == 0) & (y_pred == 1))
         fn = np.sum((y_true == 1) & (y_pred == 0))
-
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-
         if precision == 0 and recall == 0:
             fbeta = 0.0
         else:
-            b2 = beta * beta
-            denom = b2 * precision + recall
-            fbeta = (1 + b2) * (precision * recall) / denom if denom > 0 else 0.0
-
+            beta_sq = beta * beta
+            denominator = beta_sq * precision + recall
+            fbeta = (1 + beta_sq) * (precision * recall) / denominator if denominator > 0 else 0.0
         if fbeta > best_score:
             best_score = fbeta
-            best_t = float(t)
-            best = {
+            best_threshold = float(threshold)
+            best_metrics = {
                 "precision": float(precision),
                 "recall": float(recall),
                 "fbeta": float(fbeta),
-                "threshold": float(t),
+                "threshold": float(threshold),
                 "pr_auc": float(pr_auc),
             }
 
-    return best_t, best
+    return best_threshold, best_metrics
 
 
 def log_curves_and_confusion(
-    y_true: np.ndarray, y_prob: np.ndarray, threshold: float, out_dir_plots: str, prefix: str = "val"
-):
-    """
-    Log PR curve + confusion matrix (PNG) to MLflow.
-    """
-    # PR curve
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    threshold: float,
+    out_dir_plots: str,
+    prefix: str,
+) -> None:
     precision, recall, _ = precision_recall_curve(y_true, y_prob)
     fig_pr = plt.figure()
     plt.step(recall, precision, where="post")
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.title(f"Precision-Recall Curve ({prefix})")
-    mlflow.log_figure(fig_pr, f"{out_dir_plots}/{prefix}_pr_curve.png")  # stored under mlruns/.../artifacts
+    mlflow.log_figure(fig_pr, f"{out_dir_plots}/{prefix}_pr_curve.png")
     plt.close(fig_pr)
 
-    # Confusion matrix @ threshold
     y_pred = (y_prob >= threshold).astype(int)
     cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     fig_cm = plt.figure()
@@ -238,38 +270,26 @@ def log_curves_and_confusion(
     plt.close(fig_cm)
 
 
-def log_feature_importance(model, feature_names: List[str], out_dir_featimp: str):
-    """
-    Save feature importance as CSV and PNG.
-    Supports XGBoost (gain) and LightGBM (split counts).
-    """
+def log_feature_importance(model, feature_names: Sequence[str], artifact_dir: str) -> None:
     importances = None
-
-    # Try XGBoost gain
     try:
         booster = model.get_booster() if hasattr(model, "get_booster") else None
         if booster is not None:
-            score = booster.get_score(importance_type="gain")  # dict: feat -> gain
-            importances = pd.DataFrame([(k, v) for k, v in score.items()], columns=["feature", "importance"])
+            score = booster.get_score(importance_type="gain")
+            importances = pd.DataFrame(score.items(), columns=["feature", "importance"])
     except Exception:
-        pass
-
-    # Fallback to LightGBM split counts
-    if importances is None or importances.empty:
-        try:
-            arr = getattr(model, "feature_importances_", None)
-            if arr is not None:
-                importances = pd.DataFrame({"feature": feature_names, "importance": arr})
-        except Exception:
-            pass
+        importances = None
 
     if importances is None or importances.empty:
-        return  # nothing to log
+        raw_importance = getattr(model, "feature_importances_", None)
+        if raw_importance is not None:
+            importances = pd.DataFrame({"feature": feature_names, "importance": raw_importance})
+
+    if importances is None or importances.empty:
+        return
 
     importances = importances.sort_values("importance", ascending=False)
-
-    csv_blob = importances.to_csv(index=False)
-    mlflow.log_text(csv_blob, f"{out_dir_featimp}/feature_importance.csv")
+    mlflow.log_text(importances.to_csv(index=False), f"{artifact_dir}/feature_importance.csv")
 
     top = importances.head(25)
     fig = plt.figure(figsize=(8, 6))
@@ -278,247 +298,296 @@ def log_feature_importance(model, feature_names: List[str], out_dir_featimp: str
     plt.title("Top Feature Importance")
     plt.xlabel("Importance")
     plt.ylabel("Feature")
-    mlflow.log_figure(fig, f"{out_dir_featimp}/feature_importance.png")
+    mlflow.log_figure(fig, f"{artifact_dir}/feature_importance.png")
     plt.close(fig)
 
 
-# ------------------------
-# Main training
-# ------------------------
-def main():
-    parser = argparse.ArgumentParser()
-    # Data slice
-    parser.add_argument("--city", required=True, help="City partition, e.g., paris")
-    parser.add_argument("--start", required=True, help="UTC start 'YYYY-MM-DD HH:MM'")
-    parser.add_argument("--end", required=True, help="UTC end 'YYYY-MM-DD HH:MM'")
-    parser.add_argument("--database", default="mlops_bikeshare", help="Athena database name")
-    parser.add_argument("--workgroup", default="primary", help="Athena workgroup")
-    parser.add_argument("--athena-output", default=None, help="Optional S3 path for Athena staging")
-    parser.add_argument("--region", default="eu-west-3", help="AWS region")
+def build_classifier(train_config: TrainConfig):
+    if train_config.model_type == "xgboost":
+        params = dict(train_config.xgb_params)
+        params["random_state"] = train_config.random_state
+        return xgb.XGBClassifier(**params)
+    params = dict(train_config.lgb_params)
+    params["random_state"] = train_config.random_state
+    return lgb.LGBMClassifier(**params)
 
-    # Training options
-    parser.add_argument(
-        "--label", default="y_stockout_bikes_30", choices=["y_stockout_bikes_30", "y_stockout_docks_30"]
+
+def _ensure_binary_classes(y_values: np.ndarray, split_name: str, label_column: str) -> None:
+    unique_values = sorted(set(int(value) for value in y_values.tolist()))
+    if unique_values != [0, 1]:
+        raise RuntimeError(
+            f"{split_name} slice for {label_column} must contain both classes [0, 1]; got {unique_values}"
+        )
+
+
+def _save_local_package(
+    *,
+    eval_summary: dict,
+    run,
+    model,
+    package_root: str,
+) -> tuple[str, str]:
+    package_dir = ensure_package_dir(eval_summary["model_name"], run.info.run_id, root_dir=package_root)
+    model_dir = package_dir / MODEL_DIRNAME
+    artifacts_dir = package_dir / ARTIFACTS_DIRNAME
+
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
+    signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
+    mlflow.pyfunc.save_model(
+        path=str(model_dir),
+        python_model=ProbWrapper(model, FEATURE_COLUMNS),
+        signature=signature,
+        input_example=sample_x,
     )
+
+    manifest = build_package_manifest(eval_summary, package_dir)
+    manifest_path = write_package_manifest(package_dir, manifest)
+    write_json_file(artifacts_dir / "eval_summary.json", eval_summary)
+    (artifacts_dir / "model_card.md").write_text(build_model_card_text(eval_summary), encoding="utf-8")
+    return str(package_dir.resolve()), manifest_path
+
+
+def run_training_pipeline(data_config: DataConfig, train_config: TrainConfig) -> dict:
+    pg_config = build_pg_config(data_config)
+    engine = create_pg_engine(pg_config)
+    dt_list = list_unique_dt_postgres(
+        engine,
+        pg_config,
+        city=data_config.city,
+        start_dt=normalize_timestamp(data_config.start),
+        end_dt=normalize_timestamp(data_config.end),
+    )
+    split = compute_temporal_split(dt_list, train_config.valid_ratio, train_config.gap_minutes)
+    select_columns = dedupe_columns([*REQUIRED_BASE, *FEATURE_COLUMNS, *LABEL_COLUMNS, "city", "dt", "station_id"])
+
+    train_df = load_slice_postgres(
+        engine,
+        data_config,
+        select_columns,
+        normalize_timestamp(data_config.start),
+        split.train_end_dt,
+    )
+    valid_df = load_slice_postgres(
+        engine,
+        data_config,
+        select_columns,
+        split.valid_start_dt,
+        normalize_timestamp(data_config.end),
+    )
+
+    target_spec = target_spec_from_predict_bikes(train_config.predict_bikes)
+    train_rows_before_filter = len(train_df)
+    valid_rows_before_filter = len(valid_df)
+    train_df = train_df.dropna(subset=[target_spec.label_column, target_spec.paired_target_column]).copy()
+    valid_df = valid_df.dropna(subset=[target_spec.label_column, target_spec.paired_target_column]).copy()
+    if train_df.empty or valid_df.empty:
+        raise RuntimeError("train or validation slice is empty after dropping null labels")
+
+    x_train = train_df[FEATURE_COLUMNS].astype("float64")
+    y_train = train_df[target_spec.label_column].astype(int).to_numpy()
+    x_valid = valid_df[FEATURE_COLUMNS].astype("float64")
+    y_valid = valid_df[target_spec.label_column].astype(int).to_numpy()
+    _ensure_binary_classes(y_train, "train", target_spec.label_column)
+    _ensure_binary_classes(y_valid, "validation", target_spec.label_column)
+
+    model_name = build_model_name(data_config.city, target_spec.label_column, train_config.model_type)
+    feature_source = build_feature_source_name(data_config)
+    plot_dir = f"plots/{model_name}"
+    eval_path = "eval/eval_summary.json"
+    importance_dir = f"feature_importance/{model_name}"
+
+    mlflow.set_experiment(train_config.experiment)
+    mlflow.autolog(disable=True)
+
+    with mlflow.start_run(run_name=f"train-{model_name}") as run:
+        model = build_classifier(train_config)
+        mlflow.set_tags(
+            {
+                "city": data_config.city,
+                "label": target_spec.label_column,
+                "target_name": target_spec.target_name,
+                "predict_bikes": str(target_spec.predict_bikes).lower(),
+                "model_type": train_config.model_type,
+                "model_name": model_name,
+                "feature_source": feature_source,
+                "feature_contract": FEATURE_CONTRACT_VERSION,
+                "run_reason": train_config.run_reason,
+                "train_window_start": data_config.start,
+                "train_window_end": data_config.end,
+            }
+        )
+        mlflow.log_params(
+            {
+                "valid_ratio": train_config.valid_ratio,
+                "gap_minutes": train_config.gap_minutes,
+                "beta": train_config.beta,
+                "pg_schema": data_config.pg_schema,
+                "feature_table": data_config.feature_table,
+            }
+        )
+
+        model.fit(x_train, y_train)
+        train_prob = model.predict_proba(x_train)[:, 1]
+        valid_prob = model.predict_proba(x_valid)[:, 1]
+
+        pr_auc_train = float(average_precision_score(y_train, train_prob))
+        pr_auc_valid = float(average_precision_score(y_valid, valid_prob))
+        overfit_gap = abs(pr_auc_train - pr_auc_valid)
+        best_threshold, best_metrics = pick_threshold_fbeta(y_valid, valid_prob, beta=train_config.beta)
+
+        mlflow.log_metrics(
+            {
+                "pr_auc_train": pr_auc_train,
+                "pr_auc_valid": pr_auc_valid,
+                "overfit_gap": overfit_gap,
+                "best_precision": best_metrics["precision"],
+                "best_recall": best_metrics["recall"],
+                "best_fbeta": best_metrics["fbeta"],
+                "best_threshold": best_threshold,
+                "n_train": len(x_train),
+                "n_valid": len(x_valid),
+                "dropped_train_rows_null_outputs": train_rows_before_filter - len(train_df),
+                "dropped_valid_rows_null_outputs": valid_rows_before_filter - len(valid_df),
+            }
+        )
+
+        log_curves_and_confusion(y_train, train_prob, best_threshold, plot_dir, prefix="train")
+        log_curves_and_confusion(y_valid, valid_prob, best_threshold, plot_dir, prefix="valid")
+        log_feature_importance(model, FEATURE_COLUMNS, importance_dir)
+
+        sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
+        signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
+        mlflow.pyfunc.log_model(
+            artifact_path="model",
+            python_model=ProbWrapper(model, FEATURE_COLUMNS),
+            signature=signature,
+            input_example=sample_x,
+        )
+
+        eval_summary = {
+            "run_id": run.info.run_id,
+            "experiment": train_config.experiment,
+            "model_name": model_name,
+            "model_type": train_config.model_type,
+            "predict_bikes": target_spec.predict_bikes,
+            "target_name": target_spec.target_name,
+            "label": target_spec.label_column,
+            "label_column": target_spec.label_column,
+            "paired_target": target_spec.paired_target_column,
+            "paired_target_column": target_spec.paired_target_column,
+            "score_column": target_spec.score_column,
+            "score_bin_column": target_spec.score_bin_column,
+            "actual_t30_column": target_spec.actual_t30_column,
+            "city": data_config.city,
+            "time_start": data_config.start,
+            "time_end": data_config.end,
+            "train_end_dt": split.train_end_dt,
+            "valid_start_dt": split.valid_start_dt,
+            "run_reason": train_config.run_reason,
+            "feature_source": feature_source,
+            "feature_contract": FEATURE_CONTRACT_VERSION,
+            "features": list(FEATURE_COLUMNS),
+            "n_train": int(len(x_train)),
+            "n_valid": int(len(x_valid)),
+            "pr_auc_train": pr_auc_train,
+            "pr_auc_valid": pr_auc_valid,
+            "overfit_gap": overfit_gap,
+            "best_threshold": best_threshold,
+            "best_precision": best_metrics["precision"],
+            "best_recall": best_metrics["recall"],
+            "best_fbeta": best_metrics["fbeta"],
+            "beta": train_config.beta,
+            "dropped_train_rows_null_outputs": int(train_rows_before_filter - len(train_df)),
+            "dropped_valid_rows_null_outputs": int(valid_rows_before_filter - len(valid_df)),
+            "model_artifact_path": "model",
+        }
+        mlflow.log_dict(eval_summary, eval_path)
+
+        package_dir, package_manifest_path = _save_local_package(
+            eval_summary=eval_summary,
+            run=run,
+            model=model,
+            package_root=train_config.package_root,
+        )
+        eval_summary["package_dir"] = package_dir
+        eval_summary["package_manifest_path"] = package_manifest_path
+        mlflow.log_text(Path(package_manifest_path).read_text(encoding="utf-8"), "package_manifest.json")
+        mlflow.log_text(build_model_card_text(eval_summary), "artifacts/model_card.md")
+
+    return eval_summary
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train a Postgres-backed offline stockout model.")
+    parser.add_argument("--city", required=True)
+    parser.add_argument("--start", required=True, help="UTC window start in 'YYYY-MM-DD HH:MM'")
+    parser.add_argument("--end", required=True, help="UTC window end in 'YYYY-MM-DD HH:MM'")
+    parser.add_argument("--pg-host", default=env_or_default("PGHOST"))
+    parser.add_argument("--pg-port", default=env_or_default("PGPORT", "5432"), type=int)
+    parser.add_argument("--pg-db", default=env_or_default("PGDATABASE"))
+    parser.add_argument("--pg-user", default=env_or_default("PGUSER"))
+    parser.add_argument("--pg-password", default=env_or_default("PGPASSWORD"))
+    parser.add_argument("--pg-schema", default=env_or_default("PGSCHEMA", "analytics"))
+    parser.add_argument("--feature-table", default=env_or_default("FEATURE_TABLE", "feat_station_snapshot_5min"))
+    parser.add_argument("--predict-bikes", default=env_or_default("PREDICT_BIKES", "true"), choices=["true", "false"])
     parser.add_argument("--model-type", default="xgboost", choices=["xgboost", "lightgbm"])
     parser.add_argument("--valid-ratio", type=float, default=0.2)
     parser.add_argument("--gap-minutes", type=int, default=60)
     parser.add_argument("--beta", type=float, default=2.0)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--experiment", default="bikeshare-step4")
-    parser.add_argument("--use-sm-exp", action="store_true", help="Enable SageMaker Experiments autolog (optional)")
+    parser.add_argument("--package-root", default=str(DEFAULT_PACKAGE_ROOT))
+    parser.add_argument(
+        "--run-reason",
+        default="manual",
+        choices=["schedule", "manual", "drift", "post_rollback"],
+    )
+    args = parser.parse_args(argv)
+    missing = [name for name in ("pg_host", "pg_db", "pg_user", "pg_password") if getattr(args, name) in {None, ""}]
+    if missing:
+        raise ValueError(f"missing required Postgres settings: {missing}")
+    return args
 
-    args = parser.parse_args()
 
-    # Build configs
-    dcfg = DataConfig(
+def env_or_default(key: str, default: str | None = None) -> str | None:
+    value = os.environ.get(key)
+    if value not in {None, ""}:
+        return value
+    return default
+
+
+def main(argv: Sequence[str] | None = None) -> dict:
+    args = parse_args(argv)
+    data_config = DataConfig(
         city=args.city,
         start=args.start,
         end=args.end,
-        athena_database=args.database,
-        athena_workgroup=args.workgroup,
-        athena_output=args.athena_output,
-        region=args.region,
+        pg_host=args.pg_host,
+        pg_port=args.pg_port,
+        pg_db=args.pg_db,
+        pg_user=args.pg_user,
+        pg_password=args.pg_password,
+        pg_schema=args.pg_schema,
+        feature_table=args.feature_table,
     )
-    tcfg = TrainConfig(
-        label=args.label,
+    train_config = TrainConfig(
+        predict_bikes=parse_bool_value(args.predict_bikes, default=True),
         model_type=args.model_type,
         valid_ratio=args.valid_ratio,
         gap_minutes=args.gap_minutes,
         random_state=args.random_state,
         beta=args.beta,
         experiment=args.experiment,
-        use_sm_experiments_autolog=args.use_sm_exp,  # match field name above
-        xgb_params={
-            "n_estimators": 500,
-            "max_depth": 6,
-            "learning_rate": 0.05,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.0,
-            "reg_lambda": 1.0,
-            "tree_method": "hist",
-            "random_state": args.random_state,
-        },
-        lgb_params={
-            "n_estimators": 800,
-            "num_leaves": 63,
-            "max_depth": -1,
-            "learning_rate": 0.05,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "min_child_samples": 20,
-            "reg_alpha": 0.0,
-            "reg_lambda": 1.0,
-            "random_state": args.random_state,
-        },
+        run_reason=args.run_reason,
+        package_root=args.package_root,
     )
-
-    # Load data from Athena
-    cnx = athena_conn(
-        region=dcfg.region,
-        workgroup=dcfg.athena_workgroup,
-        s3_staging_dir=dcfg.athena_output,
-        schema_name=dcfg.athena_database,
-    )
-
-    # --------------------------
-    # Unified artifact namespaces
-    # --------------------------
-    task_id = f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}"  # e.g., paris_y_stockout_bikes_30_xgboost
-
-    DIR_PLOTS = f"artifacts/{task_id}/plots"  # curves, confusion matrices
-    DIR_EVAL = f"artifacts/{task_id}/eval"  # eval json, metrics
-    DIR_FEATIMP = f"artifacts/{task_id}/feature_importance"
-
-    MODEL_NAME_BASE = (
-        f"{dcfg.city}_{tcfg.label}_{tcfg.model_type}__base"  # e.g., paris_y_stockout_bikes_30_xgboost__base_sklearn
-    )
-    MODEL_NAME_PROBA = f"{task_id}__model_proba"  # e.g., paris_y_stockout_bikes_30_xgboost__model_proba
-
-    # Get the distinct dt’s in the window (lightweight)
-    dt_list = list_unique_dt(cnx, dcfg.athena_database, dcfg.city, dcfg.start, dcfg.end)
-    if len(dt_list) < 3:
-        raise RuntimeError("Not enough time points. Widen --start/--end.")
-
-    # Decide temporal split based on dt_list
-    n = len(dt_list)
-    split_idx = int(np.floor(n * (1.0 - tcfg.valid_ratio)))
-    split_idx = min(max(split_idx, 1), n - 1)
-
-    train_end_dt = dt_list[split_idx - 1]  # inclusive
-    valid_start_dt = dt_list[split_idx]  # boundary before applying gap
-
-    # Apply the anti-leakage gap (5-min grid)
-    ticks = int(np.ceil(tcfg.gap_minutes / 5.0))
-    valid_start_idx = min(split_idx + ticks, n - 1)
-    valid_start_dt = dt_list[valid_start_idx]
-
-    features = FEATURE_COLUMNS
-    label = tcfg.label
-
-    # TRAIN: dt <= train_end_dt  (and >= requested start)
-    train_where = f"\"dt\" >= '{dcfg.start.replace(' ', '-')}' AND \"dt\" <= '{train_end_dt}'"
-    train_df = load_slice(cnx, dcfg.athena_database, dcfg.city, features, LABEL_COLUMNS, train_where)
-    validate_feature_df(train_df)  # your schema checks
-    train_df = train_df.dropna(subset=[label])
-
-    # VALID: dt >= valid_start_dt (and <= requested end)
-    valid_where = f"\"dt\" >= '{valid_start_dt}' AND \"dt\" <= '{dcfg.end.replace(' ', '-')}'"
-    valid_df = load_slice(cnx, dcfg.athena_database, dcfg.city, features, LABEL_COLUMNS, valid_where)
-    validate_feature_df(valid_df)
-    valid_df = valid_df.dropna(subset=[label])
-
-    X_train = train_df[features].astype("float64")
-    y_train = train_df[label].astype(int).values
-    X_valid = valid_df[features].astype("float64")
-    y_valid = valid_df[label].astype(int).values
-
-    # MLflow experiment
-    mlflow.set_experiment(tcfg.experiment)
-
-    mlflow.autolog(disable=True)
-
-    with mlflow.start_run(run_name=f"{tcfg.model_type}-{label}") as run:
-        run_id = run.info.run_id
-        print("RUN_ID:", run.info.run_id)
-
-        # Autologging for selected model family
-        if tcfg.model_type == "xgboost":
-            # mlflow.xgboost.autolog(log_models=True)
-            model = xgb.XGBClassifier(**tcfg.xgb_params, n_jobs=0)
-        else:
-            # mlflow.lightgbm.autolog(log_models=True)
-            model = lgb.LGBMClassifier(**tcfg.lgb_params)
-
-        # Fit
-        model.fit(X_train, y_train)
-
-        # Predict probabilities
-        train_prob = model.predict_proba(X_train)[:, 1]
-        valid_prob = model.predict_proba(X_valid)[:, 1]
-
-        # Core metrics
-        pr_auc_train = float(average_precision_score(y_train, train_prob))
-        pr_auc_valid = float(average_precision_score(y_valid, valid_prob))
-        gap = abs(pr_auc_train - pr_auc_valid)
-
-        # Threshold by F-beta on valid
-        best_t, best_metrics = pick_threshold_fbeta(y_valid, valid_prob, beta=tcfg.beta)
-
-        # Log all metrics at once
-        mlflow.log_metrics(
-            {
-                "pr_auc_train": pr_auc_train,
-                "pr_auc_valid": pr_auc_valid,
-                "overfit_gap": gap,
-                "best_precision": best_metrics["precision"],
-                "best_recall": best_metrics["recall"],
-                "best_fbeta": best_metrics["fbeta"],
-                "beta": tcfg.beta,
-                "best_threshold": best_t,
-            }
-        )
-
-        # Artifacts
-        log_curves_and_confusion(
-            y_valid,
-            valid_prob,
-            threshold=best_t,
-            out_dir_plots=DIR_PLOTS,
-            prefix="val",
-        )
-        log_curves_and_confusion(y_train, train_prob, threshold=best_t, out_dir_plots=DIR_PLOTS, prefix="train")
-        log_feature_importance(model, features, out_dir_featimp=DIR_FEATIMP)
-
-        # Save eval summary for model_card.md generation
-        eval_blob = {
-            "label": label,
-            "model_type": tcfg.model_type,
-            "features": features,
-            "n_train": int(len(X_train)),
-            "n_valid": int(len(X_valid)),
-            "pr_auc_train": pr_auc_train,
-            "pr_auc_valid": pr_auc_valid,
-            "overfit_gap": gap,
-            "best_threshold": best_t,
-            "best_precision": best_metrics["precision"],
-            "best_recall": best_metrics["recall"],
-            "best_fbeta": best_metrics["fbeta"],
-            "beta": tcfg.beta,
-            "city": dcfg.city,
-            "time_start": dcfg.start,
-            "time_end": dcfg.end,
-            "run_id": run_id,
-        }
-        # with open("eval_summary.json", "w", encoding="utf-8") as f:
-        #     json.dump(eval_blob, f, indent=2)
-        mlflow.log_dict(eval_blob, f"{DIR_EVAL}/eval_summary.json")
-
-        # Explicit log (autolog already logs a model, but this gives a stable path)
-        mlflow.sklearn.log_model(model, name=MODEL_NAME_BASE)
-
-        # Build a tiny sample input for model signature
-        sample_X = pd.DataFrame({f: pd.Series([0.0], dtype="float64") for f in features})[features]
-
-        signature = infer_signature(sample_X, pd.Series([0.5], dtype="float64"))
-
-        # Log wrapped model as a separate artifact path in MLflow
-        mlflow.pyfunc.log_model(
-            name=MODEL_NAME_PROBA,
-            python_model=ProbWrapper(model, features),
-            signature=signature,
-            input_example=sample_X,
-        )
-
-        print(f"[OK] Logged probability-serving model as MLflow model '{MODEL_NAME_PROBA}'")
-
-        # Soft overfitting check
-        if gap >= 0.10:
-            print(f"[WARN] Overfitting check failed: train-valid PR-AUC gap={gap:.3f} ≥ 0.10")
-
-        print(f"[OK] Training done. PR-AUC (train)={pr_auc_train:.3f}, (valid)={pr_auc_valid:.3f}, gap={gap:.3f}")
-        print(f"[OK] Best threshold (beta={tcfg.beta}): {best_t:.2f}; Fbeta={best_metrics['fbeta']:.3f}")
+    result = run_training_pipeline(data_config, train_config)
+    print(TRAINING_RESULT_PREFIX + json.dumps(result, sort_keys=True))
+    return result
 
 
 if __name__ == "__main__":
