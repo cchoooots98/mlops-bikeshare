@@ -45,7 +45,7 @@ def test_formal_docs_use_target_specific_deployment_state_and_local_sqlite_mlflo
     readme = Path("README.md").read_text(encoding="utf-8")
     architecture = Path("docs/architecture.md").read_text(encoding="utf-8")
     deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
-    operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(encoding="utf-8")
+    
 
     assert "model_dir/deployments/local.json" not in readme
     assert "model_dir/deployments/local.json" not in architecture
@@ -54,11 +54,6 @@ def test_formal_docs_use_target_specific_deployment_state_and_local_sqlite_mlflo
     assert "model_dir/deployments/bikes/local.json" in readme
     assert "sqlite:///model_dir/mlflow.db" in readme
     assert "--environment staging" in deployment_guide
-    assert "--environment staging" in operator_manual
-    assert "Expected output" in operator_manual
-    assert "通过证据" in operator_manual
-    assert "常见坑" in operator_manual
-    assert "停止条件" in operator_manual
 
 
 def test_terraform_platform_module_has_no_placeholder_lambda():

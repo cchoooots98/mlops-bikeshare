@@ -30,6 +30,13 @@ def _dw_conn_uri() -> str:
     return uri
 
 
+def _raw_bucket() -> str:
+    bucket = _get_setting("BUCKET", "BUCKET", os.getenv("RAW_S3_BUCKET", ""))
+    if not bucket:
+        raise ValueError("RAW_S3_BUCKET (or BUCKET) is required for holiday dual-write ingestion")
+    return bucket
+
+
 def ingest_holidays_year_task(**context):
     logical_year = context["logical_date"].in_timezone("Europe/Paris").year
     dag_run = context.get("dag_run")
@@ -42,7 +49,7 @@ def ingest_holidays_year_task(**context):
         run_id=context["run_id"],
         country_code=_get_setting("HOLIDAY_COUNTRY_CODE", "HOLIDAY_COUNTRY_CODE", "FR"),
         timeout_sec=int(_get_setting("HOLIDAY_HTTP_TIMEOUT_SEC", "HOLIDAY_HTTP_TIMEOUT_SEC", "30")),
-        raw_bucket=_get_setting("RAW_S3_BUCKET", "RAW_S3_BUCKET", os.getenv("BUCKET", "")),
+        raw_bucket=_raw_bucket(),
     )
     return result
 
@@ -61,7 +68,7 @@ with DAG(
     schedule="0 2 1 1 *",
     catchup=False,
     default_args=default_args,
-    tags=["holidays", "yearly", "staging"],
+    tags=["holidays", "yearly", "dual-write"],
 ):
     ingest = PythonOperator(
         task_id="ingest_holidays_to_staging",

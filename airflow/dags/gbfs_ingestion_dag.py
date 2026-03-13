@@ -31,7 +31,7 @@ def _dw_conn_uri() -> str:
 
 
 def _raw_bucket() -> str:
-    bucket = _get_setting("RAW_S3_BUCKET", "RAW_S3_BUCKET", os.getenv("BUCKET", ""))
+    bucket = _get_setting("BUCKET", "BUCKET", os.getenv("RAW_S3_BUCKET", ""))
     if not bucket:
         raise ValueError("RAW_S3_BUCKET (or BUCKET) is required for dual-write ingestion")
     return bucket

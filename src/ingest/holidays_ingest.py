@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import date, datetime, timezone
+from functools import lru_cache
 
 import boto3
 import pandas as pd
@@ -14,7 +15,11 @@ from sqlalchemy import create_engine, text
 
 HOLIDAY_API_TEMPLATE = "https://calendrier.api.gouv.fr/jours-feries/metropole/{year}.json"
 BUCKET = os.getenv("BUCKET")
-s3 = boto3.client("s3")
+
+
+@lru_cache(maxsize=1)
+def _default_s3_client():
+    return boto3.client("s3")
 
 
 def fetch_holidays(year: int, timeout_sec: int = 30) -> dict:
@@ -28,7 +33,7 @@ def fetch_holidays(year: int, timeout_sec: int = 30) -> dict:
 
 
 def _put_json(obj: dict, key: str, *, bucket: str | None = None, s3_client=None) -> None:
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     bucket_name = bucket or BUCKET
     if not bucket_name:
         raise RuntimeError("S3 bucket is required")
@@ -55,7 +60,7 @@ def persist_holidays_raw_to_s3(
     fetched_at_utc: datetime | None = None,
     s3_client=None,
 ) -> dict:
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     fetched_at_utc = (fetched_at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
     dt_prefix = fetched_at_utc.strftime("dt=%Y-%m-%d-%H-%M")
     data_key = f"raw/holidays/country={country_code}/year={year}/{dt_prefix}/data.json.gz"
@@ -184,10 +189,25 @@ def ingest_holidays_year(
     return result
 
 
+def _build_conn_uri_from_env() -> str:
+    direct_uri = os.getenv("DW_CONN_URI", "").strip()
+    if direct_uri:
+        return direct_uri
+
+    host = os.getenv("PGHOST", "").strip()
+    port = os.getenv("PGPORT", "5432").strip()
+    database = os.getenv("PGDATABASE", "").strip()
+    user = os.getenv("PGUSER", "").strip()
+    password = os.getenv("PGPASSWORD", "").strip()
+    if host and database and user and password:
+        return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return ""
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ingest French holidays to raw S3 and stg_holidays")
     parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--conn-uri", default=os.getenv("DW_CONN_URI", ""))
+    parser.add_argument("--conn-uri", default=_build_conn_uri_from_env())
     parser.add_argument("--country-code", default=os.getenv("HOLIDAY_COUNTRY_CODE", "FR"))
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("HOLIDAY_HTTP_TIMEOUT_SEC", "30")))
     parser.add_argument("--run-id", default=f"manual_holidays_{int(time.time())}")
@@ -198,13 +218,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_arg_parser().parse_args()
     if not args.conn_uri:
-        raise RuntimeError("--conn-uri (or env DW_CONN_URI) is required")
+        raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
+    if not args.raw_bucket:
+        raise RuntimeError("--raw-bucket (or env RAW_S3_BUCKET/BUCKET) is required")
     result = ingest_holidays_year(
         conn_uri=args.conn_uri,
         year=args.year,
         run_id=args.run_id,
         country_code=args.country_code,
         timeout_sec=args.timeout_sec,
-        raw_bucket=args.raw_bucket or None,
+        raw_bucket=args.raw_bucket,
     )
     print(json.dumps(result))

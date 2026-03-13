@@ -1,9 +1,11 @@
+import argparse
 import gzip
 import io
 import json
 import os
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import boto3
 import botocore
@@ -22,7 +24,10 @@ GBFS_ROOT = {
     "paris": "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
 }
 
-s3 = boto3.client("s3")
+
+@lru_cache(maxsize=1)
+def _default_s3_client():
+    return boto3.client("s3")
 
 
 def floor_to_5min(ts: datetime) -> datetime:
@@ -42,7 +47,7 @@ def _snapshot_bucket_from_payload(payload: dict) -> datetime:
 
 
 def _exists(key: str, bucket: str, s3_client=None) -> bool:
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     try:
         client.head_object(Bucket=bucket, Key=key)
         return True
@@ -51,7 +56,7 @@ def _exists(key: str, bucket: str, s3_client=None) -> bool:
 
 
 def _put_json(obj: dict, key: str, bucket: str, s3_client=None):
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     gzbuf = io.BytesIO()
     with gzip.GzipFile(fileobj=gzbuf, mode="wb") as gz:
@@ -457,12 +462,91 @@ def handler(event, context):
     return {"ok": True, "info_raw": info_raw, "status_raw": status_raw}
 
 
-if __name__ == "__main__":
-    BUCKET = os.getenv("BUCKET")
-    CITY = os.getenv("CITY", "paris")
-    if not BUCKET:
-        raise RuntimeError("Env BUCKET is required, e.g. BUCKET=mlops-bikeshare-...")
+def _build_conn_uri_from_env() -> str:
+    direct_uri = os.getenv("DW_CONN_URI", "").strip()
+    if direct_uri:
+        return direct_uri
 
-    print(f"[gbfs_ingest] city={CITY}, bucket=s3://{BUCKET}")
-    result = handler({}, None)
-    print("[gbfs_ingest] result:", json.dumps(result))
+    host = os.getenv("PGHOST", "").strip()
+    port = os.getenv("PGPORT", "5432").strip()
+    database = os.getenv("PGDATABASE", "").strip()
+    user = os.getenv("PGUSER", "").strip()
+    password = os.getenv("PGPASSWORD", "").strip()
+    if host and database and user and password:
+        return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return ""
+
+
+def ingest_gbfs_to_staging(
+    *,
+    conn_uri: str,
+    city: str,
+    run_id: str,
+    gbfs_root_url: str,
+    timeout_sec: int = 30,
+    raw_bucket: str | None = None,
+) -> dict:
+    ensure_staging_tables(conn_uri=conn_uri)
+    info_result = ingest_station_information_to_staging(
+        conn_uri=conn_uri,
+        gbfs_root_url=gbfs_root_url,
+        run_id=run_id,
+        timeout_sec=timeout_sec,
+        raw_bucket=raw_bucket,
+        raw_city=city,
+    )
+    status_result = ingest_station_status_to_staging(
+        conn_uri=conn_uri,
+        gbfs_root_url=gbfs_root_url,
+        run_id=run_id,
+        timeout_sec=timeout_sec,
+        raw_bucket=raw_bucket,
+        raw_city=city,
+    )
+    return {
+        "ok": True,
+        "city": city,
+        "run_id": run_id,
+        "raw": raw_bucket is not None,
+        "station_information": info_result,
+        "station_status": status_result,
+    }
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Ingest GBFS station information/status into Postgres staging, optionally dual-writing raw S3."
+    )
+    parser.add_argument("--city", default=CITY)
+    parser.add_argument("--gbfs-root-url", default="")
+    parser.add_argument("--conn-uri", default=_build_conn_uri_from_env())
+    parser.add_argument("--run-id", default=f"manual_gbfs_{int(time.time())}")
+    parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("GBFS_HTTP_TIMEOUT_SEC", "30")))
+    parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
+    parser.add_argument(
+        "--staging-only",
+        action="store_true",
+        help="Skip raw S3 backup and only write Postgres staging tables.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    args = _build_arg_parser().parse_args()
+    if not args.conn_uri:
+        raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
+
+    city = args.city.strip().lower()
+    if city not in GBFS_ROOT and not args.gbfs_root_url:
+        raise RuntimeError(f"Unsupported city '{args.city}'. Provide --gbfs-root-url for a custom feed.")
+
+    gbfs_root_url = args.gbfs_root_url.strip() or GBFS_ROOT[city]
+    result = ingest_gbfs_to_staging(
+        conn_uri=args.conn_uri,
+        city=city,
+        run_id=args.run_id,
+        gbfs_root_url=gbfs_root_url,
+        timeout_sec=args.timeout_sec,
+        raw_bucket=None if args.staging_only else (args.raw_bucket.strip() or None),
+    )
+    print(json.dumps(result))

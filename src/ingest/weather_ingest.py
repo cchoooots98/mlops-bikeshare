@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import boto3
 import pandas as pd
@@ -22,7 +23,10 @@ CITY_COORDS = {
     "paris": (48.8566, 2.3522),
 }
 
-s3 = boto3.client("s3")
+
+@lru_cache(maxsize=1)
+def _default_s3_client():
+    return boto3.client("s3")
 
 
 def floor_to_10min(ts: datetime) -> datetime:
@@ -38,7 +42,7 @@ def _coords_for_city(city: str) -> tuple[float, float]:
 
 
 def _put_json(obj: dict, key: str, *, bucket: str | None = None, s3_client=None) -> None:
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     bucket_name = bucket or BUCKET
     if not bucket_name:
         raise RuntimeError("S3 bucket is required")
@@ -173,7 +177,7 @@ def persist_weather_raw_to_s3(
     run_id: str,
     s3_client=None,
 ) -> dict:
-    client = s3_client or s3
+    client = s3_client or _default_s3_client()
     snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
     dt_prefix = snapshot_bucket_at.strftime("dt=%Y-%m-%d-%H-%M")
     data_key = f"raw/weather/city={city}/{dt_prefix}/data.json.gz"
@@ -508,13 +512,28 @@ def handler(event, context):
     return {"ok": True, "raw": raw_result, "source": payload.get("_meta_ingest", {}).get("source")}
 
 
+def _build_conn_uri_from_env() -> str:
+    direct_uri = os.getenv("DW_CONN_URI", "").strip()
+    if direct_uri:
+        return direct_uri
+
+    host = os.getenv("PGHOST", "").strip()
+    port = os.getenv("PGPORT", "5432").strip()
+    database = os.getenv("PGDATABASE", "").strip()
+    user = os.getenv("PGUSER", "").strip()
+    password = os.getenv("PGPASSWORD", "").strip()
+    if host and database and user and password:
+        return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return ""
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Ingest OpenWeather current and hourly forecast data to S3 raw and Postgres staging"
     )
     parser.add_argument("--city", default=os.getenv("WEATHER_CITY", CITY))
     parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
-    parser.add_argument("--conn-uri", default=os.getenv("DW_CONN_URI", ""))
+    parser.add_argument("--conn-uri", default=_build_conn_uri_from_env())
     parser.add_argument("--run-id", default=f"manual_{int(time.time())}")
     parser.add_argument("--api-key", default=os.getenv("OPENWEATHER_API_KEY", API_KEY))
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("WEATHER_HTTP_TIMEOUT_SEC", "30")))
@@ -524,7 +543,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_arg_parser().parse_args()
     if not args.conn_uri:
-        raise RuntimeError("--conn-uri (or env DW_CONN_URI) is required")
+        raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
     if not args.raw_bucket:
         raise RuntimeError("--raw-bucket (or env RAW_S3_BUCKET/BUCKET) is required")
     if not args.api_key:

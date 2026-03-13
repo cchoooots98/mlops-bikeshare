@@ -31,7 +31,7 @@ def _dw_conn_uri() -> str:
 
 
 def _raw_bucket() -> str:
-    bucket = _get_setting("RAW_S3_BUCKET", "RAW_S3_BUCKET", os.getenv("BUCKET", ""))
+    bucket = _get_setting("BUCKET", "BUCKET", os.getenv("RAW_S3_BUCKET", ""))
     if not bucket:
         raise ValueError("RAW_S3_BUCKET (or BUCKET) is required for weather dual-write ingestion")
     return bucket
@@ -47,7 +47,7 @@ def ingest_weather_task(**context):
         raise RuntimeError("OPENWEATHER_API_KEY is required for weather ingestion")
     result = ingest_weather_dual_write(
         conn_uri=_dw_conn_uri(),
-        city=_get_setting("WEATHER_CITY", "WEATHER_CITY", "paris"),
+        city=_get_setting("CITY", "WEATHER_CITY", "paris"),
         run_id=context["run_id"],
         raw_bucket=_raw_bucket(),
         api_key=api_key,
