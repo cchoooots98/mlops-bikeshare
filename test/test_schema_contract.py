@@ -3,6 +3,8 @@ import pytest
 
 from src.features.schema import (
     DEFAULT_MISSING_RATE_THRESHOLD,
+    DEFAULT_PER_COLUMN_MISSING_RATE_THRESHOLD,
+    DEFAULT_STATION_INVENTORY_CAPACITY_MULTIPLIER,
     ENTITY_COLUMNS,
     FEATURE_COLUMNS,
     FORBIDDEN_LEGACY_COLUMNS,
@@ -107,6 +109,8 @@ def test_entity_required_base_and_label_columns_match_contract():
     assert ONLINE_REQUIRED_COLUMNS == ENTITY_COLUMNS + REQUIRED_BASE + FEATURE_COLUMNS
     assert TRAINING_REQUIRED_COLUMNS == ONLINE_REQUIRED_COLUMNS + LABEL_COLUMNS
     assert DEFAULT_MISSING_RATE_THRESHOLD == 0.02
+    assert DEFAULT_PER_COLUMN_MISSING_RATE_THRESHOLD == 0.10
+    assert DEFAULT_STATION_INVENTORY_CAPACITY_MULTIPLIER == 2.0
     assert NON_NULLABLE_FEATURE_COLUMNS == [
         column for column in FEATURE_COLUMNS if column not in NULLABLE_FEATURE_COLUMNS
     ]
@@ -144,6 +148,38 @@ def test_validate_feature_df_rejects_negative_contract_values(column, value):
         validate_feature_df(df)
 
 
+def test_validate_feature_df_allows_utilization_above_one_within_capacity_tolerance():
+    df = _valid_training_df()
+    df.loc[0, "bikes"] = 60
+    df.loc[0, "docks"] = 20
+    df.loc[0, "util_bikes"] = 1.5
+    df.loc[0, "util_docks"] = 0.5
+
+    assert validate_feature_df(df) is True
+
+
+def test_validate_feature_df_rejects_inventory_above_capacity_tolerance():
+    df = _valid_training_df()
+    df.loc[0, "bikes"] = 61
+    df.loc[0, "docks"] = 20
+    df.loc[0, "util_bikes"] = 1.525
+    df.loc[0, "util_docks"] = 0.5
+
+    with pytest.raises(ValueError, match="station capacity tolerance"):
+        validate_feature_df(df)
+
+
+def test_validate_feature_df_rejects_utilization_above_capacity_tolerance():
+    df = _valid_training_df()
+    df.loc[0, "bikes"] = 60
+    df.loc[0, "docks"] = 20
+    df.loc[0, "util_bikes"] = 2.1
+    df.loc[0, "util_docks"] = 0.5
+
+    with pytest.raises(ValueError, match="must be between 0.0 and 2.0"):
+        validate_feature_df(df)
+
+
 @pytest.mark.parametrize(
     ("column", "value"),
     [
@@ -158,6 +194,37 @@ def test_validate_feature_df_rejects_invalid_binary_flags(column, value):
 
     with pytest.raises(ValueError, match="must be 0/1"):
         validate_feature_df(df)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("y_stockout_bikes_30", 2),
+        ("y_stockout_docks_30", -1),
+    ],
+)
+def test_validate_feature_df_rejects_invalid_training_labels(column, value):
+    df = _valid_training_df()
+    df.loc[0, column] = value
+
+    with pytest.raises(ValueError, match="must be 0/1"):
+        validate_feature_df(df)
+
+
+@pytest.mark.parametrize(("column", "value"), [("target_bikes_t30", -1), ("target_docks_t30", -2)])
+def test_validate_feature_df_rejects_negative_training_targets(column, value):
+    df = _valid_training_df()
+    df.loc[0, column] = value
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        validate_feature_df(df)
+
+
+def test_validate_feature_df_allows_null_training_outputs_for_label_maturity():
+    df = _valid_training_df()
+    df.loc[0, ["y_stockout_bikes_30", "y_stockout_docks_30", "target_bikes_t30", "target_docks_t30"]] = pd.NA
+
+    assert validate_feature_df(df) is True
 
 
 def test_validate_feature_df_rejects_non_nullable_feature_all_nan():
@@ -184,10 +251,53 @@ def test_validate_feature_df_allows_all_weather_columns_to_be_all_nan():
     assert validate_feature_df(df) is True
 
 
+def test_validate_feature_df_rejects_duplicate_entity_grain():
+    df = pd.concat([_valid_training_df(), _valid_training_df()], ignore_index=True)
+
+    with pytest.raises(ValueError, match="entity grain city\\+dt\\+station_id must be unique"):
+        validate_feature_df(df)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("hour", 24),
+        ("hour", 3.5),
+        ("dow", 0),
+        ("dow", 7.5),
+        ("neighbor_count_within_radius", 2.5),
+        ("weather_code", -1),
+        ("hourly_weather_code", -2),
+    ],
+)
+def test_validate_feature_df_rejects_invalid_business_ranges(column, value):
+    df = _valid_training_df()
+    df[column] = df[column].astype("object")
+    df.loc[0, column] = value
+
+    with pytest.raises(ValueError, match="must be an integer between"):
+        validate_feature_df(df)
+
+
 def test_validate_feature_df_rejects_missing_rate_above_threshold():
     df = pd.concat([_valid_training_df(), _valid_training_df()], ignore_index=True)
     df.loc[0, "dt"] = "2026-03-11-10-10"
     df.loc[0, ["roll15_net_bikes", "roll30_net_bikes"]] = pd.NA
 
     with pytest.raises(ValueError, match="feature missing rate"):
-        validate_feature_df(df, missing_rate_threshold=DEFAULT_MISSING_RATE_THRESHOLD)
+        validate_feature_df(
+            df,
+            missing_rate_threshold=DEFAULT_MISSING_RATE_THRESHOLD,
+            per_column_missing_rate_threshold=1.0,
+        )
+
+
+def test_validate_feature_df_rejects_per_column_missing_rate_above_threshold():
+    df = pd.concat([_valid_training_df() for _ in range(10)], ignore_index=True)
+    for index in range(10):
+        df.loc[index, "dt"] = f"2026-03-11-10-{index:02d}"
+    for index in range(2):
+        df.loc[index, "roll15_net_bikes"] = pd.NA
+
+    with pytest.raises(ValueError, match="feature per-column missing rate exceeded threshold"):
+        validate_feature_df(df, per_column_missing_rate_threshold=0.10, missing_rate_threshold=1.0)
