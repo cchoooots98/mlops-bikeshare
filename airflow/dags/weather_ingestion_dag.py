@@ -1,18 +1,18 @@
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pendulum
 from airflow import DAG
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable
-from airflow.operators.python import PythonOperator, ShortCircuitOperator
+from airflow.operators.python import PythonOperator
 
 AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.ingest.weather_ingest import ensure_weather_staging_tables, ingest_weather_dual_write, weather_snapshot_exists
+from src.ingest.weather_ingest import ensure_weather_staging_tables, ingest_weather_dual_write
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -30,11 +30,6 @@ def _dw_conn_uri() -> str:
     return uri
 
 
-def _target_bucket_utc() -> datetime:
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    return now_utc.replace(minute=(now_utc.minute // 10) * 10)
-
-
 def _raw_bucket() -> str:
     bucket = _get_setting("RAW_S3_BUCKET", "RAW_S3_BUCKET", os.getenv("BUCKET", ""))
     if not bucket:
@@ -44,12 +39,6 @@ def _raw_bucket() -> str:
 
 def create_weather_staging_tables_task():
     ensure_weather_staging_tables(conn_uri=_dw_conn_uri())
-
-
-def should_ingest_weather_bucket_task() -> bool:
-    city = _get_setting("WEATHER_CITY", "WEATHER_CITY", "paris")
-    exists = weather_snapshot_exists(conn_uri=_dw_conn_uri(), city=city, snapshot_bucket_at_utc=_target_bucket_utc())
-    return not exists
 
 
 def ingest_weather_task(**context):
@@ -63,7 +52,6 @@ def ingest_weather_task(**context):
         raw_bucket=_raw_bucket(),
         api_key=api_key,
         timeout_sec=int(_get_setting("WEATHER_HTTP_TIMEOUT_SEC", "WEATHER_HTTP_TIMEOUT_SEC", "30")),
-        target_bucket_utc=_target_bucket_utc(),
     )
     return result
 
@@ -88,12 +76,8 @@ with DAG(
         task_id="create_weather_staging_tables",
         python_callable=create_weather_staging_tables_task,
     )
-    should_ingest = ShortCircuitOperator(
-        task_id="check_not_ingested_for_target_bucket",
-        python_callable=should_ingest_weather_bucket_task,
-    )
     ingest = PythonOperator(
         task_id="ingest_weather_dual_write",
         python_callable=ingest_weather_task,
     )
-    create_table >> should_ingest >> ingest
+    create_table >> ingest

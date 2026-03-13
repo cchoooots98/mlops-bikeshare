@@ -11,7 +11,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.orchestration.dbt_tasks import parse_selector, run_quality_tests
+from src.orchestration.dbt_tasks import DEFAULT_DEEP_QUALITY_TEST_SELECT, parse_select_models, run_quality_tests
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -23,29 +23,22 @@ def _get_pool_name() -> str:
 
 
 def run_dbt_deep_quality_tests_task():
+    test_select = parse_select_models(
+        _get_setting(
+            "DBT_DEEP_QUALITY_TEST_SELECT",
+            "DBT_DEEP_QUALITY_TEST_SELECT",
+            " ".join(DEFAULT_DEEP_QUALITY_TEST_SELECT),
+        ),
+        default_models=DEFAULT_DEEP_QUALITY_TEST_SELECT,
+    )
     summary = run_quality_tests(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
-        selector=parse_selector(
-            _get_setting("DBT_DEEP_QUALITY_TEST_SELECTOR", "DBT_DEEP_QUALITY_TEST_SELECTOR", ""),
-            "deep_quality_tests",
-        ),
+        select_models=test_select,
+        selector=None,
         threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_deep_quality_tests {summary}")
-
-
-def run_dbt_diagnostic_tests_task():
-    summary = run_quality_tests(
-        project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
-        profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
-        selector=parse_selector(
-            _get_setting("DBT_DIAGNOSTIC_TEST_SELECTOR", "DBT_DIAGNOSTIC_TEST_SELECTOR", ""),
-            "diagnostic_tests",
-        ),
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
-    )
-    print(f"AIRFLOW_TASK_METRIC run_dbt_diagnostic_tests {summary}")
 
 
 default_args = {
@@ -70,10 +63,3 @@ with DAG(
         python_callable=run_dbt_deep_quality_tests_task,
         pool=_get_pool_name(),
     )
-    diagnostic_tests = PythonOperator(
-        task_id="run_dbt_diagnostic_tests",
-        python_callable=run_dbt_diagnostic_tests_task,
-        pool=_get_pool_name(),
-    )
-
-    deep_quality_tests >> diagnostic_tests

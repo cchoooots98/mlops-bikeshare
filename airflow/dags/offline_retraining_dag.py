@@ -37,14 +37,12 @@ def run_retraining_task(**context):
         str(conf.get("reason", "schedule")),
         "--city",
         str(conf.get("city", _get_setting("TRAIN_CITY", "TRAIN_CITY", "paris"))),
-        "--label",
-        str(conf.get("label", _get_setting("TRAIN_LABEL", "TRAIN_LABEL", "y_stockout_bikes_30"))),
+        "--predict-bikes",
+        str(conf.get("predict_bikes", _get_setting("TRAIN_PREDICT_BIKES", "TRAIN_PREDICT_BIKES", "true"))),
         "--model-type",
         str(conf.get("model_type", _get_setting("TRAIN_MODEL_TYPE", "TRAIN_MODEL_TYPE", "xgboost"))),
         "--lookback-days",
         str(conf.get("lookback_days", _get_setting("TRAIN_LOOKBACK_DAYS", "TRAIN_LOOKBACK_DAYS", "30"))),
-        "--deploy-staging",
-        str(conf.get("deploy_staging", _get_setting("TRAIN_DEPLOY_STAGING", "TRAIN_DEPLOY_STAGING", "false"))),
         "--pg-host",
         dw_conn.host,
         "--pg-port",
@@ -65,8 +63,8 @@ def run_retraining_task(**context):
         _get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         "--dbt-profiles-dir",
         _get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
-        "--manifest-path",
-        _get_setting("RETRAIN_MANIFEST_PATH", "RETRAIN_MANIFEST_PATH", "model_dir/retrain_manifest.json"),
+        "--summary-path",
+        _get_setting("RETRAIN_SUMMARY_PATH", "RETRAIN_SUMMARY_PATH", "model_dir/candidates/retrain_summary.json"),
     ]
     retrain_main(args)
 
