@@ -10,7 +10,6 @@ ranked as (
         run_id::text as run_id,
         city::text as city,
         source::text as source,
-        source_last_updated::bigint as source_last_updated,
         ingested_at::timestamptz as ingested_at_utc,
         (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
         snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
@@ -25,9 +24,9 @@ ranked as (
         weather_main::text as weather_main,
         weather_description::text as weather_description,
         row_number() over (
-            partition by city::text, observed_at::timestamptz
+            partition by city::text, snapshot_bucket_at::timestamptz
             order by
-                source_last_updated::bigint desc,
+                observed_at::timestamptz desc,
                 ingested_at::timestamptz desc,
                 run_id::text desc
         ) as row_num
@@ -37,7 +36,6 @@ select
     run_id,
     city,
     source,
-    source_last_updated,
     ingested_at_utc,
     ingested_at_paris,
     snapshot_bucket_at_utc,
@@ -51,6 +49,10 @@ select
     weather_code,
     weather_main,
     weather_description,
-    concat(city, '|', {{ utc_ts_key('observed_at_utc') }}) as weather_current_pk
+    concat(city, '|', {{ utc_ts_key('snapshot_bucket_at_utc') }}) as weather_current_pk
 from ranked
 where row_num = 1
+  and observed_at_utc is not null
+  and (humidity_pct is null or humidity_pct between 0 and 100)
+  and (wind_speed_ms is null or wind_speed_ms >= 0)
+  and (precipitation_mm is null or precipitation_mm >= 0)

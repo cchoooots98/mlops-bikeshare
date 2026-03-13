@@ -1,3 +1,5 @@
+{{ config(tags=['deep_quality']) }}
+
 select
     left_side.station_version_key as left_station_version_key,
     right_side.station_version_key as right_station_version_key

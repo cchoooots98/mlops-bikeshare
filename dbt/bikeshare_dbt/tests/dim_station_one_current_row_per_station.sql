@@ -1,3 +1,5 @@
+{{ config(tags=['deep_quality']) }}
+
 select
     station_key
 from {{ ref('dim_station') }}

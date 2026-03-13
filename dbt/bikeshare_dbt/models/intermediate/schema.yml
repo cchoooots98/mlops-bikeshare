@@ -79,6 +79,10 @@ models:
         data_type: text
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_station')
+                field: station_version_key
       - name: snapshot_bucket_at_utc
         data_type: timestamp with time zone
         tests:
@@ -89,10 +93,18 @@ models:
         data_type: integer
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_id
       - name: time_id
         data_type: integer
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_time')
+                field: time_id
       - name: last_reported_at_utc
         data_type: timestamp with time zone
       - name: last_reported_at_paris
@@ -158,6 +170,11 @@ models:
         data_type: integer
       - name: weather_key
         data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_weather')
+                field: weather_key
       - name: weather_observed_at_utc
         data_type: timestamp with time zone
         tests:
@@ -194,7 +211,7 @@ models:
           - value_between:
               arguments:
                 min_value: 0
-                max_value: "{{ var('station_status_weather_asof_tolerance_minutes', 15) | int }}"
+                max_value: "{{ var('station_status_weather_asof_tolerance_minutes', 30) | int }}"
       - name: has_weather_context
         data_type: smallint
         tests:

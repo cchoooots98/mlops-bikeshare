@@ -30,6 +30,27 @@ ranked as (
                 run_id::text desc
         ) as row_num
     from src
+),
+cleaned as (
+    select
+        run_id,
+        ingested_at_utc,
+        ingested_at_paris,
+        source_last_updated,
+        city,
+        snapshot_bucket_at_utc,
+        snapshot_bucket_at_paris,
+        station_id,
+        station_name,
+        latitude,
+        longitude,
+        capacity
+    from ranked
+    where row_num = 1
+      and nullif(trim(station_id), '') is not null
+      and latitude between -90 and 90
+      and longitude between -180 and 180
+      and (capacity is null or capacity >= 0)
 )
 select
     run_id,
@@ -46,5 +67,4 @@ select
     capacity,
     concat(city, '|', station_id) as station_key,
     {{ station_snapshot_key('city', 'station_id', 'snapshot_bucket_at_utc') }} as station_info_pk
-from ranked
-where row_num = 1
+from cleaned

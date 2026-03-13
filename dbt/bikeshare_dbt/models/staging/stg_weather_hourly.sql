@@ -10,7 +10,6 @@ ranked as (
         run_id::text as run_id,
         city::text as city,
         source::text as source,
-        source_last_updated::bigint as source_last_updated,
         ingested_at::timestamptz as ingested_at_utc,
         (ingested_at::timestamptz at time zone 'Europe/Paris')::timestamp as ingested_at_paris,
         snapshot_bucket_at::timestamptz as snapshot_bucket_at_utc,
@@ -34,7 +33,6 @@ ranked as (
                 snapshot_bucket_at::timestamptz,
                 forecast_at::timestamptz
             order by
-                source_last_updated::bigint desc,
                 ingested_at::timestamptz desc,
                 run_id::text desc
         ) as row_num
@@ -44,7 +42,6 @@ select
     run_id,
     city,
     source,
-    source_last_updated,
     ingested_at_utc,
     ingested_at_paris,
     snapshot_bucket_at_utc,
@@ -71,3 +68,15 @@ select
     ) as weather_hourly_pk
 from ranked
 where row_num = 1
+  and observed_at_utc is not null
+  and forecast_at_utc is not null
+  and forecast_horizon_min between 0 and 60
+  and forecast_at_utc > observed_at_utc
+  and forecast_at_utc <= observed_at_utc + interval '60 minutes'
+  and (humidity_pct is null or humidity_pct between 0 and 100)
+  and (wind_speed_ms is null or wind_speed_ms >= 0)
+  and (precipitation_mm is null or precipitation_mm >= 0)
+  and (
+      precipitation_probability_pct is null
+      or precipitation_probability_pct between 0 and 100
+  )

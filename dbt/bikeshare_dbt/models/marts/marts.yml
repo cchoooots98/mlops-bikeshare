@@ -143,47 +143,75 @@ models:
           - not_null
 
   - name: dim_date
+    config:
+      contract:
+        enforced: true
+      tags: ["contract_critical"]
+      meta:
+        sla: daily_contract
+        tier: shared
     columns:
       - name: date_id
+        data_type: integer
         tests:
           - not_null
           - unique
       - name: date
+        data_type: date
         tests:
           - not_null
       - name: day_of_week
+        data_type: smallint
         tests:
           - not_null
       - name: month
+        data_type: smallint
         tests:
           - not_null
       - name: year
+        data_type: integer
         tests:
           - not_null
       - name: is_weekend
+        data_type: boolean
         tests:
           - not_null
       - name: is_holiday
+        data_type: boolean
         tests:
           - not_null
+      - name: holiday_name
+        data_type: text
           
   - name: dim_time
+    config:
+      contract:
+        enforced: true
+      tags: ["contract_critical"]
+      meta:
+        sla: daily_contract
+        tier: shared
     columns:
       - name: time_id
+        data_type: integer
         tests:
           - not_null
           - unique
       - name: bucket_label
+        data_type: text
         tests:
           - not_null
           - unique
       - name: hour
+        data_type: integer
         tests:
           - not_null
       - name: minute
+        data_type: integer
         tests:
           - not_null
       - name: minute_of_day
+        data_type: integer
         tests:
           - not_null
   
@@ -271,46 +299,3 @@ models:
           - accepted_values:
               arguments:
                 values: [0, 1]
-  - name: fct_station_inventory_capacity_anomalies
-    config:
-      tags: ["anomaly"]
-      meta:
-        sla: daily_contract
-        tier: supporting
-    columns:
-      - name: city
-        data_type: text
-        tests:
-          - not_null
-      - name: station_id
-        data_type: text
-        tests:
-          - not_null
-      - name: station_version_key
-        data_type: text
-        tests:
-          - not_null
-      - name: snapshot_bucket_at_utc
-        data_type: timestamp with time zone
-        tests:
-          - not_null
-      - name: num_bikes_available
-        data_type: integer
-        tests:
-          - not_null
-          - non_negative
-      - name: num_docks_available
-        data_type: integer
-        tests:
-          - not_null
-          - non_negative
-      - name: capacity
-        data_type: integer
-        tests:
-          - not_null
-          - non_negative
-      - name: over_capacity_by
-        data_type: integer
-        tests:
-          - not_null
-          - non_negative

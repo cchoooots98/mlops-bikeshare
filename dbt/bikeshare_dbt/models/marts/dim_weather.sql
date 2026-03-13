@@ -11,7 +11,7 @@ with incremental_state as (
     {% if is_incremental() %}
     select
         coalesce(
-            max(observed_at) - interval '{{ weather_incremental_reprocess_buffer_minutes }} minutes',
+            max(snapshot_bucket_at_utc) - interval '{{ weather_incremental_reprocess_buffer_minutes }} minutes',
             '1900-01-01'::timestamptz
         ) as reprocess_from_utc
     from {{ this }}
@@ -23,7 +23,7 @@ current_weather as (
     select *
     from {{ ref('stg_weather_current') }}
     {% if is_incremental() %}
-    where observed_at_utc >= (select reprocess_from_utc from incremental_state)
+    where snapshot_bucket_at_utc >= (select reprocess_from_utc from incremental_state)
     {% endif %}
 ),
 hourly_merged as (
@@ -62,11 +62,7 @@ hourly_merged as (
         c.observed_at_utc
 )
 select
-    concat(
-        c.city,
-        '|',
-        {{ utc_ts_key('c.observed_at_utc') }}
-    ) as weather_key,
+    c.weather_current_pk as weather_key,
     c.city,
     c.observed_at_utc as observed_at,
     c.temperature_c,

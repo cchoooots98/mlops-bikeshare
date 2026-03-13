@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with stats as (
     select
         count(*) as row_count,

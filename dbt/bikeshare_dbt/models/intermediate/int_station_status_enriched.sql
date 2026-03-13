@@ -1,17 +1,48 @@
+{% set weather_asof_tolerance_minutes = var('station_status_weather_asof_tolerance_minutes', 30) | int %}
+{% set enrich_rebuild_lookback_minutes = var('enrich_rebuild_lookback_minutes', 30) | int %}
+{% set enrich_history_buffer_minutes = var('enrich_history_buffer_minutes', 60) | int %}
+{% set existing_relation = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier) %}
+{% set run_recent_window_overwrite = existing_relation is not none and not flags.FULL_REFRESH %}
+{% set recent_window_overwrite_sql %}
+{% if run_recent_window_overwrite %}
+delete from {{ this }}
+where snapshot_bucket_at_utc >= {{ runtime_utc_expr('hotpath_window_end_utc') }}
+    - interval '{{ enrich_rebuild_lookback_minutes }} minutes'
+  and snapshot_bucket_at_utc < {{ runtime_utc_expr('hotpath_window_end_utc') }}
+{% else %}
+select 1
+{% endif %}
+{% endset %}
+
 {{ config(
-    materialized='table',
+    materialized='incremental',
+    unique_key='fact_station_status_key',
+    incremental_strategy='delete+insert',
+    on_schema_change='fail',
+    pre_hook=[recent_window_overwrite_sql],
     post_hook=[
         "create index if not exists idx_int_station_status_enriched_station_ts on {{ this }} (city, station_id, snapshot_bucket_at_utc)"
     ]
 ) }}
 
-{% set weather_asof_tolerance_minutes = var('station_status_weather_asof_tolerance_minutes', 30) | int %}
-
-with fact_base as (
-    select *
-    from {{ ref('fct_station_status') }}
+with window_bounds as (
+    select
+        {{ runtime_utc_expr('hotpath_window_end_utc') }} as rebuild_to_utc,
+        {{ runtime_utc_expr('hotpath_window_end_utc') }}
+            - interval '{{ enrich_rebuild_lookback_minutes }} minutes' as rebuild_from_utc,
+        {{ runtime_utc_expr('hotpath_window_end_utc') }}
+            - interval '{{ enrich_rebuild_lookback_minutes + enrich_history_buffer_minutes }} minutes' as source_from_utc
 ),
-station_date_time_enriched as (
+fact_base as (
+    select f.*
+    from {{ ref('fct_station_status') }} f
+    {% if is_incremental() %}
+    cross join window_bounds wb
+    where f.snapshot_bucket_at_utc >= wb.source_from_utc
+      and f.snapshot_bucket_at_utc < wb.rebuild_to_utc
+    {% endif %}
+),
+station_dim_intersection as (
     select
         f.fact_station_status_key,
         f.city,
@@ -30,17 +61,41 @@ station_date_time_enriched as (
         f.is_returning,
         s.capacity,
         s.latitude,
-        s.longitude,
+        s.longitude
+    from fact_base f
+    inner join {{ ref('dim_station') }} s
+        on f.station_version_key = s.station_version_key
+    where s.capacity is not null
+      and {{ station_inventory_within_limit_expr('f.num_bikes_available', 'f.num_docks_available', 's.capacity') }}
+),
+station_date_time_enriched as (
+    select
+        f.fact_station_status_key,
+        f.city,
+        f.station_id,
+        f.station_key,
+        f.station_version_key,
+        f.snapshot_bucket_at_utc,
+        f.snapshot_bucket_at_paris,
+        f.date_id,
+        f.time_id,
+        f.last_reported_at_utc,
+        f.last_reported_at_paris,
+        f.num_bikes_available,
+        f.num_docks_available,
+        f.is_renting,
+        f.is_returning,
+        f.capacity,
+        f.latitude,
+        f.longitude,
         d.date,
-        d.day_of_week,
+        d.day_of_week::integer as day_of_week,
         d.is_weekend,
         d.is_holiday,
         t.hour,
         t.minute,
         t.minute_of_day
-    from fact_base f
-    left join {{ ref('dim_station') }} s
-        on f.station_version_key = s.station_version_key
+    from station_dim_intersection f
     left join {{ ref('dim_date') }} d
         on f.date_id = d.date_id
     left join {{ ref('dim_time') }} t
@@ -159,3 +214,7 @@ select
     prev_num_bikes_available,
     prev_num_docks_available
 from temporal_helpers
+{% if is_incremental() %}
+where snapshot_bucket_at_utc >= (select rebuild_from_utc from window_bounds)
+  and snapshot_bucket_at_utc < (select rebuild_to_utc from window_bounds)
+{% endif %}

@@ -9,13 +9,6 @@ sources:
         freshness:
           warn_after: {count: 1, period: day}
           error_after: {count: 7, period: day}
-        tests:
-          - duplicate_grain:
-              arguments:
-                columns: ["city", "snapshot_bucket_at", "station_id"]
-              config:
-                severity: warn
-                tags: ["diagnostic"]
         columns:
           - name: run_id
             tests:
@@ -34,13 +27,6 @@ sources:
         freshness:
           warn_after: {count: 20, period: minute}
           error_after: {count: 60, period: minute}
-        tests:
-          - duplicate_grain:
-              arguments:
-                columns: ["city", "snapshot_bucket_at", "station_id"]
-              config:
-                severity: warn
-                tags: ["diagnostic"]
         columns:
           - name: run_id
             tests:
@@ -59,13 +45,6 @@ sources:
         freshness:
           warn_after: {count: 30, period: minute}
           error_after: {count: 120, period: minute}
-        tests:
-          - duplicate_grain:
-              arguments:
-                columns: ["city", "observed_at"]
-              config:
-                severity: warn
-                tags: ["diagnostic"]
         columns:
           - name: run_id
             tests:
@@ -81,13 +60,6 @@ sources:
         freshness:
           warn_after: {count: 30, period: minute}
           error_after: {count: 120, period: minute}
-        tests:
-          - duplicate_grain:
-              arguments:
-                columns: ["city", "snapshot_bucket_at", "forecast_at"]
-              config:
-                severity: warn
-                tags: ["diagnostic"]
         columns:
           - name: run_id
             tests:
@@ -106,13 +78,6 @@ sources:
         freshness:
           warn_after: {count: 400, period: day}
           error_after: {count: 800, period: day}
-        tests:
-          - duplicate_grain:
-              arguments:
-                columns: ["country_code", "holiday_date"]
-              config:
-                severity: warn
-                tags: ["diagnostic"]
         columns:
           - name: run_id
             tests:

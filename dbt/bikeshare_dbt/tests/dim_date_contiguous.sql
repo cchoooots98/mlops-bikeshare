@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 with ordered_dates as (
     select
         date,

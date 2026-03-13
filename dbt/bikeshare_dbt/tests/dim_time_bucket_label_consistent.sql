@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 select
     time_id,
     hour,

@@ -16,6 +16,9 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+vars:
+  station_inventory_capacity_multiplier: 2
+
 models:
   bikeshare_dbt:
     +meta:

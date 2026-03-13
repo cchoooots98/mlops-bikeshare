@@ -99,7 +99,7 @@ models:
     tests:
       - duplicate_grain:
           arguments:
-            columns: ["city", "observed_at_utc"]
+            columns: ["city", "snapshot_bucket_at_utc"]
           config:
             tags: ["quality_gate"]
     columns:

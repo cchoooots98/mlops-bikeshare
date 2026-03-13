@@ -1,41 +1,48 @@
+{% set stockout_threshold = var('stockout_threshold', 2) | int %}
+{% set snapshot_step_minutes = var('feature_snapshot_step_minutes', 5) | int %}
+{% set label_horizon_minutes = var('feature_label_horizon_minutes', 30) | int %}
+{% set max_roll_window_minutes = var('feature_max_roll_window_minutes', 60) | int %}
+{% set feature_rebuild_lookback_minutes = var('feature_rebuild_lookback_minutes', none) %}
+{% if feature_rebuild_lookback_minutes is none %}
+{% set feature_rebuild_lookback_minutes = (var('feature_rebuild_lookback_days', 3) | int) * 24 * 60 %}
+{% else %}
+{% set feature_rebuild_lookback_minutes = feature_rebuild_lookback_minutes | int %}
+{% endif %}
+{% set expected_future_snapshots = label_horizon_minutes // snapshot_step_minutes %}
+{% set existing_relation = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier) %}
+{% set run_recent_window_overwrite = existing_relation is not none and not flags.FULL_REFRESH %}
+{% set recent_window_overwrite_sql %}
+{% if run_recent_window_overwrite %}
+delete from {{ this }}
+where {{ feature_dt_to_utc('dt') }} >= {{ runtime_utc_expr('feature_window_end_utc') }}
+    - interval '{{ feature_rebuild_lookback_minutes }} minutes'
+  and {{ feature_dt_to_utc('dt') }} < {{ runtime_utc_expr('feature_window_end_utc') }}
+{% else %}
+select 1
+{% endif %}
+{% endset %}
+
 {{ config(
     materialized='incremental',
     unique_key=['city', 'station_id', 'dt'],
     incremental_strategy='delete+insert',
     on_schema_change='fail',
+    pre_hook=[recent_window_overwrite_sql],
     post_hook=[
         "create unique index if not exists idx_feat_station_snapshot_5min_pk on {{ this }} (city, station_id, dt)",
         "create index if not exists idx_feat_station_snapshot_5min_station_dt on {{ this }} (city, station_id, dt desc)"
     ]
 ) }}
 
-{% set stockout_threshold = var('stockout_threshold', 2) | int %}
-{% set snapshot_step_minutes = var('feature_snapshot_step_minutes', 5) | int %}
-{% set label_horizon_minutes = var('feature_label_horizon_minutes', 30) | int %}
-{% set max_roll_window_minutes = var('feature_max_roll_window_minutes', 60) | int %}
-{% set incremental_reprocess_buffer_minutes = var('feature_incremental_reprocess_buffer_minutes', 120) | int %}
-{% set incremental_source_lookback_minutes = incremental_reprocess_buffer_minutes + max_roll_window_minutes %}
-{% set expected_future_snapshots = label_horizon_minutes // snapshot_step_minutes %}
-
-with incremental_state as (
-    {% if is_incremental() %}
+with window_bounds as (
     select
-        coalesce(
-            max({{ feature_dt_to_utc('dt') }})
-                - interval '{{ incremental_source_lookback_minutes }} minutes',
-            '1900-01-01'::timestamptz
-        ) as source_reprocess_from_utc,
-        coalesce(
-            max({{ feature_dt_to_utc('dt') }})
-                - interval '{{ incremental_reprocess_buffer_minutes }} minutes',
-            '1900-01-01'::timestamptz
-        ) as output_reprocess_from_utc
-    from {{ this }}
-    {% else %}
-    select
-        '1900-01-01'::timestamptz as source_reprocess_from_utc,
-        '1900-01-01'::timestamptz as output_reprocess_from_utc
-    {% endif %}
+        {{ runtime_utc_expr('feature_window_end_utc') }} as rebuild_to_utc,
+        {{ runtime_utc_expr('feature_window_end_utc') }}
+            - interval '{{ feature_rebuild_lookback_minutes }} minutes' as rebuild_from_utc,
+        {{ runtime_utc_expr('feature_window_end_utc') }}
+            - interval '{{ feature_rebuild_lookback_minutes + max_roll_window_minutes }} minutes' as source_from_utc,
+        {{ runtime_utc_expr('feature_window_end_utc') }}
+            + interval '{{ label_horizon_minutes }} minutes' as source_to_utc
 ),
 base_source as (
     select
@@ -67,9 +74,10 @@ base_source as (
         e.prev_num_bikes_available,
         e.prev_num_docks_available
     from {{ ref('int_station_status_enriched') }} e
-    where e.num_bikes_available + e.num_docks_available <= e.capacity
+    cross join window_bounds wb
     {% if is_incremental() %}
-      and e.snapshot_bucket_at_utc >= (select source_reprocess_from_utc from incremental_state)
+    where e.snapshot_bucket_at_utc >= wb.source_from_utc
+      and e.snapshot_bucket_at_utc < wb.source_to_utc
     {% endif %}
 ),
 station_features as (
@@ -85,19 +93,13 @@ station_features as (
         bikes,
         docks,
         coalesce(minutes_since_prev_snapshot, 0.0)::double precision as minutes_since_prev_snapshot,
-        least(
-            1.0,
-            greatest(
-                0.0,
-                coalesce(bikes::double precision / nullif(capacity::double precision, 0.0), 0.0)
-            )
+        greatest(
+            0.0,
+            coalesce(bikes::double precision / nullif(capacity::double precision, 0.0), 0.0)
         ) as util_bikes,
-        least(
-            1.0,
-            greatest(
-                0.0,
-                coalesce(docks::double precision / nullif(capacity::double precision, 0.0), 0.0)
-            )
+        greatest(
+            0.0,
+            coalesce(docks::double precision / nullif(capacity::double precision, 0.0), 0.0)
         ) as util_docks,
         case
             when coalesce(minutes_since_prev_snapshot, 0.0) > 0.0
@@ -323,5 +325,6 @@ select
     y_stockout_docks_30
 from assembled
 {% if is_incremental() %}
-where snapshot_bucket_at_utc >= (select output_reprocess_from_utc from incremental_state)
+where snapshot_bucket_at_utc >= (select rebuild_from_utc from window_bounds)
+  and snapshot_bucket_at_utc < (select rebuild_to_utc from window_bounds)
 {% endif %}

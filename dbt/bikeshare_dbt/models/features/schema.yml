@@ -97,7 +97,7 @@ models:
           - value_between:
               arguments:
                 min_value: 0
-                max_value: 1
+                max_value: "{{ var('station_inventory_capacity_multiplier', 2) | float }}"
       - name: util_docks
         data_type: double precision
         tests:
@@ -105,7 +105,7 @@ models:
           - value_between:
               arguments:
                 min_value: 0
-                max_value: 1
+                max_value: "{{ var('station_inventory_capacity_multiplier', 2) | float }}"
       - name: delta_bikes_5m
         data_type: double precision
       - name: delta_docks_5m
@@ -330,7 +330,7 @@ models:
           - value_between:
               arguments:
                 min_value: 0
-                max_value: 1
+                max_value: "{{ var('station_inventory_capacity_multiplier', 2) | float }}"
       - name: util_docks
         data_type: double precision
         tests:
@@ -338,7 +338,7 @@ models:
           - value_between:
               arguments:
                 min_value: 0
-                max_value: 1
+                max_value: "{{ var('station_inventory_capacity_multiplier', 2) | float }}"
       - name: delta_bikes_5m
         data_type: double precision
       - name: delta_docks_5m

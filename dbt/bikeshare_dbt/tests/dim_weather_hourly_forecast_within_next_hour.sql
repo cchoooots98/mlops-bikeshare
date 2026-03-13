@@ -1,3 +1,5 @@
+{{ config(tags=['quality_gate']) }}
+
 select
     weather_key,
     observed_at,

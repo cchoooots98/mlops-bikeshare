@@ -4,20 +4,38 @@ selectors:
       union:
         - method: fqn
           value: feat_station_snapshot_5min
-          parents: true
         - method: fqn
           value: feat_station_snapshot_latest
-          parents: true
+
+  - name: hf_station_status_hotpath_models
+    definition:
+      union:
+        - method: fqn
+          value: dim_date
+        - method: fqn
+          value: dim_time
+        - method: fqn
+          value: fct_station_status
+        - method: fqn
+          value: int_station_status_enriched
+
+  - name: weather_refresh_models
+    definition:
+      method: fqn
+      value: dim_weather
+
+  - name: station_topology_daily_models
+    definition:
+      union:
+        - method: fqn
+          value: dim_station
+        - method: fqn
+          value: int_station_neighbors
 
   - name: hf_smoke_tests
     definition:
       method: tag
       value: hf_smoke
-
-  - name: quality_models
-    definition:
-      method: fqn
-      value: fct_station_inventory_capacity_anomalies
 
   - name: quality_gate_tests
     definition:
@@ -28,8 +46,3 @@ selectors:
     definition:
       method: tag
       value: deep_quality
-
-  - name: diagnostic_tests
-    definition:
-      method: tag
-      value: diagnostic
