@@ -1,92 +1,95 @@
-# Monitoring Runbook — mlops-bikeshare
+# Monitoring Runbook
 
-_Last updated: 2025-10-02 • Region: **eu-west-3** • City: **paris**_  
-_Endpoints: **bikeshare-staging**, **bikeshare-prod**_  
-_Routing: SNS topic **sm-alerts** → Email + Slack (verified)_
+## Purpose
+This runbook explains how to monitor and triage the dual-target platform.
 
-**Step-8 acceptance status**  
-- Drift/Quality/System alarms can trigger and route: **Verified (SNS + forced ALARM drill)**  
-- Dashboard trends (24–72h): **Available** on `bikeshare-ops` (quality, hit-rate, latency, errors, heartbeat)  
-- MTTA drill: **2.6 minutes** (2025-10-02, Slack/email receipt)
+## Formal Dimensions
+All custom metric checks must filter by:
+- `Environment`
+- `EndpointName`
+- `City`
+- `TargetName`
 
----
+## Main Signals
+Custom metrics in `Bikeshare/Model`:
+- `PR-AUC-24h`
+- `F1-24h`
+- `ThresholdHitRate-24h`
+- `Samples-24h`
+- `PredictionHeartbeat`
+- `PSI`
 
-## 0) Purpose & Scope
-This runbook explains **how to detect, triage, and resolve** issues for:
-1) **Ingestion** (GBFS + weather into S3/Glue/Athena)  
-2) **Online Inference & Feedback Loop** (predictions + ground-truth)  
-3) **Model Monitor (Drift & Data Quality)**  
-4) **Endpoint/System Health** (SageMaker latency/errors, Lambda jobs)
+Native metrics in `AWS/SageMaker`:
+- `ModelLatency`
+- `Invocation5XXErrors`
+- `Invocation4XXErrors`
+- `Invocations`
 
-It also documents **bypass/rollback** strategies to restore service quickly while the root cause is investigated.
+## Dashboard And Alarm Expectations
+The formal AWS stack should expose:
+- one CloudWatch dashboard for the environment
+- latency and 5xx alarms for each formal endpoint
+- PR-AUC, F1, PredictionHeartbeat, and PSI alarms for each formal endpoint
+- one SNS topic for monitoring notifications
 
----
+## First Triage Steps
+1. Identify the affected target.
+2. Identify the affected environment.
+3. Check the dashboard and alarms for that target and environment only.
+4. Confirm the deployment state points to the expected endpoint and package.
+5. Decide whether to stabilize with rollback.
 
-## 1) Signals & Where They Live
+## Data And Freshness Incidents
+Symptoms:
+- missing predictions
+- missing quality shards
+- delayed dbt or Airflow runs
 
-### Custom metrics — `Bikeshare/Model`
-- `PR-AUC-24h`, `F1-24h`, `ThresholdHitRate-24h`, `Samples-24h`
-- `PredictionHeartbeat` (batch success/freshness pulse)
+Checks:
+- Airflow DAG success
+- latest feature table timestamps
+- latest `PredictionHeartbeat`
+- latest prediction and quality partitions
 
-### Native metrics — `AWS/SageMaker`
-- `ModelLatency` (p50/p95), `OverheadLatency` (p50/p95)
-- `Invocations`, `Invocation4XXErrors`, `Invocation5XXErrors`
+Immediate action:
+- restore the data pipeline first
+- do not promote new models while freshness is degraded
 
-### Alarms (current names in use)
-- **Drift/Quality jobs:** `bikeshare-data-drift-failed`, `bikeshare-data-quality-failed`
-- **Batch job health:** `bikeshare-infer-Duration-p95-gt-12m`, `bikeshare-infer-Errors-gt0`, `mlops-bikeshare-lambda-errors`
-- **Endpoint/system:** `sm-prod-5XX`, `sm-prod-avg-latency`, `sm-prod-latency`, `one anomaly-band alarm ModelLatency (p95)`
-- **Model quality (staging gate):** `staging-f1-low` (recommend also `staging-prauc-low`)
+## Quality Incidents
+Symptoms:
+- low `PR-AUC-24h`
+- low `F1-24h`
+- high `PSI`
 
----
+Checks:
+- verify the dimensions include the correct target
+- compare current prod package with previous prod package
+- inspect the latest package manifest and training run
 
-## 2) Triage Flow (use this first)
+Immediate action:
+- if prod quality is materially degraded, roll back the affected target
 
-1. **Acknowledge** alert in Slack/email. Open CloudWatch **Alarms** → view state history.  
-2. **Classify** the alert:
-   - _Data/Ingestion_ • _Drift/Data Quality_ • _Model Quality_ • _Endpoint/System_ • _Pipeline/Lambda_
-3. **Open dashboard** `bikeshare-ops` → check last **24–72h** for quality/hit-rate/latency/errors/heartbeat.
-4. **Follow the relevant playbook** (sections below).
-5. **If impact exists**, apply **bypass/rollback** (see §6) to stabilize; continue root cause.
-6. **Close incident** with brief note (symptoms, cause, fix, follow-ups).
+## Serving Incidents
+Symptoms:
+- `Invocation5XXErrors > 0`
+- high latency
+- endpoint not `InService`
 
----
+Checks:
+- SageMaker endpoint status
+- CloudWatch latency and error metrics
+- router lambda behavior
+- deployment state endpoint name
 
-## 3) Runbook — Ingestion
+Immediate action:
+- prefer rollback over hot patching prod
 
-### Symptoms
-- Athena missing last 2 partitions
-- CloudWatch metric `IngestFailures` > 0
-- Lambda **ingestion** error logs spike
-
-### Quick Triage
-1) **Lambda logs:** check last run for timeout/network/validation failures.  
-2) **S3 error drops:** browse `ingest_errors/` for payload + error summaries.  
-3) **Manual re-run:** invoke Lambda test with `{ "city": "paris" }`.  
-4) **Infra checks:** S3 `PutObject` permissions; EventBridge rule enabled and last trigger time.
-
-### Common Causes & Fix
-- **GBFS 5xx / flaky upstream:** rely on EventBridge retry; increase backoff if repeated.  
-- **Schema change (new field/type):** update `validators.py`, redeploy function/package.  
-- **S3/IAM denial:** verify role has `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`.
-
-### Bypass Strategy
-- **Relax validation to warn-only**: call Pydantic with `model_validate(..., strict=False)` temporarily.  
-- **Manual backfill:** invoke Lambda with historical `last_updated` override (utility script) to fill gaps.
-
-### Metrics & Alarms
-- `IngestFailures` > 0 → **Critical**  
-- `No new partition in 15 min` → **Warning** (Athena scheduled query or Glue crawler freshness)
-
----
-
-## 4) Runbook — Online Inference & Feedback Loop
-
-### Symptoms
-- GitHub Actions workflow `inference_loop.yml` fails (or Lambda predictor schedule fails).
-- No new parquet under `inference/` for **> 10 minutes**.
-- `monitoring/quality/` partitions empty or **> 30 minutes** delayed.
-- Athena views error or return empty sets.
-
-### Quick Triage
-1) **Workflow/Lambda logs:** look for IAM denials, timeouts, network issues.
+## Evidence To Keep
+- target name
+- environment
+- endpoint name
+- time window
+- relevant metric screenshots or exports
+- dashboard name
+- deployment state before and after action
+- rollback command if used

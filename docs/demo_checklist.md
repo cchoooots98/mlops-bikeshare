@@ -10,9 +10,9 @@
 1. **Set env + health check**
    ```powershell
    # Comment: Set profile/region/endpoint shown in the dashboard.
-   $env:AWS_PROFILE="Shirley"
+   $env:AWS_PROFILE="Shirley-fr"
    $env:AWS_REGION="eu-west-3"
-   $env:SM_ENDPOINT="bikeshare-prod"
+   $env:SM_ENDPOINT="bikeshare-bikes-prod"
 
    # Comment: Quick sanity checks
    aws sts get-caller-identity
@@ -66,7 +66,7 @@
   ```
 - **Central config file**: `src/utils/config.py` must contain:
   ```python
-  REGION="eu-west-3"; CITY="paris"; SM_ENDPOINT="bikeshare-prod"; CW_NAMESPACE="Bikeshare/Model"
+  AWS_REGION="eu-west-3"; CITY="paris"; SM_ENDPOINT="bikeshare-bikes-prod"; CW_NAMESPACE="Bikeshare/Model"
   ```
 
 ---
@@ -82,16 +82,16 @@ Use when **not** interviewing.
 
 ### 2.2 Pause App Runner (if used)
 ```powershell
-aws apprunner pause-service --service-arn <YOUR_APP_RUNNER_ARN> --region $env:AWS_REGION
+aws apprunner pause-service --service-arn <YOUR_APP_RUNNER_ARN> --AWS_REGION $env:AWS_REGION
 ```
 
 ### 2.3 Disable EventBridge rules (ingest/infer/psi)
 ```powershell
-$REGION = $env:AWS_REGION; if (-not $REGION) { $REGION = "eu-west-3" }
+$AWS_REGION = $env:AWS_REGION; if (-not $AWS_REGION) { $AWS_REGION = "eu-west-3" }
 $env:AWS_PAGER = ""
-$names = aws events list-rules --region $REGION --name-prefix bikeshare- --query 'Rules[].Name' --output json | ConvertFrom-Json
-$names | % { if ($_ -and $_.Trim()) { Write-Host "Disabling $_ ..."; aws events disable-rule --region $REGION --name $_ | Out-Null } }
-aws events list-rules --region $REGION --name-prefix bikeshare- --query 'Rules[].{Name:Name,State:State}' --output table
+$names = aws events list-rules --region $AWS_REGION --name-prefix bikeshare- --query 'Rules[].Name' --output json | ConvertFrom-Json
+$names | % { if ($_ -and $_.Trim()) { Write-Host "Disabling $_ ..."; aws events disable-rule --region $AWS_REGION --name $_ | Out-Null } }
+aws events list-rules --region $AWS_REGION --name-prefix bikeshare- --query 'Rules[].{Name:Name,State:State}' --output table
 ```
 
 ### 2.4 (Optional) Block Lambda via reserved concurrency = 0
@@ -103,7 +103,7 @@ foreach ($f in $funcs) { aws lambda put-function-concurrency --function-name $f 
 ### 2.5 Logs retention = 7 days (cheap)
 ```powershell
 $groups = @(
-  "/aws/sagemaker/Endpoints/bikeshare-prod",
+  "/aws/sagemaker/Endpoints/bikeshare-bikes-prod",
   "/aws/lambda/bikeshare-infer",
   "/aws/lambda/bikeshare-publish-psi",
   "/aws/lambda/mlops-bikeshare-gbfs-ingest",
@@ -194,7 +194,7 @@ $names | % { if ($_ -and $_.Trim()) { aws events disable-rule --region $env:AWS_
 
 ## 6) Quick troubleshooting
 
-- **No metrics on charts** → Run `publish_metrics.yml` once; confirm namespace `Bikeshare/Model` and dimensions `{EndpointName=bikeshare-prod, City=paris}`.  
+- **No metrics on charts** → Run `publish_metrics.yml` once; confirm namespace `Bikeshare/Model` and dimensions `{EndpointName=bikeshare-bikes-prod, City=paris, TargetName=bikes}`.  
 - **Endpoint not found** → `aws sagemaker list-endpoints --name-contains bikeshare --query 'Endpoints[].{Name:EndpointName,Status:EndpointStatus}' --output table`  
 - **Throttling on CloudWatch** → helper auto‑retries; otherwise reduce frequency to 10–15 min.  
 - **Lambda still firing** → check EventBridge rule state + reserved concurrency (0 blocks all).  
