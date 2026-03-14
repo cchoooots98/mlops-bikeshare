@@ -12,9 +12,6 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.orchestration.retrain import main as retrain_main
-
-
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
     return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
 
@@ -30,6 +27,8 @@ def _dag_conf(context: dict) -> dict:
 
 
 def run_retraining_task(**context):
+    from src.orchestration.retrain import main as retrain_main
+
     conf = _dag_conf(context)
     dw_conn = _dw_connection()
     args = [

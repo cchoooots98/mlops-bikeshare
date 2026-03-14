@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import inspect
 import os
 import shutil
 import tempfile
@@ -365,7 +366,11 @@ def _save_or_log_pyfunc_probability_model(
         if save_path:
             mlflow.pyfunc.save_model(path=save_path, **common_kwargs)
         else:
-            mlflow.pyfunc.log_model(name=log_name, **common_kwargs)
+            log_model_params = inspect.signature(mlflow.pyfunc.log_model).parameters
+            if "name" in log_model_params:
+                mlflow.pyfunc.log_model(name=log_name, **common_kwargs)
+            else:
+                mlflow.pyfunc.log_model(artifact_path=log_name, **common_kwargs)
 
 
 def _save_local_package(
