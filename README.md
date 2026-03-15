@@ -5,6 +5,16 @@ This repository implements a dual-target, dbt-first bikeshare platform for Paris
 - always-on data engineering on EC2 with Docker Compose
 - AWS serving with SageMaker staging/prod endpoints, target-aware monitoring, and rollback
 
+Terraform follows a single-account layout:
+- `infra/terraform/bootstrap`: one-time remote-state backend primitives
+- `infra/terraform/live`: one long-lived AWS platform stack
+
+Model release remains separate from Terraform:
+- deploy to staging endpoint
+- gate on staging
+- promote to production endpoint
+- rollback via deployment-state files
+
 ## Canonical Local Defaults
 - Python environment: `.venv`
 - MLflow tracking URI: `sqlite:///model_dir/mlflow.db`
@@ -90,7 +100,7 @@ $env:MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
 - `src/monitoring/`: quality backfill, CloudWatch metrics, and monitoring helpers
 - `src/serving/`: router request parsing and target resolution
 - `pipelines/`: export, deploy, promote, and rollback entrypoints
-- `infra/terraform/`: dev/prod envs and platform module
+- `infra/terraform/`: bootstrap/live entrypoints and platform modules
 - `docs/`: execution guide, deployment guide, dashboard spec, and operator runbooks
 
 ## Formal Guides

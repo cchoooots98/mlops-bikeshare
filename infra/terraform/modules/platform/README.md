@@ -9,4 +9,5 @@ This module contains the shared AWS platform resources for the bikeshare stack:
 - Router Lambda + EventBridge trigger
 - SNS-backed CloudWatch alarms for the four formal SageMaker endpoints
 
-Environment-specific entrypoints live under `infra/terraform/envs/dev` and `infra/terraform/envs/prod`.
+The long-lived platform entrypoint lives under `infra/terraform/live`.
+Model-serving separation remains `staging` and `production` at the deployment-state and SageMaker endpoint layers.

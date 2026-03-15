@@ -139,8 +139,12 @@ curl -I http://localhost:8080
 - restart recovery evidence
 
 ## 5. Terraform Infrastructure
+Terraform in this repository manages the long-lived AWS platform only.
+Staging deployment, production promotion, and rollback remain separate release steps in Sections 6-8.
+
 ### Before you start
-- replace the backend values in `infra/terraform/envs/dev/backend.tf` and `infra/terraform/envs/prod/backend.tf` if they do not match your account
+- bootstrap the remote backend once from `infra/terraform/bootstrap`
+- use the bootstrap outputs when initializing `infra/terraform/live`
 - do not treat any repo default `aws_profile` value as canonical; set your own value, use `AWS_PROFILE`, or leave it null
 - do not commit secrets in tfvars files
 - if a repo default backend or profile does not match your environment, treat it as "must replace", not as an approved default
@@ -151,19 +155,26 @@ curl -I http://localhost:8080
 
 ### Commands
 ```powershell
-cd infra\terraform\envs\dev
-terraform init -reconfigure
+cd infra\terraform\bootstrap
+terraform init
 terraform validate
 terraform plan
 terraform apply
-terraform output
+$env:TF_STATE_BUCKET = terraform output -raw tf_state_bucket_name
+$env:TF_LOCK_TABLE = terraform output -raw tf_lock_table_name
+$env:TF_STATE_REGION = terraform output -raw aws_region
 ```
 
-Then repeat for prod:
+Then initialize and apply the long-lived platform stack:
 
 ```powershell
-cd ..\prod
-terraform init -reconfigure
+cd ..\live
+terraform init -reconfigure `
+  -backend-config="bucket=$env:TF_STATE_BUCKET" `
+  -backend-config="key=infra/live/terraform.tfstate" `
+  -backend-config="region=$env:TF_STATE_REGION" `
+  -backend-config="dynamodb_table=$env:TF_LOCK_TABLE" `
+  -backend-config="encrypt=true"
 terraform validate
 terraform plan
 terraform apply
@@ -172,11 +183,15 @@ terraform output
 
 ### Expected output
 - `terraform validate` succeeds
+- bootstrap output includes:
+  - `tf_state_bucket_name`
+  - `tf_lock_table_name`
 - `terraform output` includes:
   - `data_bucket_name`
   - `router_lambda_name`
   - `sns_topic_arn`
   - `cloudwatch_dashboard_name`
+  - `sagemaker_role_arn`
 
 ### Immediate post-apply checks
 ```powershell

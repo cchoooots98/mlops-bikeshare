@@ -13,3 +13,7 @@ output "sns_topic_arn" {
 output "cloudwatch_dashboard_name" {
   value = module.stack.cloudwatch_dashboard_name
 }
+
+output "sagemaker_role_arn" {
+  value = module.stack.sagemaker_role_arn
+}

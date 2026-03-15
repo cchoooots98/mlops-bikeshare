@@ -1,12 +1,10 @@
 # Terraform Modules Layout
 
-This directory is the target home for extracted Terraform modules.
+This directory contains the reusable Terraform modules for the single-account AWS layout.
 
-The current project still uses the flat root module in `infra/terraform/`.
-To avoid breaking existing state and references, the root module remains the source of truth for now.
+Current entrypoints:
+- `infra/terraform/bootstrap`
+- `infra/terraform/live`
 
-New environment entrypoints live under:
-- `infra/terraform/envs/dev`
-- `infra/terraform/envs/prod`
-
-Those entrypoints wrap the current root module without moving the original files.
+`bootstrap` provisions the remote-state backend primitives.
+`live` provisions the long-lived platform stack by calling the modules in this directory.

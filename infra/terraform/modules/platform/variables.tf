@@ -3,11 +3,6 @@ variable "aws_region" {
   default = "eu-west-3"
 }
 
-variable "aws_profile" {
-  type    = string
-  default = null
-}
-
 variable "sagemaker_endpoints" {
   type = map(string)
   default = {
@@ -38,7 +33,7 @@ variable "role_name" {
 
 variable "env" {
   type    = string
-  default = "dev"
+  default = "live"
 }
 
 variable "city" {
@@ -52,23 +47,6 @@ variable "alarm_email_endpoint" {
   description = "Optional email address to subscribe to the monitoring SNS topic"
   default     = null
 }
-
-# 下面三项虽然当前 backend.tf 没有引用，但保留做参数化也可以。
-variable "tf_state_bucket" {
-  type    = string
-  default = "mlops-tfstate-387706002632-eu-west-3"
-}
-
-variable "tf_lock_table" {
-  type    = string
-  default = "mlops-tflock"
-}
-
-variable "tf_state_key" {
-  type    = string
-  default = "infra/terraform.tfstate"
-}
-
 
 locals {
   project    = var.repo_name

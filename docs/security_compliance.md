@@ -17,12 +17,13 @@
 - Do not mount a developer laptop AWS config into the EC2 stack.
 
 ## Terraform Requirements
-- `backend.tf` values are environment-specific and must be reviewed before first `terraform init -reconfigure`.
+- Bootstrap the remote backend once, then use those backend values when initializing the live stack.
 - Do not assume any repo default `aws_profile` value is correct for your account.
 - Keep secrets out of checked-in Terraform files.
 
 ## AWS Serving
-- Separate dev and prod Terraform environments.
+- Use one long-lived Terraform platform stack for this single-account project.
+- Treat `staging` and `production` as model-serving environments, not separate Terraform stacks.
 - Use target-specific endpoints, alarms, and deployment state.
 - Restrict rollback and promote permissions to approved operators or CI roles.
 

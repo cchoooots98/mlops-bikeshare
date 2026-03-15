@@ -168,10 +168,10 @@ resource "aws_cloudwatch_metric_alarm" "quality_pr_auc_low" {
   threshold           = 0.70
   alarm_description   = "Target-aware PR-AUC over the last window is below the admission threshold"
   dimensions = {
-    Environment = each.value.environment
+    Environment  = each.value.environment
     EndpointName = each.value.endpoint_name
-    City = var.city
-    TargetName = each.value.target_name
+    City         = var.city
+    TargetName   = each.value.target_name
   }
   treat_missing_data = "notBreaching"
   alarm_actions      = [aws_sns_topic.monitoring.arn]
@@ -189,10 +189,10 @@ resource "aws_cloudwatch_metric_alarm" "quality_f1_low" {
   threshold           = 0.55
   alarm_description   = "Target-aware F1 over the last window is below the admission threshold"
   dimensions = {
-    Environment = each.value.environment
+    Environment  = each.value.environment
     EndpointName = each.value.endpoint_name
-    City = var.city
-    TargetName = each.value.target_name
+    City         = var.city
+    TargetName   = each.value.target_name
   }
   treat_missing_data = "notBreaching"
   alarm_actions      = [aws_sns_topic.monitoring.arn]
@@ -210,10 +210,10 @@ resource "aws_cloudwatch_metric_alarm" "quality_heartbeat_low" {
   threshold           = 1
   alarm_description   = "Target-aware prediction heartbeat is missing for the latest 15-minute window"
   dimensions = {
-    Environment = each.value.environment
+    Environment  = each.value.environment
     EndpointName = each.value.endpoint_name
-    City = var.city
-    TargetName = each.value.target_name
+    City         = var.city
+    TargetName   = each.value.target_name
   }
   treat_missing_data = "breaching"
   alarm_actions      = [aws_sns_topic.monitoring.arn]
@@ -231,10 +231,10 @@ resource "aws_cloudwatch_metric_alarm" "quality_psi_high" {
   threshold           = 0.20
   alarm_description   = "Target-aware PSI has crossed the warning threshold"
   dimensions = {
-    Environment = each.value.environment
+    Environment  = each.value.environment
     EndpointName = each.value.endpoint_name
-    City = var.city
-    TargetName = each.value.target_name
+    City         = var.city
+    TargetName   = each.value.target_name
   }
   treat_missing_data = "notBreaching"
   alarm_actions      = [aws_sns_topic.monitoring.arn]

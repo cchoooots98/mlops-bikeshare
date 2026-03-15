@@ -121,7 +121,8 @@ Goal:
 - Create the minimum AWS serving and monitoring infrastructure.
 
 Main checks:
-- remote backend is replaced with your real backend before `terraform init`
+- bootstrap creates the remote backend once
+- live stack is initialized with the backend values created by bootstrap
 - provider profile is intentionally set or omitted
 - CloudWatch dashboard exists
 - quality alarms exist for the four formal endpoints
@@ -129,8 +130,9 @@ Main checks:
 - repo defaults for backend/profile are treated as placeholders to review, not as formal defaults
 
 Pass gate:
-- dev and prod `plan`
-- dev and prod `apply`
+- bootstrap `apply`
+- live `plan`
+- live `apply`
 - outputs are recorded in the evidence pack
 
 ## Day 9: Staging, Gate, Promote, Rollback

@@ -104,29 +104,16 @@ jobs:
         with:
           terraform_version: 1.7.5
 
-      # PR: no AWS, no remote backend. Just format + validate
-      - name: Terraform fmt & validate (PR)
-        if: github.event_name == 'pull_request'
+      - name: Terraform fmt
         working-directory: infra/terraform
-        run: |
-          terraform init -backend=false
-          terraform fmt -check -recursive
-          terraform validate
+        run: terraform fmt -check -recursive
 
-      # main: assume role and validate with the real backend.
-      - name: Configure AWS credentials (OIDC)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: tf-validate-${{ github.run_id }}
-          role-duration-seconds: 3600
-
-      - name: Terraform fmt & validate (main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        working-directory: infra/terraform
+      - name: Terraform validate (bootstrap)
         run: |
-          terraform init -reconfigure
-          terraform fmt -check -recursive
-          terraform validate
+          terraform -chdir=infra/terraform/bootstrap init -backend=false
+          terraform -chdir=infra/terraform/bootstrap validate
+
+      - name: Terraform validate (live)
+        run: |
+          terraform -chdir=infra/terraform/live init -backend=false
+          terraform -chdir=infra/terraform/live validate
