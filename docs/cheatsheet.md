@@ -92,14 +92,14 @@ terraform init -reconfigure \
   -backend-config="bucket=<tfstate-bucket>" \
   -backend-config="key=infra/live/terraform.tfstate" \
   -backend-config="region=eu-west-3" \
-  -backend-config="dynamodb_table=<tflock-table>" \
   -backend-config="encrypt=true"
 terraform plan
 terraform apply
 ```
 
 说明：
-- `bootstrap` 只负责创建 tfstate bucket 和 lock table。
+- `bootstrap` 只负责创建 tfstate bucket。
+- `live` 使用 S3 native lockfile 处理 state locking。
 - `live` 负责长期平台资源。
 - `staging` / `production` 属于模型发布流程，不是 Terraform 双环境。
 

@@ -71,3 +71,34 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     assert "F1-24h" in cloudwatch_tf
     assert "PredictionHeartbeat" in cloudwatch_tf
     assert "PSI" in cloudwatch_tf
+
+
+def test_terraform_uses_s3_native_locking_and_modern_version_floor():
+    bootstrap_main = Path("infra/terraform/bootstrap/main.tf").read_text(encoding="utf-8")
+    bootstrap_vars = Path("infra/terraform/bootstrap/variables.tf").read_text(encoding="utf-8")
+    bootstrap_outputs = Path("infra/terraform/bootstrap/outputs.tf").read_text(encoding="utf-8")
+    live_backend = Path("infra/terraform/live/backend.tf").read_text(encoding="utf-8")
+    live_versions = Path("infra/terraform/live/versions.tf").read_text(encoding="utf-8")
+    bootstrap_versions = Path("infra/terraform/bootstrap/versions.tf").read_text(encoding="utf-8")
+    module_versions = Path("infra/terraform/modules/platform/versions.tf").read_text(encoding="utf-8")
+    ci_workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
+    operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(
+        encoding="utf-8"
+    )
+    aws_runbook = Path("docs/plan_detail/day5_enterprise_aws_runbook.md").read_text(encoding="utf-8")
+    cheatsheet = Path("docs/cheatsheet.md").read_text(encoding="utf-8")
+
+    assert "aws_dynamodb_table" not in bootstrap_main
+    assert "tf_lock_table_name" not in bootstrap_vars
+    assert "tf_lock_table_name" not in bootstrap_outputs
+    assert "use_lockfile = true" in live_backend
+    assert 'required_version = ">= 1.10"' in live_versions
+    assert 'required_version = ">= 1.10"' in bootstrap_versions
+    assert 'required_version = ">= 1.10"' in module_versions
+    assert "terraform_version: 1.13.3" in ci_workflow
+
+    for doc in (deployment_guide, operator_manual, aws_runbook, cheatsheet):
+        assert "dynamodb_table=" not in doc
+        assert "TF_LOCK_TABLE" not in doc
+        assert "tf_lock_table_name" not in doc

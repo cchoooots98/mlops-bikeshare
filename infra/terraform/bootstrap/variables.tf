@@ -17,8 +17,3 @@ variable "tf_state_bucket_name" {
   type    = string
   default = null
 }
-
-variable "tf_lock_table_name" {
-  type    = string
-  default = null
-}

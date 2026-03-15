@@ -45,7 +45,7 @@ Do not mark a phase green until the evidence exists.
 - restart recovery evidence
 
 ### Terraform
-- bootstrap output values for backend bucket and lock table
+- bootstrap output values for backend bucket and region
 - `terraform plan` summary
 - `terraform apply` summary
 - output values for bucket, SNS topic, dashboard, router lambda

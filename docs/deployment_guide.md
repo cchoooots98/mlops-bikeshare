@@ -161,7 +161,6 @@ terraform validate
 terraform plan
 terraform apply
 $env:TF_STATE_BUCKET = terraform output -raw tf_state_bucket_name
-$env:TF_LOCK_TABLE = terraform output -raw tf_lock_table_name
 $env:TF_STATE_REGION = terraform output -raw aws_region
 ```
 
@@ -173,7 +172,6 @@ terraform init -reconfigure `
   -backend-config="bucket=$env:TF_STATE_BUCKET" `
   -backend-config="key=infra/live/terraform.tfstate" `
   -backend-config="region=$env:TF_STATE_REGION" `
-  -backend-config="dynamodb_table=$env:TF_LOCK_TABLE" `
   -backend-config="encrypt=true"
 terraform validate
 terraform plan
@@ -185,13 +183,18 @@ terraform output
 - `terraform validate` succeeds
 - bootstrap output includes:
   - `tf_state_bucket_name`
-  - `tf_lock_table_name`
+  - `aws_region`
 - `terraform output` includes:
   - `data_bucket_name`
   - `router_lambda_name`
   - `sns_topic_arn`
   - `cloudwatch_dashboard_name`
   - `sagemaker_role_arn`
+
+### Backend notes
+- `infra/terraform/bootstrap` creates only the remote state bucket
+- S3 native lockfiles handle state locking for the `live` stack
+- no DynamoDB lock table is required for a fresh setup
 
 ### Immediate post-apply checks
 ```powershell
