@@ -211,7 +211,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--country-code", default=os.getenv("HOLIDAY_COUNTRY_CODE", "FR"))
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("HOLIDAY_HTTP_TIMEOUT_SEC", "30")))
     parser.add_argument("--run-id", default=f"manual_holidays_{int(time.time())}")
-    parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
+    parser.add_argument("--raw-bucket", default=os.getenv("BUCKET", BUCKET or ""))
     return parser
 
 
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     if not args.conn_uri:
         raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
     if not args.raw_bucket:
-        raise RuntimeError("--raw-bucket (or env RAW_S3_BUCKET/BUCKET) is required")
+        raise RuntimeError("--raw-bucket (or env BUCKET) is required")
     result = ingest_holidays_year(
         conn_uri=args.conn_uri,
         year=args.year,

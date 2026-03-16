@@ -71,6 +71,8 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     assert "F1-24h" in cloudwatch_tf
     assert "PredictionHeartbeat" in cloudwatch_tf
     assert "PSI" in cloudwatch_tf
+    assert "aws_cloudwatch_event_rule" not in lambda_tf
+    assert "events.amazonaws.com" not in lambda_tf
 
 
 def test_terraform_uses_s3_native_locking_and_modern_version_floor():
@@ -102,3 +104,47 @@ def test_terraform_uses_s3_native_locking_and_modern_version_floor():
         assert "dynamodb_table=" not in doc
         assert "TF_LOCK_TABLE" not in doc
         assert "tf_lock_table_name" not in doc
+
+
+def test_formal_repo_cleanup_removes_legacy_runtime_and_scheduler_surfaces():
+    removed_paths = [
+        ".github/workflows/predictor.yml",
+        ".github/workflows/quality.yml",
+        ".github/workflows/publish_metrics.yml",
+        ".github/workflows/groundtruth-cron.yml",
+        ".github/workflows/cd_staging.yml",
+        ".github/workflows/promote_prod.yml",
+        "src/features/update_partitions.py",
+        "src/monitoring/build_baseline_from_capture.py",
+        "src/monitoring/metrics/lambda_publish_psi.py",
+        "docs/demo_checklist.md",
+    ]
+    for path in removed_paths:
+        assert not Path(path).exists(), f"legacy path should be removed: {path}"
+
+    schedules_dir = Path("src/monitoring/schedules")
+    assert not schedules_dir.exists() or not any(schedules_dir.glob("*.py"))
+
+
+def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
+    architecture = Path("docs/architecture.md").read_text(encoding="utf-8")
+    cicd = Path("docs/cicd.md").read_text(encoding="utf-8")
+    deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
+    runbook = Path("docs/runbook_prod.md").read_text(encoding="utf-8")
+    monitoring = Path("docs/monitoring_runbook.md").read_text(encoding="utf-8")
+    operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(encoding="utf-8")
+    dag_path = Path("airflow/dags/production_serving_dags.py")
+
+    for document in (architecture, cicd, deployment_guide, runbook, monitoring, operator_manual):
+        assert "RAW_S3_BUCKET" not in document
+        assert "WEATHER_CITY" not in document
+        assert "DW_HOST" not in document
+        assert "promote_prod.yml" not in document
+        assert "cd_staging.yml" not in document
+
+    dag_source = dag_path.read_text(encoding="utf-8")
+    compile(dag_source, str(dag_path), "exec")
+    assert "serving_prediction_15min" in dag_source
+    assert "serving_quality_backfill_15min" in dag_source
+    assert "serving_metrics_publish_hourly" in dag_source
+    assert "serving_psi_publish_hourly" in dag_source

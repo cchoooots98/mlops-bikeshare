@@ -25,7 +25,7 @@ variable "github_owner" {
 
 variable "repo_name" {
   type    = string
-  default = "mlops-bikeshare"
+  default = "bikeshare-paris"
 }
 
 variable "role_name" {

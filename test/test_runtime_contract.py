@@ -8,7 +8,7 @@ from src.model_package import default_package_root_for_target
 from src.training import train
 
 
-def test_runtime_settings_accept_legacy_aliases(monkeypatch, tmp_path):
+def test_runtime_settings_reject_legacy_alias_only_configs(monkeypatch, tmp_path):
     runtime_defaults = {
         "Variables": {
             "AWS_REGION": "eu-west-3",
@@ -33,15 +33,8 @@ def test_runtime_settings_accept_legacy_aliases(monkeypatch, tmp_path):
     monkeypatch.delenv("CITY", raising=False)
     monkeypatch.delenv("BUCKET", raising=False)
 
-    settings = load_runtime_settings()
-
-    assert settings.pg_host == "legacy-host"
-    assert settings.pg_port == 15432
-    assert settings.pg_db == "legacy-db"
-    assert settings.pg_user == "legacy-user"
-    assert settings.pg_password == "legacy-password"
-    assert settings.city == "paris"
-    assert settings.bucket == "legacy-bucket"
+    with pytest.raises(ValueError, match="missing required runtime settings"):
+        load_runtime_settings()
 
 
 @pytest.mark.parametrize(

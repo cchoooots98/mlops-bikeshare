@@ -10,7 +10,7 @@ variable "aws_profile" {
 
 variable "repo_name" {
   type    = string
-  default = "mlops-bikeshare"
+  default = "bikeshare-paris"
 }
 
 variable "tf_state_bucket_name" {

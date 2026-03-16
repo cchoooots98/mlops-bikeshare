@@ -583,11 +583,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--city", required=True)
     parser.add_argument("--start", required=True, help="UTC window start in 'YYYY-MM-DD HH:MM'")
     parser.add_argument("--end", required=True, help="UTC window end in 'YYYY-MM-DD HH:MM'")
-    parser.add_argument("--pg-host", default=env_or_default("PGHOST", aliases=("DW_HOST",)))
-    parser.add_argument("--pg-port", default=env_or_default("PGPORT", "5432", aliases=("DW_PORT",)), type=int)
-    parser.add_argument("--pg-db", default=env_or_default("PGDATABASE", aliases=("DW_DB",)))
-    parser.add_argument("--pg-user", default=env_or_default("PGUSER", aliases=("DW_USER",)))
-    parser.add_argument("--pg-password", default=env_or_default("PGPASSWORD", aliases=("DW_PASSWORD",)))
+    parser.add_argument("--pg-host", default=env_or_default("PGHOST"))
+    parser.add_argument("--pg-port", default=env_or_default("PGPORT", "5432"), type=int)
+    parser.add_argument("--pg-db", default=env_or_default("PGDATABASE"))
+    parser.add_argument("--pg-user", default=env_or_default("PGUSER"))
+    parser.add_argument("--pg-password", default=env_or_default("PGPASSWORD"))
     parser.add_argument("--pg-schema", default=env_or_default("PGSCHEMA", "analytics"))
     parser.add_argument("--feature-table", default=env_or_default("FEATURE_TABLE", "feat_station_snapshot_5min"))
     parser.add_argument("--predict-bikes", default=env_or_default("PREDICT_BIKES", "true"), choices=["true", "false"])
@@ -598,7 +598,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
         "--experiment",
-        default=env_or_default("TRAINING_EXPERIMENT", "bikeshare-step4", aliases=("MLFLOW_EXPERIMENT_NAME",)),
+        default=env_or_default("TRAINING_EXPERIMENT", "bikeshare-step4"),
     )
     parser.add_argument("--package-root", default=None, help="Optional package root. Defaults to model_dir/packages/<target>.")
     parser.add_argument(
@@ -613,11 +613,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def env_or_default(key: str, default: str | None = None, *, aliases: Sequence[str] = ()) -> str | None:
-    for candidate in (key, *aliases):
-        value = os.environ.get(candidate)
-        if value not in {None, ""}:
-            return value
+def env_or_default(key: str, default: str | None = None) -> str | None:
+    value = os.environ.get(key)
+    if value not in {None, ""}:
+        return value
     return default
 
 

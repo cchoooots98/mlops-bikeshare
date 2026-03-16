@@ -1,12 +1,16 @@
+locals {
+  monitoring_email_endpoint = var.alarm_email_endpoint == null ? null : trimspace(var.alarm_email_endpoint)
+}
+
 resource "aws_sns_topic" "monitoring" {
   name = "${local.project}-monitoring"
 }
 
 resource "aws_sns_topic_subscription" "monitoring_email" {
-  count     = trimspace(coalesce(var.alarm_email_endpoint, "")) == "" ? 0 : 1
+  count     = local.monitoring_email_endpoint == null || local.monitoring_email_endpoint == "" ? 0 : 1
   topic_arn = aws_sns_topic.monitoring.arn
   protocol  = "email"
-  endpoint  = var.alarm_email_endpoint
+  endpoint  = local.monitoring_email_endpoint
 }
 
 locals {

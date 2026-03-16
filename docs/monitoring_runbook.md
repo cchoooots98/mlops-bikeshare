@@ -47,6 +47,7 @@ Symptoms:
 
 Checks:
 - Airflow DAG success
+- serving DAG success for prediction, quality backfill, metrics publish, and PSI publish
 - latest feature table timestamps
 - latest `PredictionHeartbeat`
 - latest prediction and quality partitions

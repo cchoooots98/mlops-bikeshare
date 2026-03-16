@@ -75,9 +75,8 @@ Single-file deployment state is legacy-only and must not be used for formal dual
 Formal runtime settings:
 - Postgres: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
 - Scope: `CITY`, `BUCKET`, `TARGET_NAME`, `SERVING_ENVIRONMENT`
+- Deployment: `DEPLOYMENT_STATE_PATH`, `MODEL_PACKAGE_DIR`
 - MLflow local default: `MLFLOW_TRACKING_URI=sqlite:///model_dir/mlflow.db`
-
-Compatibility aliases such as `DW_*`, `RAW_S3_BUCKET`, and `WEATHER_CITY` are tolerated temporarily but should not appear in new documentation or automation.
 
 ## Operating Split
 Local workstation:
@@ -90,6 +89,7 @@ EC2:
 - Airflow scheduler/webserver
 - Postgres
 - dbt jobs
+- serving DAGs for prediction, quality backfill, metrics publish, and PSI publish
 - dashboard service
 
 AWS:
@@ -100,4 +100,4 @@ AWS:
 - CloudWatch alarms and dashboards
 - SNS notifications
 - router lambda
-- promote and rollback automation
+- promote and rollback scripts

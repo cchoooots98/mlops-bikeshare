@@ -31,9 +31,6 @@ class RuntimeSettings:
     deployment_state_path: str
     predict_bikes: bool = True
     cw_namespace: str = "Bikeshare/Model"
-    athena_output: str | None = None
-    athena_workgroup: str | None = None
-    athena_database: str | None = None
     dev_mode: bool = False
 
 
@@ -45,14 +42,14 @@ def _load_local_defaults() -> dict:
     return raw.get("Variables", raw)
 
 
-def _setting(name: str, default: str | None = None, *, aliases: tuple[str, ...] = ()) -> str | None:
-    for key in (name, *aliases):
+def _setting(name: str, default: str | None = None) -> str | None:
+    for key in (name,):
         value = os.getenv(key)
         if value not in {None, ""}:
             return value
 
     defaults = _load_local_defaults()
-    for key in (name, *aliases):
+    for key in (name,):
         value = defaults.get(key)
         if value not in {None, ""}:
             return value
@@ -64,10 +61,10 @@ def _setting(name: str, default: str | None = None, *, aliases: tuple[str, ...] 
 
 
 def load_runtime_settings() -> RuntimeSettings:
-    pg_host = _setting("PGHOST", aliases=("DW_HOST",))
-    pg_db = _setting("PGDATABASE", aliases=("DW_DB",))
-    pg_user = _setting("PGUSER", aliases=("DW_USER",))
-    pg_password = _setting("PGPASSWORD", aliases=("DW_PASSWORD",))
+    pg_host = _setting("PGHOST")
+    pg_db = _setting("PGDATABASE")
+    pg_user = _setting("PGUSER")
+    pg_password = _setting("PGPASSWORD")
     missing = [
         name
         for name, value in (
@@ -99,42 +96,24 @@ def load_runtime_settings() -> RuntimeSettings:
         )
 
     return RuntimeSettings(
-        aws_region=str(_setting("AWS_REGION", "eu-west-3", aliases=("REGION",))),
-        city=str(_setting("CITY", "paris", aliases=("WEATHER_CITY",))),
-        bucket=str(_setting("BUCKET", "", aliases=("RAW_S3_BUCKET",))),
-        sm_endpoint=str(
-            _setting(
-                "SM_ENDPOINT",
-                _setting("ENDPOINT_NAME", endpoint_name(target_name=target_name, environment=serving_environment)),
-            )
-        ),
+        aws_region=str(_setting("AWS_REGION", "eu-west-3")),
+        city=str(_setting("CITY", "paris")),
+        bucket=str(_setting("BUCKET", "")),
+        sm_endpoint=str(_setting("SM_ENDPOINT", endpoint_name(target_name=target_name, environment=serving_environment))),
         serving_environment=serving_environment,
         target_name=target_name,
         pg_host=str(pg_host),
-        pg_port=int(_setting("PGPORT", "5432", aliases=("DW_PORT",))),
+        pg_port=int(_setting("PGPORT", "5432")),
         pg_db=str(pg_db),
         pg_user=str(pg_user),
         pg_password=str(pg_password),
-        pg_schema=str(_setting("PGSCHEMA", "analytics", aliases=("TRAIN_PG_SCHEMA",))),
-        training_feature_table=str(
-            _setting("FEATURE_TABLE", "feat_station_snapshot_5min", aliases=("TRAIN_FEATURE_TABLE",))
-        ),
-        online_feature_table=str(
-            _setting("ONLINE_FEATURE_TABLE", "feat_station_snapshot_latest", aliases=("SERVING_FEATURE_TABLE",))
-        ),
+        pg_schema=str(_setting("PGSCHEMA", "analytics")),
+        training_feature_table=str(_setting("FEATURE_TABLE", "feat_station_snapshot_5min")),
+        online_feature_table=str(_setting("ONLINE_FEATURE_TABLE", "feat_station_snapshot_latest")),
         model_package_dir=_setting("MODEL_PACKAGE_DIR"),
         deployment_state_root=deployment_root,
-        deployment_state_path=str(
-            _setting(
-                "DEPLOYMENT_STATE_PATH",
-                resolved_deployment_state_path,
-                aliases=("MODEL_METADATA_PATH", "RETRAIN_MANIFEST_PATH"),
-            )
-        ),
+        deployment_state_path=str(_setting("DEPLOYMENT_STATE_PATH", resolved_deployment_state_path)),
         predict_bikes=predict_bikes,
         cw_namespace=str(_setting("CW_NS", "Bikeshare/Model")),
-        athena_output=_setting("ATHENA_OUTPUT"),
-        athena_workgroup=_setting("ATHENA_WORKGROUP"),
-        athena_database=_setting("ATHENA_DATABASE"),
         dev_mode=parse_bool_value(_setting("DEV_MODE", "false"), default=False),
     )

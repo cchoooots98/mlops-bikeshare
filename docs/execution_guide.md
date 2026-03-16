@@ -111,6 +111,7 @@ Main checks:
 - Airflow
 - Postgres
 - dbt freshness
+- prediction, quality backfill, metrics publish, and PSI publish DAGs are scheduled on EC2
 - 72-hour run window
 
 Pass gate:

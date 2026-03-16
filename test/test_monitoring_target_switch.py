@@ -4,8 +4,8 @@ from src.config import quality_key
 from src.model_target import target_spec_from_predict_bikes
 from src.monitoring import quality_backfill
 from src.monitoring.metrics import publish_custom_metrics
+from src.monitoring.metrics import publish_psi
 from src.monitoring.metrics.metrics_helper import build_metric_dimensions
-from src.monitoring.schedules import build_GroundTruth_from_parquet as ground_truth
 
 
 def test_quality_backfill_builds_docks_rows():
@@ -49,14 +49,6 @@ def test_quality_backfill_builds_docks_rows():
     ]
 
 
-def test_ground_truth_resolves_docks_label_column_from_prediction_target():
-    df = pd.DataFrame(
-        [{"prediction_target": "docks", "inferenceId": "id-1", "y_stockout_docks_30": 1, "y_stockout_bikes_30": 0}]
-    )
-
-    assert ground_truth.resolve_label_column(df) == "y_stockout_docks_30"
-
-
 def test_publish_custom_metrics_resolves_docks_columns():
     df = pd.DataFrame(
         [
@@ -91,3 +83,28 @@ def test_metric_dimensions_include_environment_and_target():
         {"Name": "City", "Value": "paris"},
         {"Name": "TargetName", "Value": "docks"},
     ]
+
+
+def test_publish_psi_computes_target_aware_feature_map():
+    baseline = pd.DataFrame(
+        {
+            "util_bikes": [0.10, 0.15, 0.20, 0.22],
+            "temperature_c": [10.0, 11.0, 12.0, 12.5],
+        }
+    )
+    recent = pd.DataFrame(
+        {
+            "util_bikes": [0.35, 0.40, 0.45, 0.50],
+            "temperature_c": [14.0, 15.0, 16.0, 17.0],
+        }
+    )
+
+    feature_psis = publish_psi.compute_feature_psi_map(
+        baseline,
+        recent,
+        feature_columns=["util_bikes", "temperature_c"],
+    )
+
+    assert set(feature_psis) == {"util_bikes", "temperature_c"}
+    assert feature_psis["util_bikes"] > 0
+    assert publish_psi.aggregate_psi(feature_psis, aggregator="max") >= feature_psis["temperature_c"]

@@ -522,7 +522,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--conn-uri", default=_build_conn_uri_from_env())
     parser.add_argument("--run-id", default=f"manual_gbfs_{int(time.time())}")
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("GBFS_HTTP_TIMEOUT_SEC", "30")))
-    parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
+    parser.add_argument("--raw-bucket", default=os.getenv("BUCKET", BUCKET or ""))
     parser.add_argument(
         "--staging-only",
         action="store_true",

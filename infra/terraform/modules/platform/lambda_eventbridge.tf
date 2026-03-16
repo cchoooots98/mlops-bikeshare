@@ -53,23 +53,3 @@ resource "aws_lambda_function" "router" {
     )
   }
 }
-
-resource "aws_cloudwatch_event_rule" "every_15min" {
-  name                = "${local.project}-schedule-15min"
-  schedule_expression = "rate(15 minutes)"
-  state               = "DISABLED"
-}
-
-resource "aws_cloudwatch_event_target" "lambda_target" {
-  rule      = aws_cloudwatch_event_rule.every_15min.name
-  target_id = "router"
-  arn       = aws_lambda_function.router.arn
-}
-
-resource "aws_lambda_permission" "event_invoke" {
-  statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.router.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.every_15min.arn
-}

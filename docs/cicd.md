@@ -25,6 +25,9 @@ Expected flow:
 6. update staging deployment-state record
 7. promote deployment state after gate checks
 
+Production scheduling does not run in GitHub Actions.
+Formal recurring execution lives on EC2-hosted Airflow.
+
 ## Main Scripts
 - `pipelines/export_and_upload_model.py`
   - inputs: package dir or MLflow run/version
@@ -35,12 +38,13 @@ Expected flow:
 - `pipelines/promote.py`
   - inputs: source deployment state and target deployment state
   - outputs: promoted deployment-state JSON
+- `pipelines/rollback.py`
+  - inputs: active deployment state and previous approved state
+  - outputs: restored deployment-state JSON
 
 ## Runtime Inputs
 Core runtime inputs are now:
 - `MODEL_PACKAGE_DIR`
 - `DEPLOYMENT_STATE_PATH`
-
-Deprecated names are accepted only as aliases during transition:
-- `MODEL_METADATA_PATH`
-- `RETRAIN_MANIFEST_PATH`
+- `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
+- `CITY`, `BUCKET`, `TARGET_NAME`, `SERVING_ENVIRONMENT`

@@ -16,6 +16,7 @@ Always-on data plane:
 - Airflow
 - Postgres
 - dbt
+- serving DAGs for prediction, quality backfill, metrics publish, and PSI publish
 - dashboard
 
 Serving plane:

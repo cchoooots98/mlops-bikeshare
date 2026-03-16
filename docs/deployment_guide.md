@@ -136,6 +136,7 @@ curl -I http://localhost:8080
 ### Required evidence
 - 72-hour Airflow success window
 - dbt freshness evidence
+- successful serving DAG runs for prediction, quality backfill, metrics publish, and PSI publish
 - restart recovery evidence
 
 ## 5. Terraform Infrastructure

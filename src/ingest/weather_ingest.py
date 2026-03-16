@@ -492,11 +492,11 @@ def ingest_weather_dual_write(
 
 
 def handler(event, context):
-    bucket = BUCKET or os.getenv("RAW_S3_BUCKET")
+    bucket = BUCKET
     if not bucket:
-        raise RuntimeError("Env BUCKET or RAW_S3_BUCKET is required")
+        raise RuntimeError("Env BUCKET is required")
 
-    city = os.getenv("WEATHER_CITY", CITY)
+    city = os.getenv("CITY", CITY)
     api_key = os.getenv("OPENWEATHER_API_KEY", API_KEY)
     payload = fetch_weather_payload(
         city=city,
@@ -531,8 +531,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Ingest OpenWeather current and hourly forecast data to S3 raw and Postgres staging"
     )
-    parser.add_argument("--city", default=os.getenv("WEATHER_CITY", CITY))
-    parser.add_argument("--raw-bucket", default=os.getenv("RAW_S3_BUCKET", BUCKET or ""))
+    parser.add_argument("--city", default=os.getenv("CITY", CITY))
+    parser.add_argument("--raw-bucket", default=os.getenv("BUCKET", BUCKET or ""))
     parser.add_argument("--conn-uri", default=_build_conn_uri_from_env())
     parser.add_argument("--run-id", default=f"manual_{int(time.time())}")
     parser.add_argument("--api-key", default=os.getenv("OPENWEATHER_API_KEY", API_KEY))
@@ -545,7 +545,7 @@ if __name__ == "__main__":
     if not args.conn_uri:
         raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
     if not args.raw_bucket:
-        raise RuntimeError("--raw-bucket (or env RAW_S3_BUCKET/BUCKET) is required")
+        raise RuntimeError("--raw-bucket (or env BUCKET) is required")
     if not args.api_key:
         raise RuntimeError("--api-key (or env OPENWEATHER_API_KEY) is required")
 

@@ -32,7 +32,7 @@ def _get_pool_name() -> str:
 
 
 def _get_city() -> str:
-    return _get_setting("CITY", "CITY", _get_setting("GBFS_CITY", "WEATHER_CITY", "paris"))
+    return _get_setting("CITY", "CITY", "paris")
 
 
 def _build_hotpath_model_vars(context: dict) -> dict[str, object]:
