@@ -47,6 +47,13 @@ docker compose exec airflow-webserver airflow tasks test staging_prediction_15mi
 
 Only continue if both tasks succeed and `airflow dags list-import-errors` is empty.
 
+The serving DAG timing contract is:
+- prediction runs every 15 minutes
+- quality backfill runs 37 minutes after the prediction run it depends on
+- that 37-minute offset includes the 30-minute label horizon plus a 7-minute buffer slot
+- metrics waits 5 minutes after quality
+- PSI waits 6 minutes after metrics
+
 ## After Smoke Passes
 If you are in the staging observation window, unpause only:
 - `staging_prediction_15min`

@@ -418,6 +418,15 @@ Keep the production DAG set paused at this point:
 - `serving_metrics_publish_hourly`
 - `serving_psi_publish_hourly`
 
+Timing contract for the staging/serving DAG chain:
+- `staging_prediction_15min` / `serving_prediction_15min` run every 15 minutes
+- `staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `7,22,37,52 * * * *`
+- quality waits for the prediction DAG run from 37 minutes earlier:
+  - 30 minutes for label maturity
+  - 7 extra minutes for the post-maturity backfill slot
+- hourly metrics wait for the quality DAG run from 5 minutes earlier
+- hourly PSI waits for the metrics DAG run from 6 minutes earlier
+
 Expected SageMaker object lifecycle per deploy:
 - one timestamped `Model`
 - one timestamped `EndpointConfig`

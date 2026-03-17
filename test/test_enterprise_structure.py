@@ -180,3 +180,16 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
     assert "${USERPROFILE}/.aws/config" in local_compose
     assert "${USERPROFILE}/.aws/credentials" in local_compose
     assert "${USERPROFILE}/.aws/sso/cache" in local_compose
+
+
+def test_serving_dag_sensors_align_with_30_min_label_maturity():
+    factory_source = Path("airflow/dags/serving_dag_factory.py").read_text(encoding="utf-8")
+
+    assert "QUALITY_LABEL_MATURITY_MINUTES = 30" in factory_source
+    assert "QUALITY_START_LAG_MINUTES = 7" in factory_source
+    assert "QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)" in factory_source
+    assert "METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)" in factory_source
+    assert "PSI_TO_METRICS_DELTA = timedelta(minutes=6)" in factory_source
+    assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
+    assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
+    assert "execution_delta=PSI_TO_METRICS_DELTA" in factory_source

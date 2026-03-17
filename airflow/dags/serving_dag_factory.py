@@ -17,6 +17,12 @@ from src.config.naming import deployment_state_path, endpoint_name
 
 
 TARGETS = ("bikes", "docks")
+PREDICTION_CADENCE_MINUTES = 15
+QUALITY_LABEL_MATURITY_MINUTES = 30
+QUALITY_START_LAG_MINUTES = 7
+QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)
+METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)
+PSI_TO_METRICS_DELTA = timedelta(minutes=6)
 DEFAULT_ARGS = {
     "owner": "airflow",
     "retries": 1,
@@ -181,6 +187,7 @@ def build_serving_dags(
             allowed_states=["success"],
             failed_states=["failed"],
             check_existence=True,
+            execution_delta=QUALITY_TO_PREDICTION_DELTA,
             mode="reschedule",
             poke_interval=60,
             timeout=15 * 60,
@@ -209,6 +216,7 @@ def build_serving_dags(
             allowed_states=["success"],
             failed_states=["failed"],
             check_existence=True,
+            execution_delta=METRICS_TO_QUALITY_DELTA,
             mode="reschedule",
             poke_interval=60,
             timeout=20 * 60,
@@ -237,6 +245,7 @@ def build_serving_dags(
             allowed_states=["success"],
             failed_states=["failed"],
             check_existence=True,
+            execution_delta=PSI_TO_METRICS_DELTA,
             mode="reschedule",
             poke_interval=60,
             timeout=20 * 60,
