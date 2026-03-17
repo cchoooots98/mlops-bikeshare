@@ -109,6 +109,9 @@ $env:BUCKET = "bikeshare-paris-387706002632-eu-west-3"
 - a line beginning with `Dry run only. Prepared 4 metrics`
 
 ## 4. EC2 Always-On Deployment
+This section assumes you create the EC2 host manually first.
+Terraform in this repository starts in Section 5 and manages the long-lived AWS platform resources after the EC2 data plane is proven stable.
+
 ### Host checklist
 - Ubuntu LTS or Amazon Linux
 - Docker and Docker Compose installed
@@ -119,28 +122,86 @@ $env:BUCKET = "bikeshare-paris-387706002632-eu-west-3"
 ### Required rule
 - do not mount a workstation AWS SSO cache into the EC2 stack
 
+### Local preparation before you log into EC2
+```powershell
+git status --short --branch
+.\.venv\Scripts\python.exe -m pytest -q
+docker compose ps
+git rev-parse HEAD
+git push origin <your-branch>
+```
+
+Use the exact branch or commit you just validated locally.
+
+### Login example
+```bash
+ssh -i <your-key.pem> ubuntu@<ec2-public-dns>
+```
+
+If you use Amazon Linux, replace `ubuntu` with `ec2-user`.
+
+### Ubuntu host bootstrap example
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl docker.io docker-compose-plugin
+sudo usermod -aG docker $USER
+newgrp docker
+docker --version
+docker compose version
+```
+
 ### Commands
 ```bash
-git clone <your_repo_url>
+git clone -b <your-branch> <your_repo_url>
 cd mlops-bikeshare-202508
 cp .env.example .env
-# If you override values manually, keep BUCKET=bikeshare-paris-387706002632-eu-west-3.
-docker compose up -d
+chmod 600 .env
+# Edit .env and set the real OPENWEATHER_API_KEY plus any environment-specific values.
+#
+# Before first EC2 startup, remove the workstation-only AWS settings from docker-compose.yml:
+# - AWS_PROFILE: Shirley-fr
+# - ${USERPROFILE}/.aws/config
+# - ${USERPROFILE}/.aws/credentials
+# - ${USERPROFILE}/.aws/sso/cache
+#
+# On EC2, rely on the attached instance profile instead.
+docker compose up -d --build
 docker compose ps
 curl -I http://localhost:8080
 ```
 
 If you manage Airflow Variables explicitly, set `BUCKET=bikeshare-paris-387706002632-eu-west-3` there too so DAG overrides stay aligned with `.env`.
 
+### Optional SSH tunnel for the Airflow UI
+```bash
+ssh -i <your-key.pem> -L 8080:localhost:8080 ubuntu@<ec2-public-dns>
+```
+
 ### Expected output
 - Compose services are healthy
 - Airflow responds with `HTTP/1.1 200 OK` or a redirect response
+- Airflow can parse both DAG sets:
+  - `staging_prediction_15min`
+  - `staging_quality_backfill_15min`
+  - `staging_metrics_publish_hourly`
+  - `staging_psi_publish_hourly`
+  - `serving_prediction_15min`
+  - `serving_quality_backfill_15min`
+  - `serving_metrics_publish_hourly`
+  - `serving_psi_publish_hourly`
 
 ### Required evidence
+- deployed branch / commit SHA
 - 72-hour Airflow success window
 - dbt freshness evidence
 - successful serving DAG runs for prediction, quality backfill, metrics publish, and PSI publish
 - restart recovery evidence
+
+### Airflow enablement policy
+- keep all serving DAGs paused immediately after EC2 bootstrap
+- unpause `staging_*` DAGs only when both staging endpoints are `InService` and you are actively running the 24-hour staging gate
+- keep `serving_*` DAGs paused until promotion finishes and production deployment states are approved
+- keep `offline_retraining_dag` paused until serving, gate, promotion, and rollback have all been proven stable
 
 ## 5. Terraform Infrastructure
 Terraform in this repository manages the long-lived AWS platform only.
@@ -286,6 +347,21 @@ Export invariant:
   - `model_dir/deployments/bikes/staging.json`
   - `model_dir/deployments/docks/staging.json`
 - both endpoints become `InService`
+
+### After both staging endpoints are healthy
+Unpause only the staging DAG set so the 24-hour gate accumulates fresh prediction, quality, metrics, and PSI evidence against staging:
+
+- `staging_prediction_15min`
+- `staging_quality_backfill_15min`
+- `staging_metrics_publish_hourly`
+- `staging_psi_publish_hourly`
+
+Keep the production DAG set paused at this point:
+
+- `serving_prediction_15min`
+- `serving_quality_backfill_15min`
+- `serving_metrics_publish_hourly`
+- `serving_psi_publish_hourly`
 
 Expected SageMaker object lifecycle per deploy:
 - one timestamped `Model`

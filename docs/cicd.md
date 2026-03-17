@@ -27,6 +27,9 @@ Expected flow:
 
 Production scheduling does not run in GitHub Actions.
 Formal recurring execution lives on EC2-hosted Airflow.
+Staging gate automation and production automation are separate Airflow DAG sets:
+- `staging_*` DAGs drive the 24-hour staging gate before promotion
+- `serving_*` DAGs drive post-promotion production prediction, quality backfill, metrics, and PSI
 
 ## Main Scripts
 - `pipelines/export_and_upload_model.py`

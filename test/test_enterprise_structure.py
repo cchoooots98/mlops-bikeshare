@@ -133,7 +133,8 @@ def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
     runbook = Path("docs/runbook_prod.md").read_text(encoding="utf-8")
     monitoring = Path("docs/monitoring_runbook.md").read_text(encoding="utf-8")
     operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(encoding="utf-8")
-    dag_path = Path("airflow/dags/production_serving_dags.py")
+    production_dag_path = Path("airflow/dags/production_serving_dags.py")
+    staging_dag_path = Path("airflow/dags/staging_serving_dags.py")
 
     for document in (architecture, cicd, deployment_guide, runbook, monitoring, operator_manual):
         assert "RAW_S3_BUCKET" not in document
@@ -142,9 +143,24 @@ def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
         assert "promote_prod.yml" not in document
         assert "cd_staging.yml" not in document
 
-    dag_source = dag_path.read_text(encoding="utf-8")
-    compile(dag_source, str(dag_path), "exec")
-    assert "serving_prediction_15min" in dag_source
-    assert "serving_quality_backfill_15min" in dag_source
-    assert "serving_metrics_publish_hourly" in dag_source
-    assert "serving_psi_publish_hourly" in dag_source
+    production_dag_source = production_dag_path.read_text(encoding="utf-8")
+    staging_dag_source = staging_dag_path.read_text(encoding="utf-8")
+    compile(production_dag_source, str(production_dag_path), "exec")
+    compile(staging_dag_source, str(staging_dag_path), "exec")
+
+    assert "serving_prediction_15min" in production_dag_source
+    assert "serving_quality_backfill_15min" in production_dag_source
+    assert "serving_metrics_publish_hourly" in production_dag_source
+    assert "serving_psi_publish_hourly" in production_dag_source
+    assert "staging_prediction_15min" in staging_dag_source
+    assert "staging_quality_backfill_15min" in staging_dag_source
+    assert "staging_metrics_publish_hourly" in staging_dag_source
+    assert "staging_psi_publish_hourly" in staging_dag_source
+
+    assert "staging_prediction_15min" in deployment_guide
+    assert "staging_quality_backfill_15min" in deployment_guide
+    assert "staging_metrics_publish_hourly" in deployment_guide
+    assert "staging_psi_publish_hourly" in deployment_guide
+    assert "serving_prediction_15min" in deployment_guide
+    assert "staging_prediction_15min" in operator_manual
+    assert "staging_quality_backfill_15min" in operator_manual

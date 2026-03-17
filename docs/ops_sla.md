@@ -29,6 +29,11 @@ Before promotion, the target-specific staging endpoint must satisfy:
 6. `PSI` stays below the warning threshold or has an approved waiver.
 
 Formal gate commands must pass `--environment staging`.
+The 24-hour staging observation window should be fed by the EC2-hosted staging DAG set:
+- `staging_prediction_15min`
+- `staging_quality_backfill_15min`
+- `staging_metrics_publish_hourly`
+- `staging_psi_publish_hourly`
 
 ## Rollback Policy
 - Roll back by target, never globally.
