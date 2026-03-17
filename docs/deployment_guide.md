@@ -10,21 +10,24 @@ This guide is the command authority for:
 
 If you are actively building the project, use this together with:
 - [current_state_to_enterprise_operator_manual.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/plan_detail/current_state_to_enterprise_operator_manual.md)
+- [ec2_release_update_guide.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/ec2_release_update_guide.md)
 
 ## 1. Local Validation
 ### Pre-checks
 - Python is `3.11.x`
 - `.env` exists
 - Docker Desktop is running
+- use the local override file when you need workstation AWS profile mounts:
+  - `docker-compose.local.yml`
 
 ### Commands
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pip check
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 .\.venv\Scripts\python.exe -m pytest -q
-docker compose ps
+docker compose -f docker-compose.yml -f docker-compose.local.yml ps
 ```
 
 ### Expected output
@@ -126,7 +129,7 @@ Terraform in this repository starts in Section 5 and manages the long-lived AWS 
 ```powershell
 git status --short --branch
 .\.venv\Scripts\python.exe -m pytest -q
-docker compose ps
+docker compose -f docker-compose.yml -f docker-compose.local.yml ps
 git rev-parse HEAD
 git push origin <your-branch>
 ```
@@ -157,17 +160,68 @@ cd mlops-bikeshare-202508
 cp .env.example .env
 chmod 600 .env
 # Edit .env and set the real OPENWEATHER_API_KEY plus any environment-specific values.
-#
-# Before first EC2 startup, remove the workstation-only AWS settings from docker-compose.yml:
-# - AWS_PROFILE: Shirley-fr
-# - ${USERPROFILE}/.aws/config
-# - ${USERPROFILE}/.aws/credentials
-# - ${USERPROFILE}/.aws/sso/cache
-#
-# On EC2, rely on the attached instance profile instead.
+# The base docker-compose.yml is the formal EC2 runtime.
+# Workstation AWS profile mounts now live only in docker-compose.local.yml.
+# Do not copy docker-compose.local.yml into the EC2 startup command path.
 docker compose up -d --build
 docker compose ps
 curl -I http://localhost:8080
+```
+
+### Path portability rule
+- package manifest and deployment-state JSON now store portable repo-relative paths such as:
+  - `model_dir/packages/bikes/<model-name>/<run-id>`
+  - `model_dir/deployments/bikes/staging.json`
+- formal code paths must not depend on workstation absolute paths
+- readers remain backward-compatible with older absolute-path JSON written before this hardening change
+
+### EC2 code refresh after a new local push
+Run this from the EC2 repo root after you push a validated branch or commit:
+
+```bash
+git fetch origin
+git checkout <your-branch>
+git pull --ff-only origin <your-branch>
+git rev-parse HEAD
+docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
+docker compose up airflow-init
+docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler
+docker compose ps
+docker compose exec airflow-webserver airflow dags list-import-errors
+docker compose exec airflow-webserver airflow dags list
+```
+
+Before unpausing staging DAGs again, smoke-test both prediction tasks:
+
+```bash
+docker compose exec airflow-webserver airflow tasks test staging_prediction_15min predict_bikes <logical-date>
+docker compose exec airflow-webserver airflow tasks test staging_prediction_15min predict_docks <logical-date>
+```
+
+### Mandatory Airflow metadata bootstrap
+The data-plane DAGs expect the Airflow connection `velib_dw` to exist.
+The `DW_CONN_ID=velib_dw` environment setting does not create the connection for you.
+
+Create it explicitly after the webserver is reachable:
+
+```bash
+docker compose exec airflow-webserver airflow connections add velib_dw \
+  --conn-type postgres \
+  --conn-host dw-postgres \
+  --conn-schema velib_dw \
+  --conn-login velib \
+  --conn-password velib \
+  --conn-port 5432
+
+docker compose exec airflow-webserver airflow connections get velib_dw
+```
+
+### Bucket override rule
+Airflow Variables override container environment variables.
+If you explicitly set `BUCKET` as an Airflow Variable, it must stay aligned with `.env`.
+
+```bash
+docker compose exec airflow-webserver airflow variables get BUCKET
 ```
 
 If you manage Airflow Variables explicitly, set `BUCKET=bikeshare-paris-387706002632-eu-west-3` there too so DAG overrides stay aligned with `.env`.
@@ -347,6 +401,7 @@ Export invariant:
   - `model_dir/deployments/bikes/staging.json`
   - `model_dir/deployments/docks/staging.json`
 - both endpoints become `InService`
+- the JSON files store portable `model_dir/...` paths instead of workstation absolute paths
 
 ### After both staging endpoints are healthy
 Unpause only the staging DAG set so the 24-hour gate accumulates fresh prediction, quality, metrics, and PSI evidence against staging:
@@ -379,6 +434,8 @@ Expected SageMaker object lifecycle per deploy:
 
 ## 7. Promotion
 ### Gate commands
+Run these by hand from the repository root on the operator terminal after the EC2 staging DAG set has accumulated the 24-hour observation window.
+
 ```powershell
 .\.venv\Scripts\python.exe -m test.check_gate --endpoint bikeshare-bikes-staging --city paris --region eu-west-3 --target-name bikes --environment staging
 .\.venv\Scripts\python.exe -m test.check_gate --endpoint bikeshare-docks-staging --city paris --region eu-west-3 --target-name docks --environment staging

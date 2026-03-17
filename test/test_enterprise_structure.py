@@ -164,3 +164,19 @@ def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
     assert "serving_prediction_15min" in deployment_guide
     assert "staging_prediction_15min" in operator_manual
     assert "staging_quality_backfill_15min" in operator_manual
+
+
+def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
+    base_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    local_compose = Path("docker-compose.local.yml").read_text(encoding="utf-8")
+
+    assert "./model_dir:/opt/airflow/model_dir" in base_compose
+    assert "AWS_PROFILE: Shirley-fr" not in base_compose
+    assert "${USERPROFILE}/.aws/config" not in base_compose
+    assert "${USERPROFILE}/.aws/credentials" not in base_compose
+    assert "${USERPROFILE}/.aws/sso/cache" not in base_compose
+
+    assert "AWS_PROFILE: Shirley-fr" in local_compose
+    assert "${USERPROFILE}/.aws/config" in local_compose
+    assert "${USERPROFILE}/.aws/credentials" in local_compose
+    assert "${USERPROFILE}/.aws/sso/cache" in local_compose

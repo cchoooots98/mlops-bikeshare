@@ -1,0 +1,24 @@
+services:
+  airflow-init:
+    environment:
+      AWS_PROFILE: Shirley-fr
+    volumes:
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
+
+  airflow-webserver:
+    environment:
+      AWS_PROFILE: Shirley-fr
+    volumes:
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
+
+  airflow-scheduler:
+    environment:
+      AWS_PROFILE: Shirley-fr
+    volumes:
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache

@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-PACKAGE_LAYOUT_VERSION = "1"
+PACKAGE_LAYOUT_VERSION = "2"
+DEPLOYMENT_STATE_VERSION = "2"
 PACKAGE_MANIFEST_FILENAME = "package_manifest.json"
 MODEL_DIRNAME = "model"
 ARTIFACTS_DIRNAME = "artifacts"
@@ -17,6 +18,9 @@ DEFAULT_PACKAGE_ROOT = Path("model_dir") / "packages"
 DEFAULT_BIKES_PACKAGE_ROOT = DEFAULT_PACKAGE_ROOT / "bikes"
 DEFAULT_DOCKS_PACKAGE_ROOT = DEFAULT_PACKAGE_ROOT / "docks"
 DEFAULT_DEPLOYMENT_STATE_PATH = Path("model_dir") / "deployments" / "bikes" / "local.json"
+PORTABLE_PATH_ANCHOR = "model_dir"
+SUPPORTED_CONTRACT_VERSIONS = {"1", "2"}
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 _REQUIRED_PACKAGE_FIELDS = {
@@ -67,6 +71,106 @@ def _slugify(value: str) -> str:
     return normalized.strip("-") or "package"
 
 
+def _normalize_path_parts(path_like: str | os.PathLike[str]) -> list[str]:
+    text = str(path_like).replace("\\", "/").strip()
+    return [part for part in text.split("/") if part not in {"", "."}]
+
+
+def _extract_anchor_suffix(path_like: str | os.PathLike[str]) -> Path | None:
+    parts = _normalize_path_parts(path_like)
+    lowered = [part.lower() for part in parts]
+    if PORTABLE_PATH_ANCHOR not in lowered:
+        return None
+    anchor_index = lowered.index(PORTABLE_PATH_ANCHOR)
+    return Path(*parts[anchor_index:])
+
+
+def _infer_project_root(reference_path: str | os.PathLike[str]) -> Path:
+    resolved = Path(reference_path).resolve()
+    lowered = [part.lower() for part in resolved.parts]
+    if PORTABLE_PATH_ANCHOR not in lowered:
+        return PROJECT_ROOT
+    anchor_index = lowered.index(PORTABLE_PATH_ANCHOR)
+    return Path(*resolved.parts[:anchor_index]) if anchor_index > 0 else PROJECT_ROOT
+
+
+def _resolve_runtime_path(path_like: str | os.PathLike[str], *, project_root: Path) -> Path:
+    candidate = Path(path_like)
+    if candidate.exists():
+        return candidate.resolve()
+
+    suffix = _extract_anchor_suffix(path_like)
+    if suffix is not None:
+        return (project_root / suffix).resolve()
+
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project_root / candidate).resolve()
+
+
+def _portable_path(path_like: str | os.PathLike[str], *, project_root: Path) -> str:
+    resolved = _resolve_runtime_path(path_like, project_root=project_root)
+    suffix = _extract_anchor_suffix(resolved)
+    if suffix is not None:
+        return suffix.as_posix()
+    try:
+        return resolved.relative_to(project_root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def _build_portable_manifest_paths(package_dir: str | os.PathLike[str]) -> dict[str, str]:
+    package_path = Path(package_dir).resolve()
+    project_root = _infer_project_root(package_path)
+    return {
+        "package_dir": _portable_path(package_path, project_root=project_root),
+        "model_dir": _portable_path(package_path / MODEL_DIRNAME, project_root=project_root),
+        "package_manifest_path": _portable_path(package_path / PACKAGE_MANIFEST_FILENAME, project_root=project_root),
+        "artifacts_dir": _portable_path(package_path / ARTIFACTS_DIRNAME, project_root=project_root),
+    }
+
+
+def _resolve_manifest_paths(paths: Mapping[str, Any], *, manifest_path: Path) -> dict[str, str]:
+    project_root = _infer_project_root(manifest_path)
+    package_dir = _resolve_runtime_path(paths["package_dir"], project_root=project_root)
+    return {
+        "package_dir": str(package_dir),
+        "model_dir": str(_resolve_runtime_path(paths.get("model_dir", package_dir / MODEL_DIRNAME), project_root=project_root)),
+        "package_manifest_path": str(manifest_path.resolve()),
+        "artifacts_dir": str(
+            _resolve_runtime_path(paths.get("artifacts_dir", package_dir / ARTIFACTS_DIRNAME), project_root=project_root)
+        ),
+    }
+
+
+def _normalize_manifest_for_storage(
+    manifest: Mapping[str, Any],
+    *,
+    package_dir: str | os.PathLike[str],
+) -> dict[str, Any]:
+    normalized = dict(manifest)
+    normalized["package_layout_version"] = PACKAGE_LAYOUT_VERSION
+    normalized["paths"] = _build_portable_manifest_paths(package_dir)
+    return normalized
+
+
+def _normalize_deployment_state_for_storage(
+    state: Mapping[str, Any],
+    *,
+    state_path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    project_root = _infer_project_root(Path(state_path).resolve())
+    package_dir = _resolve_runtime_path(state["package_dir"], project_root=project_root)
+    manifest_value = state.get("package_manifest_path") or package_dir / PACKAGE_MANIFEST_FILENAME
+    manifest_path = _resolve_runtime_path(manifest_value, project_root=project_root)
+
+    normalized = dict(state)
+    normalized["deployment_state_version"] = DEPLOYMENT_STATE_VERSION
+    normalized["package_dir"] = _portable_path(package_dir, project_root=project_root)
+    normalized["package_manifest_path"] = _portable_path(manifest_path, project_root=project_root)
+    return normalized
+
+
 def write_json_file(path: str | os.PathLike[str], payload: Mapping[str, Any]) -> str:
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,12 +196,6 @@ def default_package_root_for_target(target_name: str) -> Path:
 
 
 def build_package_manifest(summary: Mapping[str, Any], package_dir: str | os.PathLike[str]) -> dict[str, Any]:
-    paths = {
-        "package_dir": str(Path(package_dir).resolve()),
-        "model_dir": str((Path(package_dir) / MODEL_DIRNAME).resolve()),
-        "package_manifest_path": str((Path(package_dir) / PACKAGE_MANIFEST_FILENAME).resolve()),
-        "artifacts_dir": str((Path(package_dir) / ARTIFACTS_DIRNAME).resolve()),
-    }
     manifest = {
         "package_layout_version": PACKAGE_LAYOUT_VERSION,
         "created_at_utc": _utc_now(),
@@ -125,13 +223,15 @@ def build_package_manifest(summary: Mapping[str, Any], package_dir: str | os.Pat
         "registered_model_name": summary.get("registered_model_name"),
         "registered_version": summary.get("registered_version"),
         "aliases": list(summary.get("aliases", [])),
-        "paths": paths,
+        "paths": _build_portable_manifest_paths(package_dir),
     }
     validate_package_manifest(manifest)
     return manifest
 
 
 def validate_package_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    if str(manifest.get("package_layout_version")) not in SUPPORTED_CONTRACT_VERSIONS:
+        raise ValueError(f"unsupported package layout version: {manifest.get('package_layout_version')}")
     missing = sorted(_REQUIRED_PACKAGE_FIELDS.difference(manifest.keys()))
     if missing:
         raise ValueError(f"package manifest missing required fields: {missing}")
@@ -153,7 +253,7 @@ def validate_package_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def resolve_package_manifest_path(package_dir_or_manifest: str | os.PathLike[str]) -> Path:
-    candidate = Path(package_dir_or_manifest)
+    candidate = _resolve_runtime_path(package_dir_or_manifest, project_root=PROJECT_ROOT)
     if candidate.is_dir():
         candidate = candidate / PACKAGE_MANIFEST_FILENAME
     if candidate.name != PACKAGE_MANIFEST_FILENAME:
@@ -165,17 +265,19 @@ def load_package_manifest(package_dir_or_manifest: str | os.PathLike[str]) -> di
     manifest_path = resolve_package_manifest_path(package_dir_or_manifest)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     validated = validate_package_manifest(manifest)
-    validated["paths"]["package_manifest_path"] = str(manifest_path.resolve())
-    return validated
+    resolved = dict(validated)
+    resolved["paths"] = _resolve_manifest_paths(validated["paths"], manifest_path=manifest_path)
+    return resolved
 
 
 def write_package_manifest(package_dir: str | os.PathLike[str], manifest: Mapping[str, Any]) -> str:
-    validate_package_manifest(manifest)
-    return write_json_file(Path(package_dir) / PACKAGE_MANIFEST_FILENAME, manifest)
+    normalized = _normalize_manifest_for_storage(manifest, package_dir=package_dir)
+    validate_package_manifest(normalized)
+    return write_json_file(Path(package_dir) / PACKAGE_MANIFEST_FILENAME, normalized)
 
 
 def compute_package_sha256(package_dir: str | os.PathLike[str]) -> str:
-    package_path = Path(package_dir)
+    package_path = _resolve_runtime_path(package_dir, project_root=PROJECT_ROOT)
     digest = hashlib.sha256()
     if not package_path.exists():
         raise FileNotFoundError(f"package directory does not exist: {package_path}")
@@ -245,12 +347,15 @@ def build_deployment_state(
 ) -> dict[str, Any]:
     package_path = Path(package_dir).resolve()
     state = {
-        "deployment_state_version": "1",
+        "deployment_state_version": DEPLOYMENT_STATE_VERSION,
         "environment": environment,
         "predict_bikes": bool(manifest["predict_bikes"]),
         "target_name": manifest["target_name"],
-        "package_dir": str(package_path),
-        "package_manifest_path": str(resolve_package_manifest_path(package_path).resolve()),
+        "package_dir": _portable_path(package_path, project_root=_infer_project_root(package_path)),
+        "package_manifest_path": _portable_path(
+            resolve_package_manifest_path(package_path),
+            project_root=_infer_project_root(package_path),
+        ),
         "model_name": manifest["model_name"],
         "run_id": manifest["run_id"],
         "registered_model_name": manifest.get("registered_model_name"),
@@ -266,6 +371,8 @@ def build_deployment_state(
 
 
 def validate_deployment_state(state: Mapping[str, Any]) -> dict[str, Any]:
+    if str(state.get("deployment_state_version")) not in SUPPORTED_CONTRACT_VERSIONS:
+        raise ValueError(f"unsupported deployment state version: {state.get('deployment_state_version')}")
     missing = sorted(_REQUIRED_DEPLOYMENT_FIELDS.difference(state.keys()))
     if missing:
         raise ValueError(f"deployment state missing required fields: {missing}")
@@ -273,16 +380,24 @@ def validate_deployment_state(state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def write_deployment_state(path: str | os.PathLike[str], state: Mapping[str, Any]) -> str:
-    validate_deployment_state(state)
-    return write_json_file(path, state)
+    normalized = _normalize_deployment_state_for_storage(state, state_path=path)
+    validate_deployment_state(normalized)
+    return write_json_file(path, normalized)
 
 
 def load_deployment_state(path: str | os.PathLike[str]) -> dict[str, Any]:
-    state_path = Path(path)
+    state_path = _resolve_runtime_path(path, project_root=PROJECT_ROOT)
     if not state_path.exists():
         raise FileNotFoundError(f"deployment state does not exist: {state_path}")
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    return validate_deployment_state(state)
+    validated = validate_deployment_state(state)
+    project_root = _infer_project_root(state_path)
+    resolved = dict(validated)
+    resolved["package_dir"] = str(_resolve_runtime_path(validated["package_dir"], project_root=project_root))
+    resolved["package_manifest_path"] = str(
+        _resolve_runtime_path(validated["package_manifest_path"], project_root=project_root)
+    )
+    return resolved
 
 
 def activate_package(
@@ -304,7 +419,7 @@ def resolve_active_package_dir(
     deployment_state_path: str | os.PathLike[str] | None = None,
 ) -> Path:
     if model_package_dir:
-        return Path(model_package_dir).resolve()
+        return _resolve_runtime_path(model_package_dir, project_root=PROJECT_ROOT)
     state_path = Path(deployment_state_path or DEFAULT_DEPLOYMENT_STATE_PATH)
     state = load_deployment_state(state_path)
     return Path(state["package_dir"]).resolve()

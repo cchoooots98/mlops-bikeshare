@@ -38,8 +38,8 @@ def _runtime_settings(tmp_path) -> RuntimeSettings:
         training_feature_table="feat_station_snapshot_5min",
         online_feature_table="feat_station_snapshot_latest",
         model_package_dir=None,
-        deployment_state_root=str(tmp_path / "deployments"),
-        deployment_state_path=str(tmp_path / "deployments" / "bikes" / "local.json"),
+        deployment_state_root=str(tmp_path / "model_dir" / "deployments"),
+        deployment_state_path=str(tmp_path / "model_dir" / "deployments" / "bikes" / "local.json"),
         predict_bikes=True,
         dev_mode=False,
     )
@@ -54,7 +54,7 @@ def _online_features_df() -> pd.DataFrame:
 
 def _write_package(tmp_path, *, feature_columns=None, predict_bikes=True) -> tuple[Path, Path]:
     target_spec = target_spec_from_predict_bikes(predict_bikes)
-    package_dir = ensure_package_dir("paris_model", "run-123", root_dir=tmp_path / "packages")
+    package_dir = ensure_package_dir("paris_model", "run-123", root_dir=tmp_path / "model_dir" / "packages")
     (package_dir / "model" / "MLmodel").write_text("artifact_path: model\n", encoding="utf-8")
     manifest = {
         "package_layout_version": "1",
@@ -91,7 +91,9 @@ def _write_package(tmp_path, *, feature_columns=None, predict_bikes=True) -> tup
         },
     }
     write_package_manifest(package_dir, manifest)
-    deployment_state_path = Path(activate_package(package_dir, tmp_path / "deployments" / "bikes" / "local.json", source="pytest"))
+    deployment_state_path = Path(
+        activate_package(package_dir, tmp_path / "model_dir" / "deployments" / "bikes" / "local.json", source="pytest")
+    )
     return package_dir, deployment_state_path
 
 
@@ -119,7 +121,9 @@ def test_predictor_builds_sagemaker_payload_from_feature_row():
 def test_load_prediction_manifest_requires_threshold_and_target(tmp_path, predict_bikes, expected_label):
     _write_package(tmp_path, predict_bikes=predict_bikes)
 
-    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "bikes" / "local.json")
+    metadata = predictor.load_prediction_manifest(
+        deployment_state_path=tmp_path / "model_dir" / "deployments" / "bikes" / "local.json"
+    )
 
     assert metadata["label"] == expected_label
     assert metadata["best_threshold"] == 0.37
@@ -130,7 +134,9 @@ def test_load_prediction_manifest_uses_package_feature_columns_without_runtime_c
     package_columns = ["util_bikes", "minutes_since_prev_snapshot"]
     _write_package(tmp_path, feature_columns=package_columns)
 
-    metadata = predictor.load_prediction_manifest(deployment_state_path=tmp_path / "deployments" / "bikes" / "local.json")
+    metadata = predictor.load_prediction_manifest(
+        deployment_state_path=tmp_path / "model_dir" / "deployments" / "bikes" / "local.json"
+    )
 
     assert metadata["feature_columns"] == package_columns
 

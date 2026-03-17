@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import tarfile
 
@@ -13,7 +14,7 @@ from src.model_package import (
 
 
 def _write_package(tmp_path) -> Path:
-    package_dir = ensure_package_dir("paris_model", "run-123", root_dir=tmp_path / "packages")
+    package_dir = ensure_package_dir("paris_model", "run-123", root_dir=tmp_path / "model_dir" / "packages")
     (package_dir / "model" / "MLmodel").write_text("artifact_path: model\n", encoding="utf-8")
     manifest = {
         "package_layout_version": "1",
@@ -56,15 +57,26 @@ def _write_package(tmp_path) -> Path:
 
 def test_package_manifest_round_trip_and_activation(tmp_path):
     package_dir = _write_package(tmp_path)
-    deployment_state_path = activate_package(package_dir, tmp_path / "deployments" / "bikes" / "local.json", source="pytest")
+    deployment_state_path = activate_package(
+        package_dir,
+        tmp_path / "model_dir" / "deployments" / "bikes" / "local.json",
+        source="pytest",
+    )
 
     manifest = load_package_manifest(package_dir)
     deployment_state = load_deployment_state(deployment_state_path)
+    raw_manifest = json.loads((package_dir / "package_manifest.json").read_text(encoding="utf-8"))
+    raw_state = json.loads(Path(deployment_state_path).read_text(encoding="utf-8"))
 
     assert manifest["model_name"] == "paris_model"
     assert deployment_state["target_name"] == "bikes"
     assert deployment_state["package_dir"] == str(package_dir.resolve())
     assert resolve_active_package_dir(deployment_state_path=deployment_state_path) == package_dir.resolve()
+    assert raw_manifest["package_layout_version"] == "2"
+    assert raw_manifest["paths"]["package_dir"] == "model_dir/packages/paris_model/run-123"
+    assert raw_state["deployment_state_version"] == "2"
+    assert raw_state["package_dir"] == "model_dir/packages/paris_model/run-123"
+    assert raw_state["package_manifest_path"] == "model_dir/packages/paris_model/run-123/package_manifest.json"
 
 
 def test_export_package_creates_tar_from_local_package(tmp_path):
@@ -133,7 +145,7 @@ def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_pat
             "--environment",
             "staging",
             "--deployment-state-path",
-            str(tmp_path / "deployments" / "bikes" / "staging.json"),
+            str(tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json"),
         ]
     )
 
@@ -192,7 +204,7 @@ def test_deploy_cleans_up_new_resources_on_failure(monkeypatch, tmp_path):
                 "--environment",
                 "staging",
                 "--deployment-state-path",
-                str(tmp_path / "deployments" / "bikes" / "staging.json"),
+                str(tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json"),
             ]
         )
     except RuntimeError as exc:
@@ -202,19 +214,23 @@ def test_deploy_cleans_up_new_resources_on_failure(monkeypatch, tmp_path):
 
     assert any(item[0] == "delete_endpoint_config" for item in calls)
     assert any(item[0] == "delete_model" for item in calls)
-    assert not (tmp_path / "deployments" / "bikes" / "staging.json").exists()
+    assert not (tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json").exists()
 
 
 def test_promote_copies_deployment_state_to_target_environment(tmp_path):
     package_dir = _write_package(tmp_path)
-    source_state_path = activate_package(package_dir, tmp_path / "deployments" / "bikes" / "staging.json", source="pytest")
+    source_state_path = activate_package(
+        package_dir,
+        tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json",
+        source="pytest",
+    )
 
     result = promote.main(
         [
             "--source-deployment-state-path",
             str(source_state_path),
             "--target-deployment-state-path",
-            str(tmp_path / "deployments" / "bikes" / "production.json"),
+            str(tmp_path / "model_dir" / "deployments" / "bikes" / "production.json"),
             "--target-environment",
             "production",
         ]
@@ -228,10 +244,14 @@ def test_promote_copies_deployment_state_to_target_environment(tmp_path):
 def test_rollback_restores_previous_deployment_state(tmp_path):
     package_dir = _write_package(tmp_path)
     current_state_path = Path(
-        activate_package(package_dir, tmp_path / "deployments" / "bikes" / "production.json", source="pytest")
+        activate_package(
+            package_dir,
+            tmp_path / "model_dir" / "deployments" / "bikes" / "production.json",
+            source="pytest",
+        )
     )
 
-    previous_package_dir = ensure_package_dir("paris_model_prev", "run-122", root_dir=tmp_path / "packages")
+    previous_package_dir = ensure_package_dir("paris_model_prev", "run-122", root_dir=tmp_path / "model_dir" / "packages")
     (previous_package_dir / "model" / "MLmodel").write_text("artifact_path: model\n", encoding="utf-8")
     previous_manifest = {
         **load_package_manifest(package_dir),
@@ -246,7 +266,11 @@ def test_rollback_restores_previous_deployment_state(tmp_path):
     }
     write_package_manifest(previous_package_dir, previous_manifest)
     previous_state_path = Path(
-        activate_package(previous_package_dir, tmp_path / "deployments" / "bikes" / "previous_prod.json", source="pytest")
+        activate_package(
+            previous_package_dir,
+            tmp_path / "model_dir" / "deployments" / "bikes" / "previous_prod.json",
+            source="pytest",
+        )
     )
 
     result = rollback.main(
@@ -266,3 +290,99 @@ def test_rollback_restores_previous_deployment_state(tmp_path):
     assert restored_state["source"] == "rollback"
     assert restored_state["environment"] == "production"
     assert restored_state["package_dir"] == str(previous_package_dir.resolve())
+
+
+def test_load_package_manifest_rebases_v1_windows_absolute_paths(tmp_path):
+    package_dir = _write_package(tmp_path)
+    manifest_path = package_dir / "package_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["package_layout_version"] = "1"
+    payload["paths"] = {
+        "package_dir": r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123",
+        "model_dir": r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123\model",
+        "package_manifest_path": (
+            r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123\package_manifest.json"
+        ),
+        "artifacts_dir": r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123\artifacts",
+    }
+    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    manifest = load_package_manifest(manifest_path)
+
+    assert manifest["paths"]["package_dir"] == str(package_dir.resolve())
+    assert manifest["paths"]["model_dir"] == str((package_dir / "model").resolve())
+
+
+def test_load_deployment_state_rebases_v1_linux_absolute_paths(tmp_path):
+    package_dir = _write_package(tmp_path)
+    state_path = tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_payload = {
+        "deployment_state_version": "1",
+        "environment": "staging",
+        "predict_bikes": True,
+        "target_name": "bikes",
+        "package_dir": "/opt/airflow/model_dir/packages/paris_model/run-123",
+        "package_manifest_path": "/opt/airflow/model_dir/packages/paris_model/run-123/package_manifest.json",
+        "model_name": "paris_model",
+        "run_id": "run-123",
+        "registered_model_name": None,
+        "registered_version": None,
+        "aliases": [],
+        "updated_at_utc": "2026-03-13T00:00:00Z",
+        "source": "pytest",
+        "endpoint_name": "bikeshare-bikes-staging",
+    }
+    state_path.write_text(json.dumps(state_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    state = load_deployment_state(state_path)
+
+    assert state["package_dir"] == str(package_dir.resolve())
+    assert state["package_manifest_path"] == str((package_dir / "package_manifest.json").resolve())
+
+
+def test_promote_reads_v1_state_and_writes_v2_portable_state(tmp_path):
+    package_dir = _write_package(tmp_path)
+    source_state_path = tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json"
+    source_state_path.parent.mkdir(parents=True, exist_ok=True)
+    source_state_path.write_text(
+        json.dumps(
+            {
+                "deployment_state_version": "1",
+                "environment": "staging",
+                "predict_bikes": True,
+                "target_name": "bikes",
+                "package_dir": r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123",
+                "package_manifest_path": (
+                    r"C:\legacy\mlops-bikeshare-202508\model_dir\packages\paris_model\run-123\package_manifest.json"
+                ),
+                "model_name": "paris_model",
+                "run_id": "run-123",
+                "registered_model_name": None,
+                "registered_version": None,
+                "aliases": [],
+                "updated_at_utc": "2026-03-13T00:00:00Z",
+                "source": "pytest",
+                "endpoint_name": "bikeshare-bikes-staging",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = promote.main(
+        [
+            "--source-deployment-state-path",
+            str(source_state_path),
+            "--target-deployment-state-path",
+            str(tmp_path / "model_dir" / "deployments" / "bikes" / "production.json"),
+            "--target-environment",
+            "production",
+        ]
+    )
+
+    raw_promoted = json.loads(Path(result["target_deployment_state_path"]).read_text(encoding="utf-8"))
+
+    assert raw_promoted["deployment_state_version"] == "2"
+    assert raw_promoted["package_dir"] == "model_dir/packages/paris_model/run-123"
