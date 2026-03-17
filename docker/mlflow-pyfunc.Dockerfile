@@ -12,23 +12,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ build-essential curl libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 
-# Install Python runtime dependencies
-# - Pin mlflow to match how you logged the model (3.3.2 per your tags)
-# - Gunicorn + Flask provide the web server
-# - numpy<2 often avoids ABI surprises with popular libs
+# Install Python runtime dependencies.
+# Keep these aligned with the local training environment so the saved MLflow
+# package can be deserialized and executed without version drift warnings.
 RUN python -m pip install --upgrade pip && \
     pip install --no-cache-dir \
-      mlflow==3.3.2 \
+      mlflow==3.10.1 \
       gunicorn==22.0.0 \
-      scipy==1.16.1 \
+      scipy==1.17.1 \
       psutil==7.0.0 \
       flask==3.0.3 \
-      pandas==2.3.2 \
-      numpy==1.26.4 \
-      scikit-learn==1.7.1 \
-      cloudpickle==3.1.1 \
-      pyarrow==15.0.2 \
-      xgboost==3.0.4
+      pandas==2.3.3 \
+      numpy==2.4.3 \
+      scikit-learn==1.8.0 \
+      cloudpickle==3.1.2 \
+      pyarrow==22.0.0 \
+      xgboost==3.2.0
 
 # Put our app in the container
 WORKDIR /opt/ml/code
@@ -38,21 +37,14 @@ COPY docker/inference.py /opt/ml/code/inference.py
 
 # Add the SageMaker-compatible entrypoint wrapper
 COPY docker/start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
+RUN sed -i 's/\r$//' /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
 
-# --- Make training schema available at runtime (so serve == train) ---
+# --- Make runtime Python modules available inside the image ---
 # Create the Python package path inside the image
 RUN mkdir -p /opt/ml/code/src/features
 
-# COPY the schema used during training into the same path inside the image.
-# If your repo path is src/features/schema.py, keep the first COPY line.
-# If schema.py is at project root, use the second COPY line instead (and remove the first).
-
-# Option A: schema lives at src/features/schema.py in your repo
 COPY src/features/schema.py /opt/ml/code/src/features/schema.py
-
-# Option B: schema lives at project root (UNCOMMENT if that's your structure)
-# COPY schema.py /opt/ml/code/src/features/schema.py
+COPY src/mlflow_pyfunc_model.py /opt/ml/code/src/mlflow_pyfunc_model.py
 
 # Make 'src' importable as a package
 RUN bash -lc 'touch /opt/ml/code/src/__init__.py /opt/ml/code/src/features/__init__.py'

@@ -102,6 +102,19 @@ def test_smoke_invoke_payload_matches_feature_contract():
     assert len(payload["inputs"]["dataframe_split"]["data"][0]) == len(FEATURE_COLUMNS)
 
 
+def test_predictor_builds_sagemaker_payload_from_feature_row():
+    payload = predictor.build_endpoint_payload([1.0, 2.0], ["f1", "f2"])
+
+    assert payload == {
+        "inputs": {
+            "dataframe_split": {
+                "columns": ["f1", "f2"],
+                "data": [[1.0, 2.0]],
+            }
+        }
+    }
+
+
 @pytest.mark.parametrize(("predict_bikes", "expected_label"), [(True, "y_stockout_bikes_30"), (False, "y_stockout_docks_30")])
 def test_load_prediction_manifest_requires_threshold_and_target(tmp_path, predict_bikes, expected_label):
     _write_package(tmp_path, predict_bikes=predict_bikes)

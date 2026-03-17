@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Sequence
+from urllib.parse import urlparse
 
 import boto3
 import botocore
@@ -70,6 +71,22 @@ def create_endpoint_config(sm, endpoint_config_name: str, model_name: str, insta
     )
 
 
+def delete_model(sm, model_name: str) -> None:
+    try:
+        sm.delete_model(ModelName=model_name)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"ValidationException", "ResourceNotFound"}:
+            print(f"[WARN] Failed to delete SageMaker model '{model_name}': {exc}")
+
+
+def delete_endpoint_config(sm, endpoint_config_name: str) -> None:
+    try:
+        sm.delete_endpoint_config(EndpointConfigName=endpoint_config_name)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"ValidationException", "ResourceNotFound"}:
+            print(f"[WARN] Failed to delete endpoint config '{endpoint_config_name}': {exc}")
+
+
 def wait_until_not_in_progress(sm, endpoint_name: str, timeout_sec: int = 900, poll_sec: int = 15) -> str:
     progress = {"Creating", "Updating", "SystemUpdating", "RollingBack", "Deleting"}
     deadline = time.time() + timeout_sec
@@ -126,39 +143,71 @@ def maybe_write_deployment_state(
     return write_deployment_state(deployment_state_path, state)
 
 
+def validate_package_s3_uri(package_s3_uri: str) -> None:
+    parsed = urlparse(package_s3_uri)
+    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.lstrip("/"):
+        raise ValueError(f"invalid SageMaker package S3 URI: {package_s3_uri}")
+
+
+def validate_preflight(*, image_uri: str, package_s3_uri: str, package_dir: str | None, region: str) -> dict[str, str | None]:
+    assert_image_region_matches(image_uri, region)
+    validate_package_s3_uri(package_s3_uri)
+    resolved_package_dir = None
+    if package_dir:
+        manifest = load_package_manifest(package_dir)
+        resolved_package_dir = manifest["paths"]["package_dir"]
+    return {"package_dir": resolved_package_dir}
+
+
 def main(argv: Sequence[str] | None = None) -> dict:
     args = parse_args(argv)
     package_s3_uri = args.package_s3_uri or args.model_data
     if not package_s3_uri:
         raise ValueError("provide --package-s3-uri (or deprecated --model-data)")
-    assert_image_region_matches(args.image_uri, args.region)
+    preflight = validate_preflight(
+        image_uri=args.image_uri,
+        package_s3_uri=package_s3_uri,
+        package_dir=args.package_dir,
+        region=args.region,
+    )
 
     sm = boto3.client("sagemaker", region_name=args.region)
     suffix = ts_suffix()
     model_name = f"{args.endpoint_name}-model-{suffix}"
     endpoint_config_name = f"{args.endpoint_name}-config-{suffix}"
 
-    create_model(sm, model_name, args.image_uri, package_s3_uri, args.role_arn)
-    create_endpoint_config(sm, endpoint_config_name, model_name, args.instance_type)
-    wait_until_not_in_progress(sm, args.endpoint_name)
-    upsert_endpoint(sm, args.endpoint_name, endpoint_config_name)
-    wait_in_service(sm, args.endpoint_name)
-    state_path = maybe_write_deployment_state(
-        package_dir=args.package_dir,
-        environment=args.environment,
-        deployment_state_path=args.deployment_state_path,
-        endpoint_name=args.endpoint_name,
-    )
-    result = {
-        "endpoint_name": args.endpoint_name,
-        "environment": args.environment,
-        "endpoint_config_name": endpoint_config_name,
-        "model_name": model_name,
-        "package_s3_uri": package_s3_uri,
-        "deployment_state_path": state_path,
-    }
-    print(json.dumps(result, indent=2, sort_keys=True))
-    return result
+    created_model = False
+    created_endpoint_config = False
+    try:
+        create_model(sm, model_name, args.image_uri, package_s3_uri, args.role_arn)
+        created_model = True
+        create_endpoint_config(sm, endpoint_config_name, model_name, args.instance_type)
+        created_endpoint_config = True
+        wait_until_not_in_progress(sm, args.endpoint_name)
+        upsert_endpoint(sm, args.endpoint_name, endpoint_config_name)
+        wait_in_service(sm, args.endpoint_name)
+        state_path = maybe_write_deployment_state(
+            package_dir=preflight["package_dir"],
+            environment=args.environment,
+            deployment_state_path=args.deployment_state_path,
+            endpoint_name=args.endpoint_name,
+        )
+        result = {
+            "endpoint_name": args.endpoint_name,
+            "environment": args.environment,
+            "endpoint_config_name": endpoint_config_name,
+            "model_name": model_name,
+            "package_s3_uri": package_s3_uri,
+            "deployment_state_path": state_path,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return result
+    except Exception:
+        if created_endpoint_config:
+            delete_endpoint_config(sm, endpoint_config_name)
+        if created_model:
+            delete_model(sm, model_name)
+        raise
 
 
 if __name__ == "__main__":

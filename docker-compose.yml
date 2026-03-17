@@ -72,9 +72,12 @@ services:
       DBT_DUPLICATE_ERROR_RATE: "0.01"
       DBT_QUALITY_LOOKBACK_HOURS: "2"
       DBT_STATION_INFORMATION_QUALITY_LOOKBACK_DAYS: "2"
+      AWS_REGION: ${AWS_REGION}
       AWS_DEFAULT_REGION: eu-west-3
       AWS_PROFILE: Shirley-fr
       AWS_SDK_LOAD_CONFIG: "1"
+      CITY: ${CITY}
+      BUCKET: ${BUCKET}
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
     volumes: &airflow-volumes
       - ./airflow/dags:/opt/airflow/dags

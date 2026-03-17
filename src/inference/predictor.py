@@ -31,18 +31,12 @@ def _write_parquet_s3(df: pd.DataFrame, bucket: str, key: str) -> None:
     _s3().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
-def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
-    payload = {"inputs": {"dataframe_split": {"columns": feature_columns, "data": [feature_row]}}}
-    resp = _smr().invoke_endpoint(
-        EndpointName=endpoint,
-        ContentType="application/json",
-        Accept="application/json",
-        Body=json.dumps(payload).encode("utf-8"),
-        InferenceId=inference_id,
-    )
-    body = resp["Body"].read().decode("utf-8", errors="ignore")
-    out = json.loads(body) if body.strip().startswith(("{", "[")) else body
-    preds = out.get("predictions", out) if isinstance(out, dict) else out
+def build_endpoint_payload(feature_row: list[float], feature_columns: list[str]) -> dict:
+    return {"inputs": {"dataframe_split": {"columns": feature_columns, "data": [feature_row]}}}
+
+
+def _coerce_prediction_value(output) -> float:
+    preds = output.get("predictions", output) if isinstance(output, dict) else output
     if isinstance(preds, list):
         value = preds[0] if len(preds) == 1 else preds
     else:
@@ -53,6 +47,20 @@ def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: 
         return float(value if not isinstance(value, dict) else value.get("yhat", "nan"))
     except Exception:
         return float("nan")
+
+
+def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
+    payload = build_endpoint_payload(feature_row, feature_columns)
+    resp = _smr().invoke_endpoint(
+        EndpointName=endpoint,
+        ContentType="application/json",
+        Accept="application/json",
+        Body=json.dumps(payload).encode("utf-8"),
+        InferenceId=inference_id,
+    )
+    body = resp["Body"].read().decode("utf-8", errors="ignore")
+    out = json.loads(body) if body.strip().startswith(("{", "[")) else body
+    return _coerce_prediction_value(out)
 
 
 def load_prediction_manifest(

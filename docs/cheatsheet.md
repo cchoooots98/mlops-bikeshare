@@ -94,6 +94,10 @@ terraform init -reconfigure \
   -backend-config="region=eu-west-3" \
   -backend-config="encrypt=true"
 terraform plan
+# Only if apply fails with EntityAlreadyExists for shared GitHub OIDC resources:
+terraform import module.stack.aws_iam_openid_connect_provider.github arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+terraform import module.stack.aws_iam_role.gh_deployer gh-oidc-deployer
+terraform import module.stack.aws_iam_role_policy.gh_deployer_least_priv gh-oidc-deployer:least-priv
 terraform apply
 ```
 
@@ -101,6 +105,7 @@ terraform apply
 - `bootstrap` 只负责创建 tfstate bucket。
 - `live` 使用 S3 native lockfile 处理 state locking。
 - `live` 负责长期平台资源。
+- 如果共享账号里已经存在 GitHub OIDC provider 或 `gh-oidc-deployer`，先 import 再 apply。
 - `staging` / `production` 属于模型发布流程，不是 Terraform 双环境。
 
 ---

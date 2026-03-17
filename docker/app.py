@@ -53,8 +53,15 @@ def try_load_model() -> Optional[mlflow.pyfunc.PyFuncModel]:
 def ping() -> Response:
     """
     Health endpoint.
-    Return 200 immediately so SageMaker considers the container healthy even if the model is still downloading.
+    Return 200 only when the model is present and loadable.
     """
+    try:
+        model = try_load_model()
+    except Exception as exc:
+        app.logger.error("Health check failed: %s\n%s", exc, traceback.format_exc())
+        return Response("model load failed", status=500)
+    if model is None:
+        return Response("model not ready", status=503)
     return Response("pong", status=200)
 
 

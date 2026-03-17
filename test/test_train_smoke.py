@@ -66,6 +66,24 @@ def _make_training_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=TRAINING_REQUIRED_COLUMNS)
 
 
+def _configure_training_sources(monkeypatch, base_df: pd.DataFrame, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    train.mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+    monkeypatch.setattr(train, "create_pg_engine", lambda pg_config: object())
+    monkeypatch.setattr(
+        train,
+        "list_unique_dt_postgres",
+        lambda engine, pg_config, city, start_dt, end_dt: sorted(base_df["dt"].unique()),
+    )
+
+    def fake_load_slice(engine, data_config, select_columns, start_dt, end_dt):
+        mask = (base_df["dt"] >= start_dt) & (base_df["dt"] <= end_dt)
+        return base_df.loc[mask, select_columns].copy()
+
+    monkeypatch.setattr(train, "load_slice_postgres", fake_load_slice)
+
+
 def test_build_feature_select_query_reads_postgres_feature_table_in_schema_order():
     columns = ["capacity", "lat", "lon", "bikes", "docks", "minutes_since_prev_snapshot", "y_stockout_bikes_30"]
     sql = train.build_feature_select_query("analytics", "feat_station_snapshot_5min", columns)
@@ -89,23 +107,7 @@ def test_compute_temporal_split_applies_gap_minutes_on_5min_grid():
 def test_train_smoke_logs_model_and_registers_artifact(monkeypatch, tmp_path, predict_bikes):
     base_df = _make_training_df()
     target_spec = target_spec_from_predict_bikes(predict_bikes)
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-    train.mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-
-    monkeypatch.setattr(train, "create_pg_engine", lambda pg_config: object())
-    monkeypatch.setattr(
-        train,
-        "list_unique_dt_postgres",
-        lambda engine, pg_config, city, start_dt, end_dt: sorted(base_df["dt"].unique()),
-    )
-
-    def fake_load_slice(engine, data_config, select_columns, start_dt, end_dt):
-        mask = (base_df["dt"] >= start_dt) & (base_df["dt"] <= end_dt)
-        return base_df.loc[mask, select_columns].copy()
-
-    monkeypatch.setattr(train, "load_slice_postgres", fake_load_slice)
+    _configure_training_sources(monkeypatch, base_df, tmp_path)
 
     data_config = train.DataConfig(
         city="paris",
@@ -153,6 +155,13 @@ def test_train_smoke_logs_model_and_registers_artifact(monkeypatch, tmp_path, pr
     model_card = (Path(result["package_dir"]) / "artifacts" / "model_card.md").read_text(encoding="utf-8")
     assert "radius-based neighbor graph" in model_card
     assert "Serving artifact path" in model_card
+    mlmodel_text = (Path(result["package_dir"]) / "model" / "MLmodel").read_text(encoding="utf-8")
+    assert "loader_module: mlflow.pyfunc.model" in mlmodel_text
+    assert "model_code_path:" not in mlmodel_text
+    assert (Path(result["package_dir"]) / "model" / "python_model.pkl").exists()
+    assert not (Path(result["package_dir"]) / "model" / "mlflow_prob_model.py").exists()
+    assert b"src.mlflow_pyfunc_model" in (Path(result["package_dir"]) / "model" / "python_model.pkl").read_bytes()
+    assert b"src.training" not in (Path(result["package_dir"]) / "model" / "python_model.pkl").read_bytes()
     assert int(registration["version"]) >= 1
 
 
@@ -164,23 +173,7 @@ def test_training_drops_rows_with_null_selected_label_or_paired_target(monkeypat
     base_df.loc[5, target_spec.paired_target_column] = None
     base_df.loc[20, target_spec.label_column] = None
     base_df.loc[22, target_spec.paired_target_column] = None
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-    train.mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-
-    monkeypatch.setattr(train, "create_pg_engine", lambda pg_config: object())
-    monkeypatch.setattr(
-        train,
-        "list_unique_dt_postgres",
-        lambda engine, pg_config, city, start_dt, end_dt: sorted(base_df["dt"].unique()),
-    )
-
-    def fake_load_slice(engine, data_config, select_columns, start_dt, end_dt):
-        mask = (base_df["dt"] >= start_dt) & (base_df["dt"] <= end_dt)
-        return base_df.loc[mask, select_columns].copy()
-
-    monkeypatch.setattr(train, "load_slice_postgres", fake_load_slice)
+    _configure_training_sources(monkeypatch, base_df, tmp_path)
 
     data_config = train.DataConfig(
         city="paris",
@@ -223,22 +216,7 @@ def test_training_rejects_single_class_validation_slice(monkeypatch, tmp_path, p
     base_df = _make_training_df()
     target_spec = target_spec_from_predict_bikes(predict_bikes)
     base_df.loc[base_df.index >= 18, target_spec.label_column] = 0
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-    train.mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-    monkeypatch.setattr(train, "create_pg_engine", lambda pg_config: object())
-    monkeypatch.setattr(
-        train,
-        "list_unique_dt_postgres",
-        lambda engine, pg_config, city, start_dt, end_dt: sorted(base_df["dt"].unique()),
-    )
-
-    def fake_load_slice(engine, data_config, select_columns, start_dt, end_dt):
-        mask = (base_df["dt"] >= start_dt) & (base_df["dt"] <= end_dt)
-        return base_df.loc[mask, select_columns].copy()
-
-    monkeypatch.setattr(train, "load_slice_postgres", fake_load_slice)
+    _configure_training_sources(monkeypatch, base_df, tmp_path)
 
     with pytest.raises(RuntimeError, match="validation slice .* must contain both classes"):
         train.run_training_pipeline(

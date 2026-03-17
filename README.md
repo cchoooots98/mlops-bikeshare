@@ -27,7 +27,7 @@ Model release remains separate from Terraform:
   - `model_dir/packages/bikes/`
   - `model_dir/packages/docks/`
 
-Compatibility aliases such as `DW_*`, `RAW_S3_BUCKET`, and `WEATHER_CITY` are still read for one transition cycle, but they are no longer the formal contract.
+The formal runtime contract is `PG*`, `AWS_REGION`, `CITY`, `BUCKET`, `TARGET_NAME`, `SERVING_ENVIRONMENT`, and the target-specific deployment/package paths.
 
 ## Quick Start
 1. Create a local virtual environment.
@@ -84,7 +84,7 @@ $env:PGUSER = "velib"
 $env:PGPASSWORD = "velib"
 
 $env:AWS_REGION = "eu-west-3"
-$env:BUCKET = "bikeshare-paris-dev"
+$env:BUCKET = "bikeshare-paris-387706002632-eu-west-3"
 $env:CITY = "paris"
 $env:TARGET_NAME = "bikes"
 $env:SERVING_ENVIRONMENT = "local"

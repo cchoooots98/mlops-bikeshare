@@ -1,4 +1,5 @@
 from pathlib import Path
+import tarfile
 
 from pipelines import deploy_via_sagemaker_sdk, export_and_upload_model, promote, rollback
 from src.model_package import (
@@ -75,6 +76,10 @@ def test_export_package_creates_tar_from_local_package(tmp_path):
 
     assert Path(result["tar_path"]).exists()
     assert result["model_name"] == "paris_model"
+    with tarfile.open(result["tar_path"], "r:gz") as tar:
+        names = tar.getnames()
+    assert "MLmodel" in names
+    assert "model/MLmodel" not in names
 
 
 def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_path):
@@ -136,6 +141,68 @@ def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_pat
     assert deployment_state["environment"] == "staging"
     assert deployment_state["endpoint_name"] == "bikeshare-bikes-staging"
     assert any(item[0] == "create_model" for item in calls)
+
+
+def test_deploy_cleans_up_new_resources_on_failure(monkeypatch, tmp_path):
+    package_dir = _write_package(tmp_path)
+    calls = []
+
+    class _FakeSageMaker:
+        def create_model(self, **kwargs):
+            calls.append(("create_model", kwargs["ModelName"]))
+
+        def create_endpoint_config(self, **kwargs):
+            calls.append(("create_endpoint_config", kwargs["EndpointConfigName"]))
+
+        def describe_endpoint(self, EndpointName):
+            raise deploy_via_sagemaker_sdk.ClientError(
+                {"Error": {"Code": "ValidationException", "Message": "Could not find endpoint"}},
+                "DescribeEndpoint",
+            )
+
+        def create_endpoint(self, **kwargs):
+            calls.append(("create_endpoint", kwargs["EndpointName"]))
+            raise RuntimeError("create endpoint failed")
+
+        def delete_endpoint_config(self, **kwargs):
+            calls.append(("delete_endpoint_config", kwargs["EndpointConfigName"]))
+
+        def delete_model(self, **kwargs):
+            calls.append(("delete_model", kwargs["ModelName"]))
+
+    monkeypatch.setattr(deploy_via_sagemaker_sdk.boto3, "client", lambda service_name, region_name=None: _FakeSageMaker())
+
+    try:
+        deploy_via_sagemaker_sdk.main(
+            [
+                "--endpoint-name",
+                "bikeshare-bikes-staging",
+                "--role-arn",
+                "arn:aws:iam::123456789012:role/sm-exec",
+                "--image-uri",
+                "123456789012.dkr.ecr.eu-west-3.amazonaws.com/mlflow:latest",
+                "--package-s3-uri",
+                "s3://bucket/packages/model.tar.gz",
+                "--package-dir",
+                str(package_dir),
+                "--instance-type",
+                "ml.m5.large",
+                "--region",
+                "eu-west-3",
+                "--environment",
+                "staging",
+                "--deployment-state-path",
+                str(tmp_path / "deployments" / "bikes" / "staging.json"),
+            ]
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "create endpoint failed"
+    else:
+        raise AssertionError("expected deployment failure")
+
+    assert any(item[0] == "delete_endpoint_config" for item in calls)
+    assert any(item[0] == "delete_model" for item in calls)
+    assert not (tmp_path / "deployments" / "bikes" / "staging.json").exists()
 
 
 def test_promote_copies_deployment_state_to_target_environment(tmp_path):

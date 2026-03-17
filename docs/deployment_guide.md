@@ -42,7 +42,7 @@ $env:PGUSER = "velib"
 $env:PGPASSWORD = "velib"
 $env:AWS_REGION = "eu-west-3"
 $env:CITY = "paris"
-$env:BUCKET = "bikeshare-paris-dev"
+$env:BUCKET = "bikeshare-paris-387706002632-eu-west-3"
 $env:MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
 ```
 
@@ -71,7 +71,7 @@ $env:TARGET_NAME = "bikes"
 $env:SERVING_ENVIRONMENT = "local"
 $env:DEPLOYMENT_STATE_PATH = "model_dir/deployments/bikes/local.json"
 $env:SM_ENDPOINT = "bikeshare-bikes-staging"
-$env:BUCKET = "<your-bucket>"
+$env:BUCKET = "bikeshare-paris-387706002632-eu-west-3"
 ```
 
 ### 3.3 Run predictor
@@ -81,7 +81,7 @@ $env:BUCKET = "<your-bucket>"
 
 ### Expected output
 - one or more lines like:
-  - `[predictor] wrote <n> rows to s3://<bucket>/inference/target=bikes/city=paris/dt=<dt>/predictions.parquet`
+  - `[predictor] wrote <n> rows to s3://bikeshare-paris-387706002632-eu-west-3/inference/target=bikes/city=paris/dt=<dt>/predictions.parquet`
 
 ### 3.4 Run quality backfill
 ```powershell
@@ -95,7 +95,7 @@ $env:BUCKET = "<your-bucket>"
 ### 3.5 Run metrics dry-run
 ```powershell
 .\.venv\Scripts\python.exe -m src.monitoring.metrics.publish_custom_metrics `
-  --bucket <your-bucket> `
+  --bucket bikeshare-paris-387706002632-eu-west-3 `
   --quality-prefix AUTO `
   --endpoint bikeshare-bikes-staging `
   --city-dimension paris `
@@ -124,10 +124,13 @@ $env:BUCKET = "<your-bucket>"
 git clone <your_repo_url>
 cd mlops-bikeshare-202508
 cp .env.example .env
+# If you override values manually, keep BUCKET=bikeshare-paris-387706002632-eu-west-3.
 docker compose up -d
 docker compose ps
 curl -I http://localhost:8080
 ```
+
+If you manage Airflow Variables explicitly, set `BUCKET=bikeshare-paris-387706002632-eu-west-3` there too so DAG overrides stay aligned with `.env`.
 
 ### Expected output
 - Compose services are healthy
@@ -176,9 +179,21 @@ terraform init -reconfigure `
   -backend-config="encrypt=true"
 terraform validate
 terraform plan
+
+# Run these imports once only if apply fails with EntityAlreadyExists for shared GitHub OIDC resources.
+terraform import module.stack.aws_iam_openid_connect_provider.github arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+terraform import module.stack.aws_iam_role.gh_deployer gh-oidc-deployer
+terraform import module.stack.aws_iam_role_policy.gh_deployer_least_priv gh-oidc-deployer:least-priv
+
 terraform apply
 terraform output
+$env:DATA_BUCKET = terraform output -raw data_bucket_name
 ```
+
+Import notes:
+- only run the three `terraform import` commands if `terraform apply` fails with `EntityAlreadyExists`
+- if Terraform says a resource is already managed by state, skip that import and continue
+- this usually happens in a shared AWS account that already has the GitHub OIDC provider or `gh-oidc-deployer` role
 
 ### Expected output
 - `terraform validate` succeeds
@@ -213,25 +228,40 @@ Verify in AWS:
 ## 6. AWS Staging Deployment
 ### 6.1 Build the inference image
 ```powershell
-docker build -f docker/mlflow-pyfunc.Dockerfile -t bikeshare-infer:latest .
-docker tag bikeshare-infer:latest <account>.dkr.ecr.eu-west-3.amazonaws.com/mlops-bikeshare:latest
-docker push <account>.dkr.ecr.eu-west-3.amazonaws.com/mlops-bikeshare:latest
+cmd /c "aws --profile Shirley-fr ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin 387706002632.dkr.ecr.eu-west-3.amazonaws.com"
+docker buildx build `
+  --platform linux/amd64 `
+  --provenance=false `
+  --sbom=false `
+  --output "type=registry,name=387706002632.dkr.ecr.eu-west-3.amazonaws.com/bikeshare-paris:latest,oci-mediatypes=false" `
+  -f docker/mlflow-pyfunc.Dockerfile `
+  .
 ```
+
+Why this exact build path:
+- SageMaker rejected OCI manifest variants from the older local `docker build` + `docker push` flow
+- the current `buildx ... oci-mediatypes=false` command pushes a SageMaker-compatible image manifest directly to ECR
+- after any `docker/start.sh` or `docker/app.py` change, rebuild and push the image before redeploying staging
 
 ### 6.2 Export packages
 ```powershell
 .\.venv\Scripts\python.exe -m pipelines.export_and_upload_model `
   --package-dir model_dir/packages/bikes/<run-dir> `
   --output-dir dist/model_packages `
-  --s3-uri s3://<bucket>/packages/bikes/latest.tar.gz `
+  --s3-uri s3://$env:DATA_BUCKET/packages/bikes/latest.tar.gz `
   --region eu-west-3
 
 .\.venv\Scripts\python.exe -m pipelines.export_and_upload_model `
   --package-dir model_dir/packages/docks/<run-dir> `
   --output-dir dist/model_packages `
-  --s3-uri s3://<bucket>/packages/docks/latest.tar.gz `
+  --s3-uri s3://$env:DATA_BUCKET/packages/docks/latest.tar.gz `
   --region eu-west-3
 ```
+
+Export invariant:
+- the uploaded `latest.tar.gz` is now a SageMaker-ready serving artifact
+- `MLmodel` must exist at the archive root, not under `model/MLmodel`
+- if you uploaded `packages/*/latest.tar.gz` before this hardening change, re-export both bikes and docks
 
 ### 6.3 Deploy staging endpoints
 ```powershell
@@ -239,14 +269,14 @@ docker push <account>.dkr.ecr.eu-west-3.amazonaws.com/mlops-bikeshare:latest
   --endpoint-name bikeshare-bikes-staging `
   --role-arn <role_arn> `
   --image-uri <image_uri> `
-  --package-s3-uri s3://<bucket>/packages/bikes/latest.tar.gz `
+  --package-s3-uri s3://$env:DATA_BUCKET/packages/bikes/latest.tar.gz `
   --package-dir model_dir/packages/bikes/<run-dir>
 
 .\.venv\Scripts\python.exe -m pipelines.deploy_staging `
   --endpoint-name bikeshare-docks-staging `
   --role-arn <role_arn> `
   --image-uri <image_uri> `
-  --package-s3-uri s3://<bucket>/packages/docks/latest.tar.gz `
+  --package-s3-uri s3://$env:DATA_BUCKET/packages/docks/latest.tar.gz `
   --package-dir model_dir/packages/docks/<run-dir>
 ```
 
@@ -256,6 +286,20 @@ docker push <account>.dkr.ecr.eu-west-3.amazonaws.com/mlops-bikeshare:latest
   - `model_dir/deployments/bikes/staging.json`
   - `model_dir/deployments/docks/staging.json`
 - both endpoints become `InService`
+
+Expected SageMaker object lifecycle per deploy:
+- one timestamped `Model`
+- one timestamped `EndpointConfig`
+- one long-lived endpoint name such as `bikeshare-bikes-staging`
+- one local deployment state file such as `model_dir/deployments/bikes/staging.json`
+
+### Staging troubleshooting
+- if endpoint creation stays in `Creating`, check:
+  - `aws sagemaker describe-endpoint --endpoint-name <endpoint> --region eu-west-3 --profile Shirley-fr`
+  - `FailureReason` if status becomes `Failed`
+  - CloudWatch logs for the hosting container
+- `/ping` is now strict: it returns healthy only when the model is actually loadable from `/opt/ml/model`
+- if a deploy attempt fails before `InService`, rerun after fixing the root cause; the deploy script now best-effort cleans up only the newly created `Model` and `EndpointConfig`
 
 ## 7. Promotion
 ### Gate commands

@@ -63,11 +63,23 @@ def assemble_package_from_run(run_id: str, output_dir: Path) -> Path:
     return package_dir
 
 
-def create_package_tar(package_dir: Path, tar_path: Path) -> Path:
+def _resolve_package_paths(package_dir_or_manifest: str | Path) -> tuple[Path, Path]:
+    manifest = load_package_manifest(package_dir_or_manifest)
+    package_dir = Path(manifest["paths"]["package_dir"]).resolve()
+    model_dir = Path(manifest["paths"]["model_dir"]).resolve()
+    if not model_dir.exists():
+        raise FileNotFoundError(f"package model directory does not exist: {model_dir}")
+    mlmodel_path = model_dir / "MLmodel"
+    if not mlmodel_path.exists():
+        raise FileNotFoundError(f"package model directory is missing MLmodel: {mlmodel_path}")
+    return package_dir, model_dir
+
+
+def create_package_tar(model_dir: Path, tar_path: Path) -> Path:
     tar_path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path, "w:gz") as tar:
-        for file_path in sorted(path for path in package_dir.rglob("*") if path.is_file()):
-            tar.add(file_path, arcname=file_path.relative_to(package_dir).as_posix())
+        for file_path in sorted(path for path in model_dir.rglob("*") if path.is_file()):
+            tar.add(file_path, arcname=file_path.relative_to(model_dir).as_posix())
     return tar_path
 
 
@@ -97,8 +109,7 @@ def main(argv: Sequence[str] | None = None) -> dict:
     output_dir = Path(args.output_dir)
 
     if args.package_dir:
-        package_dir = Path(args.package_dir).resolve()
-        load_package_manifest(package_dir)
+        package_dir, model_dir = _resolve_package_paths(args.package_dir)
     else:
         run_id = _resolve_run_id(args.run_id, args.model_name, args.version, args.alias)
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -107,13 +118,15 @@ def main(argv: Sequence[str] | None = None) -> dict:
             if package_dir.exists():
                 shutil.rmtree(package_dir)
             _copy_tree(assembled_dir, package_dir)
+            _, model_dir = _resolve_package_paths(package_dir)
 
     manifest = load_package_manifest(package_dir)
-    tar_path = create_package_tar(package_dir, output_dir / f"{package_dir.name}.tar.gz")
+    tar_path = create_package_tar(model_dir, output_dir / f"{package_dir.name}.tar.gz")
     uploaded_uri = upload_to_s3(tar_path, args.s3_uri, args.region) if args.s3_uri else None
     result = {
         "package_dir": str(package_dir),
         "package_manifest_path": str(package_dir / PACKAGE_MANIFEST_FILENAME),
+        "serving_model_dir": str(model_dir),
         "model_name": manifest["model_name"],
         "run_id": manifest["run_id"],
         "tar_path": str(tar_path),

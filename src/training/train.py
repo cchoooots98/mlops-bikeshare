@@ -4,7 +4,6 @@ import math
 import inspect
 import os
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +43,7 @@ from src.model_package import (
     write_package_manifest,
 )
 from src.model_target import parse_bool_value, target_spec_from_predict_bikes
+from src.mlflow_pyfunc_model import PositiveClassProbabilityModel
 
 DEFAULT_LOCAL_MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
 
@@ -54,7 +54,6 @@ DT_FORMAT = "%Y-%m-%d-%H-%M"
 INPUT_TS_FORMAT = "%Y-%m-%d %H:%M"
 FEATURE_CONTRACT_VERSION = "v1_dim_weather_aligned"
 TRAINING_RESULT_PREFIX = "TRAINING_RESULT_JSON::"
-PYFUNC_MODEL_CODE_PATH = Path(__file__).with_name("mlflow_prob_model.py")
 
 
 @dataclass(frozen=True)
@@ -296,6 +295,10 @@ def log_feature_importance(model, feature_names: Sequence[str], artifact_dir: st
     plt.close(fig)
 
 
+def build_sample_input_frame(feature_names: Sequence[str]) -> pd.DataFrame:
+    return pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in feature_names})[list(feature_names)]
+
+
 def build_classifier(train_config: TrainConfig):
     if train_config.model_type == "xgboost":
         params = dict(train_config.xgb_params)
@@ -314,26 +317,23 @@ def _ensure_binary_classes(y_values: np.ndarray, split_name: str, label_column: 
         )
 
 
-def _native_model_filename(model_type: str) -> str:
-    if model_type == "xgboost":
-        return "native_model.json"
-    if model_type == "lightgbm":
-        return "native_model.txt"
-    raise ValueError(f"unsupported model_type: {model_type}")
-
-
-def _write_native_model_artifact(model, model_type: str, destination: Path) -> None:
-    if model_type == "xgboost":
-        booster = model.get_booster() if hasattr(model, "get_booster") else model
-        booster.save_model(str(destination))
-        return
-
-    if model_type == "lightgbm":
-        booster = getattr(model, "booster_", model)
-        booster.save_model(str(destination))
-        return
-
-    raise ValueError(f"unsupported model_type: {model_type}")
+def build_pyfunc_model_kwargs(
+    *,
+    model,
+    model_type: str,
+    feature_names: Sequence[str],
+    signature,
+    input_example: pd.DataFrame,
+) -> dict:
+    return {
+        "python_model": PositiveClassProbabilityModel(
+            model=model,
+            model_type=model_type,
+            feature_names=list(feature_names),
+        ),
+        "signature": signature,
+        "input_example": input_example,
+    }
 
 
 def _save_or_log_pyfunc_probability_model(
@@ -349,28 +349,21 @@ def _save_or_log_pyfunc_probability_model(
     if bool(save_path) == bool(log_name):
         raise ValueError("provide exactly one of save_path or log_name")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        native_model_path = Path(temp_dir) / _native_model_filename(model_type)
-        _write_native_model_artifact(model, model_type, native_model_path)
-
-        common_kwargs = {
-            "python_model": str(PYFUNC_MODEL_CODE_PATH),
-            "artifacts": {"native_model": str(native_model_path)},
-            "model_config": {
-                "model_type": model_type,
-                "feature_names": list(feature_names),
-            },
-            "signature": signature,
-            "input_example": input_example,
-        }
-        if save_path:
-            mlflow.pyfunc.save_model(path=save_path, **common_kwargs)
+    common_kwargs = build_pyfunc_model_kwargs(
+        model=model,
+        model_type=model_type,
+        feature_names=feature_names,
+        signature=signature,
+        input_example=input_example,
+    )
+    if save_path:
+        mlflow.pyfunc.save_model(path=save_path, **common_kwargs)
+    else:
+        log_model_params = inspect.signature(mlflow.pyfunc.log_model).parameters
+        if "name" in log_model_params:
+            mlflow.pyfunc.log_model(name=log_name, **common_kwargs)
         else:
-            log_model_params = inspect.signature(mlflow.pyfunc.log_model).parameters
-            if "name" in log_model_params:
-                mlflow.pyfunc.log_model(name=log_name, **common_kwargs)
-            else:
-                mlflow.pyfunc.log_model(artifact_path=log_name, **common_kwargs)
+            mlflow.pyfunc.log_model(artifact_path=log_name, **common_kwargs)
 
 
 def _save_local_package(
@@ -388,7 +381,7 @@ def _save_local_package(
         shutil.rmtree(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
+    sample_x = build_sample_input_frame(FEATURE_COLUMNS)
     signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
     _save_or_log_pyfunc_probability_model(
         model=model,
@@ -404,6 +397,63 @@ def _save_local_package(
     write_json_file(artifacts_dir / "eval_summary.json", eval_summary)
     (artifacts_dir / "model_card.md").write_text(build_model_card_text(eval_summary), encoding="utf-8")
     return str(package_dir.resolve()), manifest_path
+
+
+def build_eval_summary(
+    *,
+    run_id: str,
+    train_config: TrainConfig,
+    data_config: DataConfig,
+    target_spec,
+    feature_source: str,
+    split: TemporalSplit,
+    n_train: int,
+    n_valid: int,
+    train_rows_before_filter: int,
+    valid_rows_before_filter: int,
+    pr_auc_train: float,
+    pr_auc_valid: float,
+    overfit_gap: float,
+    best_threshold: float,
+    best_metrics: dict,
+) -> dict:
+    return {
+        "run_id": run_id,
+        "experiment": train_config.experiment,
+        "model_name": build_model_name(data_config.city, target_spec.label_column, train_config.model_type),
+        "model_type": train_config.model_type,
+        "predict_bikes": target_spec.predict_bikes,
+        "target_name": target_spec.target_name,
+        "label": target_spec.label_column,
+        "label_column": target_spec.label_column,
+        "paired_target": target_spec.paired_target_column,
+        "paired_target_column": target_spec.paired_target_column,
+        "score_column": target_spec.score_column,
+        "score_bin_column": target_spec.score_bin_column,
+        "actual_t30_column": target_spec.actual_t30_column,
+        "city": data_config.city,
+        "time_start": data_config.start,
+        "time_end": data_config.end,
+        "train_end_dt": split.train_end_dt,
+        "valid_start_dt": split.valid_start_dt,
+        "run_reason": train_config.run_reason,
+        "feature_source": feature_source,
+        "feature_contract": FEATURE_CONTRACT_VERSION,
+        "features": list(FEATURE_COLUMNS),
+        "n_train": int(n_train),
+        "n_valid": int(n_valid),
+        "pr_auc_train": pr_auc_train,
+        "pr_auc_valid": pr_auc_valid,
+        "overfit_gap": overfit_gap,
+        "best_threshold": best_threshold,
+        "best_precision": best_metrics["precision"],
+        "best_recall": best_metrics["recall"],
+        "best_fbeta": best_metrics["fbeta"],
+        "beta": train_config.beta,
+        "dropped_train_rows_null_outputs": int(train_rows_before_filter - n_train),
+        "dropped_valid_rows_null_outputs": int(valid_rows_before_filter - n_valid),
+        "model_artifact_path": "model",
+    }
 
 
 def run_training_pipeline(data_config: DataConfig, train_config: TrainConfig) -> dict:
@@ -514,7 +564,7 @@ def run_training_pipeline(data_config: DataConfig, train_config: TrainConfig) ->
         log_curves_and_confusion(y_valid, valid_prob, best_threshold, plot_dir, prefix="valid")
         log_feature_importance(model, FEATURE_COLUMNS, importance_dir)
 
-        sample_x = pd.DataFrame({column: pd.Series([0.0], dtype="float64") for column in FEATURE_COLUMNS})[FEATURE_COLUMNS]
+        sample_x = build_sample_input_frame(FEATURE_COLUMNS)
         signature = infer_signature(sample_x, pd.Series([0.5], dtype="float64"))
         _save_or_log_pyfunc_probability_model(
             model=model,
@@ -525,43 +575,23 @@ def run_training_pipeline(data_config: DataConfig, train_config: TrainConfig) ->
             log_name="model",
         )
 
-        eval_summary = {
-            "run_id": run.info.run_id,
-            "experiment": train_config.experiment,
-            "model_name": model_name,
-            "model_type": train_config.model_type,
-            "predict_bikes": target_spec.predict_bikes,
-            "target_name": target_spec.target_name,
-            "label": target_spec.label_column,
-            "label_column": target_spec.label_column,
-            "paired_target": target_spec.paired_target_column,
-            "paired_target_column": target_spec.paired_target_column,
-            "score_column": target_spec.score_column,
-            "score_bin_column": target_spec.score_bin_column,
-            "actual_t30_column": target_spec.actual_t30_column,
-            "city": data_config.city,
-            "time_start": data_config.start,
-            "time_end": data_config.end,
-            "train_end_dt": split.train_end_dt,
-            "valid_start_dt": split.valid_start_dt,
-            "run_reason": train_config.run_reason,
-            "feature_source": feature_source,
-            "feature_contract": FEATURE_CONTRACT_VERSION,
-            "features": list(FEATURE_COLUMNS),
-            "n_train": int(len(x_train)),
-            "n_valid": int(len(x_valid)),
-            "pr_auc_train": pr_auc_train,
-            "pr_auc_valid": pr_auc_valid,
-            "overfit_gap": overfit_gap,
-            "best_threshold": best_threshold,
-            "best_precision": best_metrics["precision"],
-            "best_recall": best_metrics["recall"],
-            "best_fbeta": best_metrics["fbeta"],
-            "beta": train_config.beta,
-            "dropped_train_rows_null_outputs": int(train_rows_before_filter - len(train_df)),
-            "dropped_valid_rows_null_outputs": int(valid_rows_before_filter - len(valid_df)),
-            "model_artifact_path": "model",
-        }
+        eval_summary = build_eval_summary(
+            run_id=run.info.run_id,
+            train_config=train_config,
+            data_config=data_config,
+            target_spec=target_spec,
+            feature_source=feature_source,
+            split=split,
+            n_train=len(x_train),
+            n_valid=len(x_valid),
+            train_rows_before_filter=train_rows_before_filter,
+            valid_rows_before_filter=valid_rows_before_filter,
+            pr_auc_train=pr_auc_train,
+            pr_auc_valid=pr_auc_valid,
+            overfit_gap=overfit_gap,
+            best_threshold=best_threshold,
+            best_metrics=best_metrics,
+        )
         mlflow.log_dict(eval_summary, eval_path)
 
         package_dir, package_manifest_path = _save_local_package(
