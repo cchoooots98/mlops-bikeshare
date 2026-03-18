@@ -193,3 +193,15 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
     assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
     assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
     assert "execution_delta=PSI_TO_METRICS_DELTA" in factory_source
+
+
+def test_feature_future_window_label_smoke_test_is_runtime_scoped():
+    test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_future_window_labels.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from {{ ref('int_station_status_enriched') }}" in test_sql
+    assert "runtime_window_start_utc_expr(default_lookback_hours=72)" in test_sql
+    assert "{{ runtime_utc_expr('test_window_end_utc') }} + interval '30 minutes'" in test_sql
+    assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
+    assert "from mature_feature_rows cur" in test_sql
