@@ -205,3 +205,14 @@ def test_feature_future_window_label_smoke_test_is_runtime_scoped():
     assert "{{ runtime_utc_expr('test_window_end_utc') }} + interval '30 minutes'" in test_sql
     assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
     assert "from mature_feature_rows cur" in test_sql
+
+
+def test_feature_latest_window_null_test_uses_immature_window_not_full_horizon():
+    test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_latest_window_labels_null.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "feature_snapshot_step_minutes" in test_sql
+    assert "feature_label_horizon_minutes" in test_sql
+    assert "immature_window_minutes = label_horizon_minutes - snapshot_step_minutes" in test_sql
+    assert "interval '{{ immature_window_minutes }} minutes'" in test_sql

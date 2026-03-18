@@ -1,5 +1,9 @@
 {{ config(tags=['quality_gate']) }}
 
+{% set snapshot_step_minutes = var('feature_snapshot_step_minutes', 5) | int %}
+{% set label_horizon_minutes = var('feature_label_horizon_minutes', 30) | int %}
+{% set immature_window_minutes = label_horizon_minutes - snapshot_step_minutes %}
+
 with city_latest as (
     select
         city,
@@ -16,7 +20,7 @@ select
 from {{ ref('feat_station_snapshot_5min') }} f
 inner join city_latest cl
     on f.city = cl.city
-where {{ feature_dt_to_utc('f.dt') }} > cl.latest_dt - interval '30 minutes'
+where {{ feature_dt_to_utc('f.dt') }} > cl.latest_dt - interval '{{ immature_window_minutes }} minutes'
   and (
     f.y_stockout_bikes_30 is not null
     or f.y_stockout_docks_30 is not null
