@@ -1,42 +1,37 @@
-# Purpose: Streamlit dashboard container for AWS App Runner or ECS Fargate.
-# Notes:
-# - Exposes port 8080 (App Runner default).
-# - Installs only runtime deps from requirements.txt.
-# - Copies only the app + src code (no tests/mlruns/etc.).
-# - Reads env: AWS_REGION, CITY, SM_ENDPOINT, CW_NS.
+# Purpose: Streamlit dashboard container.
+# - Exposes port 8080.
+# - Installs core ML deps from requirements.txt, then dashboard-specific
+#   deps from requirements-app.txt (streamlit, plotly, folium, etc.).
+# - Copies only app + src code (no tests/mlruns/model_dir).
+# - On EC2 Docker Compose: pass STREAMLIT_PG_HOST / STREAMLIT_PG_PORT
+#   env vars to override the Postgres address in secrets.toml.
 
 FROM python:3.11-slim
 
-# Keep image small and deterministic
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# Install system packages if needed by your deps (kept minimal here)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl && \
+    build-essential curl libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy dependency manifest first to leverage Docker layer cache
-# Make sure requirements.txt includes: streamlit, boto3, pandas, pyarrow, s3fs, plotly, folium, etc.
+# Layer-cache friendly: copy manifests first, install, then copy code
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY requirements-app.txt /app/requirements-app.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+ && pip install --no-cache-dir -r /app/requirements-app.txt
 
-# Copy the minimum runtime code
 COPY app/ /app/app/
 COPY src/ /app/src/
 
-# Default envs (override in App Runner or docker run -e ...)
 ENV PORT=8080 \
     AWS_REGION=eu-west-3 \
     CITY=paris \
-    SM_ENDPOINT=bikeshare-prod \
-    CW_NS=Bikeshare/Model \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
 EXPOSE 8080
 
-# Health: App Runner can check GET /; Streamlit serves 200 on "/"
 CMD ["streamlit", "run", "app/dashboard.py", "--server.port=8080", "--server.address=0.0.0.0"]

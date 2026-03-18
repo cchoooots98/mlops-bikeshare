@@ -1,92 +1,61 @@
+"""PostgreSQL query helpers for the dashboard.
+
+Replaces the former Athena-based SQL functions.
+Reads station metadata and data-freshness from the analytics schema.
+"""
 from __future__ import annotations
 
-from .targeting import DashboardTargetConfig
+import pandas as pd
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+
+from dashboard.utils import validate_pg_identifier
 
 
-def build_station_info_query(*, database: str, view_name: str, city: str) -> str:
-    return f"""
-WITH ranked AS (
-    SELECT
-        station_id,
-        name,
-        capacity,
-        lat,
-        lon,
-        dt_ts,
-        row_number() OVER (PARTITION BY station_id ORDER BY dt_ts DESC) AS rn
-    FROM {database}.{view_name}
-    WHERE city = '{city}'
-)
-SELECT station_id, name, capacity, lat, lon
-FROM ranked
-WHERE rn = 1
-"""
+def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame:
+    """Return one row per station with its latest lat/lon/name/capacity.
+
+    Queries feat_station_snapshot_latest which holds the most recent
+    snapshot per station — a lightweight dedup via GROUP BY.
+
+    Returns DataFrame: station_id (str), name, capacity, lat, lon.
+    """
+    schema = validate_pg_identifier(schema)
+    sql = text(f"""
+        SELECT
+            CAST(station_id AS text)            AS station_id,
+            MAX(name)                           AS name,
+            MAX(capacity)                       AS capacity,
+            AVG(lat)                            AS lat,
+            AVG(lon)                            AS lon
+        FROM {schema}.feat_station_snapshot_latest
+        WHERE city = :city
+        GROUP BY station_id
+    """)
+    with engine.connect() as conn:
+        df = pd.read_sql(sql, conn, params={"city": city})
+    return df
 
 
-def build_latest_predictions_query(*, database: str, view_name: str, city: str, target: DashboardTargetConfig) -> str:
-    return f"""
-WITH ranked AS (
-    SELECT
-        CAST(station_id AS varchar) AS station_id,
-        TRY(date_parse(dt, '%%Y-%%m-%%d-%%H-%%i')) AS ts,
-        CAST({target.score_column} AS double) AS score,
-        row_number() OVER (
-            PARTITION BY CAST(station_id AS varchar)
-            ORDER BY TRY(date_parse(dt, '%%Y-%%m-%%d-%%H-%%i')) DESC
-        ) AS rn
-    FROM {database}.{view_name}
-    WHERE city = '{city}'
-      AND prediction_target = '{target.target_name}'
-      AND {target.score_column} IS NOT NULL
-)
-SELECT station_id, ts, score
-FROM ranked
-WHERE rn = 1
-"""
+def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str]) -> pd.DataFrame:
+    """Return the latest dt string and computed delay for each monitored table.
 
-
-def build_prediction_history_query(
-    *,
-    database: str,
-    view_name: str,
-    city: str,
-    station_id: str,
-    target: DashboardTargetConfig,
-    limit: int,
-) -> str:
-    return f"""
-SELECT
-    CAST(station_id AS varchar) AS station_id,
-    TRY(date_parse(dt, '%Y-%m-%d-%H-%i')) AS ts,
-    CAST({target.score_column} AS double) AS score
-FROM {database}.{view_name}
-WHERE city = '{city}'
-  AND prediction_target = '{target.target_name}'
-  AND CAST(station_id AS varchar) = '{station_id}'
-  AND {target.score_column} IS NOT NULL
-  AND TRY(date_parse(dt, '%Y-%m-%d-%H-%i')) IS NOT NULL
-ORDER BY ts DESC
-LIMIT {limit}
-"""
-
-
-def build_quality_summary_query(*, database: str, view_name: str, city: str, target: DashboardTargetConfig) -> str:
-    return f"""
-SELECT
-    dt,
-    CAST({target.score_column} AS double) AS score,
-    CAST({target.label_column} AS integer) AS label
-FROM {database}.{view_name}
-WHERE city = '{city}'
-  AND prediction_target = '{target.target_name}'
-  AND {target.score_column} IS NOT NULL
-  AND {target.label_column} IS NOT NULL
-"""
-
-
-def build_freshness_query(*, database: str, table_name: str, city: str) -> str:
-    return f"""
-SELECT '{table_name}' AS source, max(dt) AS latest_dt_str
-FROM {database}.{table_name}
-WHERE city = '{city}'
-"""
+    Returns DataFrame: source (str), latest_dt_str (str or None).
+    """
+    schema = validate_pg_identifier(schema)
+    rows = []
+    for table in tables:
+        table = validate_pg_identifier(table)
+        sql = text(f"""
+            SELECT MAX(dt) AS latest_dt_str
+            FROM {schema}.{table}
+            WHERE city = :city
+        """)
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(sql, {"city": city}).fetchone()
+            latest = result[0] if result else None
+        except Exception:
+            latest = None
+        rows.append({"source": table, "latest_dt_str": latest})
+    return pd.DataFrame(rows)

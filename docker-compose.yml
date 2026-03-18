@@ -199,6 +199,30 @@ services:
       --default-artifact-root /mlartifacts
     
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    ports:
+      - "8501:8080"
+    depends_on:
+      dw-postgres:
+        condition: service_healthy
+    environment:
+      # Override Postgres connection to Docker-internal network.
+      # The same .streamlit/secrets.toml (pg_host=localhost, pg_port=15432) works
+      # locally; on EC2 these env vars take precedence automatically.
+      STREAMLIT_PG_HOST: "dw-postgres"
+      STREAMLIT_PG_PORT: "5432"
+      AWS_REGION: ${AWS_REGION:-eu-west-3}
+      AWS_DEFAULT_REGION: eu-west-3
+      AWS_SDK_LOAD_CONFIG: "1"
+      CITY: ${CITY:-paris}
+      BUCKET: ${BUCKET}
+    volumes:
+      - ./.streamlit:/app/.streamlit:ro
+    restart: unless-stopped
+
 volumes:
   airflow_postgres_data:
   dw_postgres_data:
