@@ -71,16 +71,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Settings from secrets ────────────────────────────────────────────
-AWS_PROFILE  = st.secrets.get("aws_profile", None)
-AWS_REGION   = st.secrets["region"]
-BUCKET       = st.secrets["bucket"]
-CITY         = st.secrets.get("city", "paris")
-ENVIRONMENT  = st.secrets.get("serving_environment", "staging")
-PROJECT_SLUG = st.secrets.get("project_slug", "bikeshare")
-DEV_MODE     = bool(st.secrets.get("dev_mode", False))
-CW_NAMESPACE = st.secrets.get("cw_custom_ns", "Bikeshare/Model")
-THRESHOLD    = float(st.secrets.get("decision_threshold", 0.37))
-MODEL_VER    = st.secrets.get("model_version", "unknown")
+# Supports both the documented nested format ([aws]/[app] sections) and the
+# legacy flat format, so the same code works with both secrets.toml layouts.
+_aws = st.secrets.get("aws", {})
+_app = st.secrets.get("app", {})
+
+AWS_PROFILE  = _aws.get("profile")      or st.secrets.get("aws_profile")
+AWS_REGION   = _aws.get("region")       or st.secrets.get("region", "eu-west-3")
+BUCKET       = _aws.get("bucket")       or st.secrets.get("bucket", "bikeshare-paris-387706002632-eu-west-3")
+CITY         = _app.get("city")         or st.secrets.get("city", "paris")
+ENVIRONMENT  = _app.get("environment")  or st.secrets.get("serving_environment", "staging")
+PROJECT_SLUG = _app.get("project_slug") or st.secrets.get("project_slug", "bikeshare")
+DEV_MODE     = bool(_app.get("dev_mode") if "dev_mode" in _app else st.secrets.get("dev_mode", False))
+CW_NAMESPACE = _app.get("cw_custom_ns") or st.secrets.get("cw_custom_ns", "Bikeshare/Model")
+THRESHOLD    = float(_app.get("threshold")    or st.secrets.get("decision_threshold", 0.37))
+MODEL_VER    = _app.get("model_version") or st.secrets.get("model_version", "unknown")
 PG_SCHEMA    = st.secrets.get("pg_schema", "analytics")
 FRESHNESS_TABLES: list[str] = list(
     st.secrets.get(

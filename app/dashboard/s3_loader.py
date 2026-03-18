@@ -10,6 +10,8 @@ import io
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+import botocore.exceptions
+
 import pandas as pd
 
 from src.config.naming import prediction_prefix, quality_prefix
@@ -21,12 +23,18 @@ if TYPE_CHECKING:
 
 
 def _list_dt_keys(s3_client, bucket: str, prefix: str) -> list[str]:
-    """Return all object keys under a given S3 prefix, sorted ascending."""
+    """Return all object keys under a given S3 prefix, sorted ascending.
+
+    Returns an empty list if the bucket does not exist or is inaccessible.
+    """
     paginator = s3_client.get_paginator("list_objects_v2")
     keys = []
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            keys.append(obj["Key"])
+    try:
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+    except botocore.exceptions.ClientError:
+        return []
     return sorted(keys)
 
 
