@@ -147,7 +147,7 @@ services:
       bash -c "exec airflow celery worker
       --queues tier1
       --concurrency 2
-      --hostname worker-tier1@%h"
+      --celery-hostname worker-tier1@%h"
 
   airflow-worker-tier2:
     image: mlops-bikeshare-airflow:2.10.3-local
@@ -160,7 +160,7 @@ services:
       bash -c "exec airflow celery worker
       --queues tier2,default
       --concurrency 1
-      --hostname worker-tier2@%h"
+      --celery-hostname worker-tier2@%h"
   
   mlflow-postgres:
     image: postgres:15
