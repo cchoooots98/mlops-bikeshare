@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import boto3
+import botocore.exceptions
 import pandas as pd
 
 from src.monitoring.metrics.metrics_helper import build_metric_dimensions
@@ -52,11 +53,14 @@ def fetch_metric_series(
             "ReturnData": True,
         }
     ]
-    response = cw.get_metric_data(
-        StartTime=start,
-        EndTime=end,
-        MetricDataQueries=query,
-        ScanBy="TimestampAscending",
-    )
+    try:
+        response = cw.get_metric_data(
+            StartTime=start,
+            EndTime=end,
+            MetricDataQueries=query,
+            ScanBy="TimestampAscending",
+        )
+    except botocore.exceptions.ClientError:
+        return pd.DataFrame({"ts": [], metric_name: []})
     result = response["MetricDataResults"][0]
     return pd.DataFrame({"ts": result.get("Timestamps", []), metric_name: result.get("Values", [])})
