@@ -30,6 +30,7 @@ COPY src/ /app/src/
 ENV PORT=8080 \
     AWS_REGION=eu-west-3 \
     CITY=paris \
+    PYTHONPATH=/app \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
 EXPOSE 8080
