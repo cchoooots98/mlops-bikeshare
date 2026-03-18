@@ -23,14 +23,21 @@ def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame
     schema = validate_pg_identifier(schema)
     sql = text(f"""
         SELECT
-            CAST(station_id AS text)            AS station_id,
-            MAX(name)                           AS name,
-            MAX(capacity)                       AS capacity,
-            AVG(lat)                            AS lat,
-            AVG(lon)                            AS lon
-        FROM {schema}.feat_station_snapshot_latest
-        WHERE city = :city
-        GROUP BY station_id
+            CAST(f.station_id AS text)          AS station_id,
+            s.name                              AS name,
+            f.capacity,
+            f.lat,
+            f.lon
+        FROM {schema}.feat_station_snapshot_latest f
+        LEFT JOIN (
+            SELECT DISTINCT ON (city, station_id)
+                city,
+                station_id,
+                name
+            FROM public.stg_station_information
+            ORDER BY city, station_id, ingested_at DESC
+        ) s ON f.city = s.city AND f.station_id = s.station_id
+        WHERE f.city = :city
     """)
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"city": city})
