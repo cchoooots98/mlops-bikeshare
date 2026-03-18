@@ -170,6 +170,14 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
     base_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     local_compose = Path("docker-compose.local.yml").read_text(encoding="utf-8")
 
+    assert "AIRFLOW__CORE__EXECUTOR: CeleryExecutor" in base_compose
+    assert "redis:" in base_compose
+    assert "airflow-worker-tier1:" in base_compose
+    assert "airflow-worker-tier2:" in base_compose
+    assert "command: celery worker --queues tier1 --concurrency 2" in base_compose
+    assert "command: celery worker --queues tier2,default --concurrency 1" in base_compose
+    assert "airflow-worker-tier1:" in local_compose
+    assert "airflow-worker-tier2:" in local_compose
     assert "./model_dir:/opt/airflow/model_dir" in base_compose
     assert "AWS_PROFILE: Shirley-fr" not in base_compose
     assert "${USERPROFILE}/.aws/config" not in base_compose
@@ -189,10 +197,13 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
     assert "QUALITY_START_LAG_MINUTES = 7" in factory_source
     assert "QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)" in factory_source
     assert "METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)" in factory_source
-    assert "PSI_TO_METRICS_DELTA = timedelta(minutes=6)" in factory_source
     assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
     assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
-    assert "execution_delta=PSI_TO_METRICS_DELTA" in factory_source
+    assert "wait_for_metrics_dag" not in factory_source
+    assert "queue=_tier1_queue()" in factory_source
+    assert "queue=_tier2_queue()" in factory_source
+    assert "pool=_serving_prediction_pool()" in factory_source
+    assert "pool=_serving_observability_pool()" in factory_source
 
 
 def test_feature_future_window_label_smoke_test_is_runtime_scoped():
@@ -216,3 +227,16 @@ def test_feature_latest_window_null_test_uses_immature_window_not_full_horizon()
     assert "feature_label_horizon_minutes" in test_sql
     assert "immature_window_minutes = label_horizon_minutes - snapshot_step_minutes" in test_sql
     assert "interval '{{ immature_window_minutes }} minutes'" in test_sql
+
+
+def test_tiered_dbt_dags_use_explicit_queue_and_pool_assignments():
+    hotpath = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
+    feature = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
+    quality = Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(encoding="utf-8")
+
+    assert 'return _get_setting("DBT_HOTPATH_POOL", "DBT_HOTPATH_POOL", "dbt_hotpath_pool")' in hotpath
+    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in hotpath
+    assert 'return _get_setting("DBT_FEATURE_POOL", "DBT_FEATURE_POOL", "dbt_feature_pool")' in feature
+    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in feature
+    assert 'return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")' in quality
+    assert 'return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")' in quality

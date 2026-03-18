@@ -25,8 +25,9 @@ git checkout <your-branch>
 git pull --ff-only origin <your-branch>
 git rev-parse HEAD
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
+docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler
+docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
@@ -36,6 +37,10 @@ Notes:
 - `docker-compose.yml` is the formal EC2 baseline.
 - Do not use `docker-compose.local.yml` on EC2.
 - Airflow now mounts `./model_dir` to `/opt/airflow/model_dir`, so deployment-state and package paths resolve consistently inside the container.
+- Airflow now runs with `CeleryExecutor` on a single EC2 host:
+  - `redis` is the local broker
+  - `airflow-worker-tier1` handles the prediction-critical path
+  - `airflow-worker-tier2` handles quality, metrics, PSI, and heavier dbt observation work
 
 ## Mandatory Smoke Check
 Before you unpause any staging DAG again, smoke-test both prediction tasks:
@@ -52,7 +57,7 @@ The serving DAG timing contract is:
 - quality backfill runs 37 minutes after the prediction run it depends on
 - that 37-minute offset includes the 30-minute label horizon plus a 7-minute buffer slot
 - metrics waits 5 minutes after quality
-- PSI waits 6 minutes after metrics
+- PSI runs independently from metrics and instead fails fast when feature freshness is missing
 
 ## After Smoke Passes
 If you are in the staging observation window, unpause only:

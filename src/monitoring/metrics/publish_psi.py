@@ -1,4 +1,5 @@
 import argparse
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -65,6 +66,41 @@ def build_drift_window(
         recent_start=_format_dt(recent_start),
         recent_end=_format_dt(recent_end),
     )
+
+
+def load_latest_feature_dt(*, config: PostgresFeatureConfig, city: str) -> datetime:
+    sql = text(
+        f"""
+        SELECT max(dt) AS max_dt
+        FROM "{validate_identifier(config.pg_schema)}"."{validate_identifier(config.training_table)}"
+        WHERE city = :city
+        """
+    )
+    engine = create_pg_engine(config)
+    try:
+        with engine.connect() as connection:
+            max_dt = pd.read_sql_query(sql, connection, params={"city": city}).iloc[0]["max_dt"]
+    finally:
+        engine.dispose()
+    if not max_dt:
+        raise RuntimeError(f"feature freshness check failed: no features found for city={city}")
+    return datetime.strptime(max_dt, DT_FORMAT).replace(tzinfo=timezone.utc)
+
+
+def assert_feature_freshness(
+    *,
+    latest_feature_dt: datetime,
+    max_feature_age_minutes: int,
+    now_utc: datetime | None = None,
+) -> timedelta:
+    reference_now = now_utc or datetime.now(timezone.utc)
+    age = reference_now.astimezone(timezone.utc) - latest_feature_dt.astimezone(timezone.utc)
+    if age > timedelta(minutes=max_feature_age_minutes):
+        raise RuntimeError(
+            "feature freshness check failed: "
+            f"latest dt {latest_feature_dt.isoformat()} age={age} exceeds {max_feature_age_minutes} minutes"
+        )
+    return age
 
 
 def load_feature_window(
@@ -168,8 +204,14 @@ def publish_psi(
     lookback_hours: int = 24,
     baseline_days: int = 7,
     aggregator: str = "max",
+    max_feature_age_minutes: int = 45,
     dry_run: bool = False,
 ) -> dict[str, object]:
+    latest_feature_dt = load_latest_feature_dt(config=config, city=city)
+    feature_age = assert_feature_freshness(
+        latest_feature_dt=latest_feature_dt,
+        max_feature_age_minutes=max_feature_age_minutes,
+    )
     window = build_drift_window(
         now_utc=datetime.now(timezone.utc),
         lookback_hours=lookback_hours,
@@ -187,6 +229,11 @@ def publish_psi(
         start_dt=window.recent_start,
         end_dt=window.recent_end,
     )
+    if recent_df.empty:
+        raise RuntimeError(
+            "feature freshness check failed: "
+            f"recent feature window is empty for city={city}, window={window.recent_start}..{window.recent_end}"
+        )
 
     if baseline_df.empty or recent_df.empty:
         result = {
@@ -194,6 +241,8 @@ def publish_psi(
             "feature_count": 0,
             "baseline_rows": int(len(baseline_df)),
             "recent_rows": int(len(recent_df)),
+            "latest_feature_dt_utc": latest_feature_dt.isoformat(),
+            "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
             "window": window,
         }
         if dry_run:
@@ -215,6 +264,8 @@ def publish_psi(
         "feature_count": len(feature_psis),
         "baseline_rows": int(len(baseline_df)),
         "recent_rows": int(len(recent_df)),
+        "latest_feature_dt_utc": latest_feature_dt.isoformat(),
+        "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
         "window": window,
         "top_features": sorted(feature_psis.items(), key=lambda item: item[1], reverse=True)[:5],
     }
@@ -248,6 +299,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lookback-hours", type=int, default=24)
     parser.add_argument("--baseline-days", type=int, default=7)
     parser.add_argument("--aggregator", choices=["max", "mean"], default="max")
+    parser.add_argument(
+        "--max-feature-age-minutes",
+        type=int,
+        default=int(os.environ.get("PSI_MAX_FEATURE_AGE_MINUTES", "45")),
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -271,6 +327,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         lookback_hours=args.lookback_hours,
         baseline_days=args.baseline_days,
         aggregator=args.aggregator,
+        max_feature_age_minutes=args.max_feature_age_minutes,
         dry_run=args.dry_run,
     )
     print(result)

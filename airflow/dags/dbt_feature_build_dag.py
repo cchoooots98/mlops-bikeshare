@@ -27,7 +27,11 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 
 
 def _get_pool_name() -> str:
-    return _get_setting("DBT_AIRFLOW_POOL", "DBT_AIRFLOW_POOL", "dbt_warehouse_serial")
+    return _get_setting("DBT_FEATURE_POOL", "DBT_FEATURE_POOL", "dbt_feature_pool")
+
+
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
 
 
 def _build_feature_model_vars(context: dict) -> dict[str, object]:
@@ -121,15 +125,18 @@ with DAG(
         mode="reschedule",
         poke_interval=30,
         timeout=15 * 60,
+        queue=_get_queue_name(),
     )
     build_and_test_features = PythonOperator(
         task_id="run_dbt_feature_build",
         python_callable=run_dbt_feature_build_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
     smoke_test_features = PythonOperator(
         task_id="run_dbt_feature_smoke_tests",
         python_callable=run_dbt_feature_smoke_tests_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
 

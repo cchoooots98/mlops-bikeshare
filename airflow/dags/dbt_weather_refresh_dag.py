@@ -20,7 +20,11 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 
 
 def _get_pool_name() -> str:
-    return _get_setting("DBT_AIRFLOW_POOL", "DBT_AIRFLOW_POOL", "dbt_warehouse_serial")
+    return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")
+
+
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
 
 
 def run_dbt_weather_refresh_task():
@@ -69,10 +73,12 @@ with DAG(
         mode="reschedule",
         poke_interval=30,
         timeout=20 * 60,
+        queue=_get_queue_name(),
     )
     run_weather_refresh = PythonOperator(
         task_id="run_dbt_weather_refresh",
         python_callable=run_dbt_weather_refresh_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
 

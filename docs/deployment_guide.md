@@ -168,6 +168,14 @@ docker compose ps
 curl -I http://localhost:8080
 ```
 
+### Runtime mode
+- the formal EC2 runtime is now single-host Airflow with `CeleryExecutor`
+- Redis runs locally in Compose as the Celery broker
+- worker separation is explicit:
+  - `airflow-worker-tier1` for the prediction-critical path
+  - `airflow-worker-tier2` for quality, metrics, PSI, and heavier dbt observation work
+- Tier-1 and Tier-2 may run concurrently, but they do not share the same critical queue or pool
+
 ### Path portability rule
 - package manifest and deployment-state JSON now store portable repo-relative paths such as:
   - `model_dir/packages/bikes/<model-name>/<run-id>`
@@ -184,8 +192,9 @@ git checkout <your-branch>
 git pull --ff-only origin <your-branch>
 git rev-parse HEAD
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
+docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler
+docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
@@ -234,6 +243,9 @@ ssh -i <your-key.pem> -L 8080:localhost:8080 ubuntu@<ec2-public-dns>
 ### Expected output
 - Compose services are healthy
 - Airflow responds with `HTTP/1.1 200 OK` or a redirect response
+- the tiered worker set is running:
+  - `airflow-worker-tier1`
+  - `airflow-worker-tier2`
 - Airflow can parse both DAG sets:
   - `staging_prediction_15min`
   - `staging_quality_backfill_15min`
@@ -425,7 +437,8 @@ Timing contract for the staging/serving DAG chain:
   - 30 minutes for label maturity
   - 7 extra minutes for the post-maturity backfill slot
 - hourly metrics wait for the quality DAG run from 5 minutes earlier
-- hourly PSI waits for the metrics DAG run from 6 minutes earlier
+- hourly PSI no longer waits for hourly metrics
+- hourly PSI publishes independently and fails fast if the feature store is stale or the recent feature window is empty
 
 Expected SageMaker object lifecycle per deploy:
 - one timestamped `Model`

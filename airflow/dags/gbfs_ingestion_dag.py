@@ -19,6 +19,14 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
     return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
 
 
+def _tier1_queue() -> str:
+    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
+
+
+def _tier2_queue() -> str:
+    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
+
+
 def _dw_conn_uri() -> str:
     conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
     conn = BaseHook.get_connection(conn_id)
@@ -89,8 +97,16 @@ with DAG(
     default_args=default_args,
     tags=["gbfs", "paris", "daily"],
 ):
-    info_create = PythonOperator(task_id="create_staging_tables", python_callable=create_staging_tables_task)
-    info_ingest = PythonOperator(task_id="ingest_station_information", python_callable=ingest_station_information_task)
+    info_create = PythonOperator(
+        task_id="create_staging_tables",
+        python_callable=create_staging_tables_task,
+        queue=_tier2_queue(),
+    )
+    info_ingest = PythonOperator(
+        task_id="ingest_station_information",
+        python_callable=ingest_station_information_task,
+        queue=_tier2_queue(),
+    )
     info_create >> info_ingest
 
 with DAG(
@@ -101,6 +117,14 @@ with DAG(
     default_args=default_args,
     tags=["gbfs", "paris", "5min"],
 ):
-    status_create = PythonOperator(task_id="create_staging_tables", python_callable=create_staging_tables_task)
-    status_ingest = PythonOperator(task_id="ingest_station_status", python_callable=ingest_station_status_task)
+    status_create = PythonOperator(
+        task_id="create_staging_tables",
+        python_callable=create_staging_tables_task,
+        queue=_tier1_queue(),
+    )
+    status_ingest = PythonOperator(
+        task_id="ingest_station_status",
+        python_callable=ingest_station_status_task,
+        queue=_tier1_queue(),
+    )
     status_create >> status_ingest

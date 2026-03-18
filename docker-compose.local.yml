@@ -22,3 +22,19 @@ services:
       - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
       - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
       - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
+
+  airflow-worker-tier1:
+    environment:
+      AWS_PROFILE: Shirley-fr
+    volumes:
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache
+
+  airflow-worker-tier2:
+    environment:
+      AWS_PROFILE: Shirley-fr
+    volumes:
+      - ${USERPROFILE}/.aws/config:/home/airflow/.aws/config:ro
+      - ${USERPROFILE}/.aws/credentials:/home/airflow/.aws/credentials:ro
+      - ${USERPROFILE}/.aws/sso/cache:/home/airflow/.aws/sso/cache

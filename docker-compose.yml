@@ -13,6 +13,14 @@ services:
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   dw-postgres:
     image: postgres:15
     environment:
@@ -36,16 +44,23 @@ services:
     image: mlops-bikeshare-airflow:2.10.3-local
     depends_on:
       - airflow-postgres
+      - redis
       - dw-postgres
     environment: &airflow-env
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: "1"
+      AIRFLOW__CELERY__TASK_ACKS_LATE: "true"
       # Airflow 2.10.3 still emits this deprecation warning internally even when the new key is used.
       PYTHONWARNINGS: "ignore::FutureWarning:airflow.configuration"
       GBFS_BASE_URL: "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json"
       GBFS_CITY: "paris"
       DW_CONN_ID: "velib_dw"
+      AIRFLOW_TIER1_QUEUE: "tier1"
+      AIRFLOW_TIER2_QUEUE: "tier2"
       DBT_PROJECT_DIR: "dbt/bikeshare_dbt"
       DBT_PROFILES_DIR: "dbt"
       DBT_HOST: "dw-postgres"
@@ -55,7 +70,12 @@ services:
       DBT_DATABASE: "velib_dw"
       DBT_SCHEMA: "analytics"
       DBT_THREADS: "1"
-      DBT_AIRFLOW_POOL: "dbt_warehouse_serial"
+      DBT_AIRFLOW_POOL: "dbt_quality_pool"
+      DBT_HOTPATH_POOL: "dbt_hotpath_pool"
+      DBT_FEATURE_POOL: "dbt_feature_pool"
+      DBT_QUALITY_POOL: "dbt_quality_pool"
+      SERVING_PREDICTION_POOL: "serving_prediction_pool"
+      SERVING_OBSERVABILITY_POOL: "serving_observability_pool"
       DBT_FEATURE_BUILD_SELECTOR: "hf_feature_build_models"
       DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_smoke_tests"
       DBT_FEATURE_BUILD_SKIP_TESTS: "false"
@@ -77,6 +97,7 @@ services:
       AWS_SDK_LOAD_CONFIG: "1"
       CITY: ${CITY}
       BUCKET: ${BUCKET}
+      PSI_MAX_FEATURE_AGE_MINUTES: "45"
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
     volumes: &airflow-volumes
       - ./airflow/dags:/opt/airflow/dags
@@ -87,12 +108,19 @@ services:
       - ./pipelines:/opt/airflow/pipelines
       - ./model_dir:/opt/airflow/model_dir
     command: >
-      bash -c "airflow db migrate && (airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true) && (airflow pools set dbt_warehouse_serial 1 'Serialize dbt warehouse mutations' || true)"
+      bash -c "airflow db migrate &&
+      (airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true) &&
+      (airflow pools set dbt_hotpath_pool 1 'Tier-1 dbt hotpath' || true) &&
+      (airflow pools set dbt_feature_pool 1 'Tier-1 dbt feature build' || true) &&
+      (airflow pools set dbt_quality_pool 1 'Tier-2 dbt quality and refresh' || true) &&
+      (airflow pools set serving_prediction_pool 2 'Tier-1 serving prediction runtime' || true) &&
+      (airflow pools set serving_observability_pool 1 'Tier-2 serving observability' || true)"
 
   airflow-webserver:
     image: mlops-bikeshare-airflow:2.10.3-local
     depends_on:
       - airflow-init
+      - redis
     environment: *airflow-env
     volumes: *airflow-volumes
     ports:
@@ -103,9 +131,28 @@ services:
     image: mlops-bikeshare-airflow:2.10.3-local
     depends_on:
       - airflow-init
+      - redis
     environment: *airflow-env
     volumes: *airflow-volumes
     command: scheduler
+
+  airflow-worker-tier1:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    depends_on:
+      - airflow-init
+      - redis
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: celery worker --queues tier1 --concurrency 2
+
+  airflow-worker-tier2:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    depends_on:
+      - airflow-init
+      - redis
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: celery worker --queues tier2,default --concurrency 1
   
   mlflow-postgres:
     image: postgres:15

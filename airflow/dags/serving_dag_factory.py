@@ -22,7 +22,10 @@ QUALITY_LABEL_MATURITY_MINUTES = 30
 QUALITY_START_LAG_MINUTES = 7
 QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)
 METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)
-PSI_TO_METRICS_DELTA = timedelta(minutes=6)
+TIER1_QUEUE = "tier1"
+TIER2_QUEUE = "tier2"
+SERVING_PREDICTION_POOL = "serving_prediction_pool"
+SERVING_OBSERVABILITY_POOL = "serving_observability_pool"
 DEFAULT_ARGS = {
     "owner": "airflow",
     "retries": 1,
@@ -37,6 +40,22 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 def _dw_connection():
     conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
     return BaseHook.get_connection(conn_id)
+
+
+def _tier1_queue() -> str:
+    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", TIER1_QUEUE)
+
+
+def _tier2_queue() -> str:
+    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", TIER2_QUEUE)
+
+
+def _serving_prediction_pool() -> str:
+    return _get_setting("SERVING_PREDICTION_POOL", "SERVING_PREDICTION_POOL", SERVING_PREDICTION_POOL)
+
+
+def _serving_observability_pool() -> str:
+    return _get_setting("SERVING_OBSERVABILITY_POOL", "SERVING_OBSERVABILITY_POOL", SERVING_OBSERVABILITY_POOL)
 
 
 def _base_runtime_env(*, target_name: str, environment: str) -> dict[str, str]:
@@ -169,6 +188,8 @@ def build_serving_dags(
                 task_id=f"predict_{target}",
                 python_callable=run_prediction_task,
                 op_kwargs={"target_name": target, "environment": environment},
+                queue=_tier1_queue(),
+                pool=_serving_prediction_pool(),
             )
 
     with DAG(
@@ -191,12 +212,15 @@ def build_serving_dags(
             mode="reschedule",
             poke_interval=60,
             timeout=15 * 60,
+            queue=_tier2_queue(),
         )
         for target in TARGETS:
             task = PythonOperator(
                 task_id=f"backfill_quality_{target}",
                 python_callable=run_quality_backfill_task,
                 op_kwargs={"target_name": target, "environment": environment},
+                queue=_tier2_queue(),
+                pool=_serving_observability_pool(),
             )
             wait_for_prediction >> task
 
@@ -220,12 +244,15 @@ def build_serving_dags(
             mode="reschedule",
             poke_interval=60,
             timeout=20 * 60,
+            queue=_tier2_queue(),
         )
         for target in TARGETS:
             task = PythonOperator(
                 task_id=f"publish_metrics_{target}",
                 python_callable=run_metrics_publish_task,
                 op_kwargs={"target_name": target, "environment": environment},
+                queue=_tier2_queue(),
+                pool=_serving_observability_pool(),
             )
             wait_for_quality >> task
 
@@ -238,24 +265,13 @@ def build_serving_dags(
         default_args=DEFAULT_ARGS,
         tags=psi_tags,
     ) as psi_dag:
-        wait_for_metrics = ExternalTaskSensor(
-            task_id="wait_for_metrics_dag",
-            external_dag_id=metrics_dag_id,
-            external_task_id=None,
-            allowed_states=["success"],
-            failed_states=["failed"],
-            check_existence=True,
-            execution_delta=PSI_TO_METRICS_DELTA,
-            mode="reschedule",
-            poke_interval=60,
-            timeout=20 * 60,
-        )
         for target in TARGETS:
-            task = PythonOperator(
+            PythonOperator(
                 task_id=f"publish_psi_{target}",
                 python_callable=run_psi_publish_task,
                 op_kwargs={"target_name": target, "environment": environment},
+                queue=_tier2_queue(),
+                pool=_serving_observability_pool(),
             )
-            wait_for_metrics >> task
 
     return prediction_dag, quality_dag, metrics_dag, psi_dag

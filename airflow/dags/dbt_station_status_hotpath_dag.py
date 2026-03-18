@@ -28,7 +28,11 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 
 
 def _get_pool_name() -> str:
-    return _get_setting("DBT_AIRFLOW_POOL", "DBT_AIRFLOW_POOL", "dbt_warehouse_serial")
+    return _get_setting("DBT_HOTPATH_POOL", "DBT_HOTPATH_POOL", "dbt_hotpath_pool")
+
+
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
 
 
 def _get_city() -> str:
@@ -158,23 +162,28 @@ with DAG(
         mode="reschedule",
         poke_interval=30,
         timeout=15 * 60,
+        queue=_get_queue_name(),
     )
     dim_station_staleness_warn = PythonOperator(
         task_id="check_dim_station_staleness",
         python_callable=check_dim_station_staleness_task,
+        queue=_get_queue_name(),
     )
     dim_weather_staleness_gate = PythonOperator(
         task_id="check_dim_weather_staleness",
         python_callable=check_dim_weather_staleness_task,
+        queue=_get_queue_name(),
     )
     run_station_status_hotpath = PythonOperator(
         task_id="run_dbt_station_status_hotpath",
         python_callable=run_dbt_station_status_hotpath_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
     test_station_status_hotpath = PythonOperator(
         task_id="run_dbt_station_status_hotpath_tests",
         python_callable=run_dbt_station_status_hotpath_tests_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
 

@@ -19,6 +19,10 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
     return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
 
 
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
+
+
 def _dw_conn_uri() -> str:
     conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
     conn = BaseHook.get_connection(conn_id)
@@ -75,9 +79,11 @@ with DAG(
     create_table = PythonOperator(
         task_id="create_weather_staging_tables",
         python_callable=create_weather_staging_tables_task,
+        queue=_get_queue_name(),
     )
     ingest = PythonOperator(
         task_id="ingest_weather_dual_write",
         python_callable=ingest_weather_task,
+        queue=_get_queue_name(),
     )
     create_table >> ingest

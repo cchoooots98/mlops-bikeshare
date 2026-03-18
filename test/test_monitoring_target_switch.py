@@ -1,4 +1,7 @@
+from datetime import datetime, timezone
+
 import pandas as pd
+import pytest
 
 from src.config import quality_key
 from src.model_target import target_spec_from_predict_bikes
@@ -108,3 +111,55 @@ def test_publish_psi_computes_target_aware_feature_map():
     assert set(feature_psis) == {"util_bikes", "temperature_c"}
     assert feature_psis["util_bikes"] > 0
     assert publish_psi.aggregate_psi(feature_psis, aggregator="max") >= feature_psis["temperature_c"]
+
+
+def test_publish_psi_feature_freshness_rejects_stale_latest_dt():
+    latest_dt = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(RuntimeError, match="feature freshness check failed"):
+        publish_psi.assert_feature_freshness(
+            latest_feature_dt=latest_dt,
+            max_feature_age_minutes=45,
+            now_utc=datetime(2026, 3, 18, 1, 0, tzinfo=timezone.utc),
+        )
+
+
+def test_publish_psi_raises_when_recent_feature_window_is_empty(monkeypatch):
+    config = publish_psi.PostgresFeatureConfig(
+        pg_host="dw-postgres",
+        pg_port=5432,
+        pg_db="velib_dw",
+        pg_user="velib",
+        pg_password="velib",
+    )
+
+    monkeypatch.setattr(
+        publish_psi,
+        "load_latest_feature_dt",
+        lambda **_: datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "assert_feature_freshness",
+        lambda **_: datetime.now(timezone.utc) - datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+    )
+
+    call_count = {"value": 0}
+
+    def fake_load_feature_window(**kwargs):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return pd.DataFrame({"util_bikes": [0.1], "temperature_c": [10.0]})
+        return pd.DataFrame()
+
+    monkeypatch.setattr(publish_psi, "load_feature_window", fake_load_feature_window)
+
+    with pytest.raises(RuntimeError, match="recent feature window is empty"):
+        publish_psi.publish_psi(
+            config=config,
+            city="paris",
+            endpoint="bikeshare-bikes-staging",
+            target_name="bikes",
+            environment="staging",
+            dry_run=True,
+        )

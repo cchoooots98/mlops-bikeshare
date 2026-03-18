@@ -20,7 +20,11 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 
 
 def _get_pool_name() -> str:
-    return _get_setting("DBT_AIRFLOW_POOL", "DBT_AIRFLOW_POOL", "dbt_warehouse_serial")
+    return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")
+
+
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
 
 
 def run_dbt_station_topology_task():
@@ -70,10 +74,12 @@ with DAG(
         mode="reschedule",
         poke_interval=60,
         timeout=60 * 60,
+        queue=_get_queue_name(),
     )
     run_station_topology = PythonOperator(
         task_id="run_dbt_station_topology",
         python_callable=run_dbt_station_topology_task,
+        queue=_get_queue_name(),
         pool=_get_pool_name(),
     )
 
