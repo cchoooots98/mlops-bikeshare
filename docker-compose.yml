@@ -220,7 +220,7 @@ services:
       CITY: ${CITY:-paris}
       BUCKET: ${BUCKET}
     volumes:
-      - ./.streamlit:/app/.streamlit:ro
+      - ./.streamlit:/app/.streamlit
     restart: unless-stopped
 
 volumes:
