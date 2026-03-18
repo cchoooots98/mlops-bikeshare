@@ -1,5 +1,13 @@
 # CI And CD
 
+## Overview
+
+CI/CD in this project has two distinct concerns:
+- **CI**: GitHub Actions validates code quality and test coverage on every push/PR
+- **CD**: Model release is a manual, gate-controlled pipeline (not automated deployment)
+
+Production scheduling runs on EC2-hosted Airflow, not in GitHub Actions.
+
 ## CI
 CI should validate:
 - unit and integration tests

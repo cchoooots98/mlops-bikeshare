@@ -101,16 +101,16 @@ $env:MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
 - `src/serving/`: router request parsing and target resolution
 - `pipelines/`: export, deploy, promote, and rollback entrypoints
 - `infra/terraform/`: bootstrap/live entrypoints and platform modules
-- `docs/`: execution guide, deployment guide, dashboard spec, and operator runbooks
+- `docs/`: architecture, data pipeline, ML lifecycle, deployment guide, operations runbook, dashboard, and CI/CD reference
 
 ## Formal Guides
 Open these local files directly:
-- [docs/project_documents.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/project_documents.md)
-- [docs/execution_guide.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/execution_guide.md)
-- [docs/deployment_guide.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/deployment_guide.md)
-- [docs/runbook_prod.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/runbook_prod.md)
-- [docs/dashboard_spec.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/dashboard_spec.md)
-- [docs/plan_detail/current_state_to_enterprise_operator_manual.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/plan_detail/current_state_to_enterprise_operator_manual.md)
+- [docs/README.md](docs/README.md) — document index and authority map
+- [docs/execution_guide.md](docs/execution_guide.md) — 10-day build sequence
+- [docs/deployment_guide.md](docs/deployment_guide.md) — command authority for all environments
+- [docs/operations_runbook.md](docs/operations_runbook.md) — SLA, monitoring, and incident response
+- [docs/dashboard.md](docs/dashboard.md) — dashboard spec and current implementation
+- [docs/plan_detail/current_state_to_enterprise_operator_manual.md](docs/plan_detail/current_state_to_enterprise_operator_manual.md) — step-by-step operator manual
 
 If you are actively building or rebuilding the project, start with the operator manual.
 Use `docs/deployment_guide.md` as the command authority and `docs/evidence_capture_template.md` to save phase evidence.

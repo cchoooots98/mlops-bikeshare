@@ -4,7 +4,7 @@
 This is the high-level build sequence for the repository.
 
 If you are actively executing commands, use the operator manual as the detailed entrypoint:
-- [current_state_to_enterprise_operator_manual.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/plan_detail/current_state_to_enterprise_operator_manual.md)
+- [plan_detail/current_state_to_enterprise_operator_manual.md](plan_detail/current_state_to_enterprise_operator_manual.md)
 
 Use this guide when you want the order and intent without all troubleshooting detail.
 
