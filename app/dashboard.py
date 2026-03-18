@@ -85,8 +85,7 @@ PG_SCHEMA    = st.secrets.get("pg_schema", "analytics")
 FRESHNESS_TABLES: list[str] = list(
     st.secrets.get(
         "freshness_tables",
-        ["station_information_raw", "station_status_raw", "weather_hourly_raw",
-         "feat_station_snapshot_latest", "inference", "monitoring_quality"],
+        ["feat_station_snapshot_latest"],
     )
 )
 
