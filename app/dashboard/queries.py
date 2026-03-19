@@ -14,21 +14,26 @@ from dashboard.utils import validate_pg_identifier
 
 
 def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame:
-    """Return one row per station with its latest lat/lon/name/capacity.
+    """Return one row per station with its latest business-ready serving context.
 
     Queries feat_station_snapshot_latest which holds the most recent
     snapshot per station — a lightweight dedup via GROUP BY.
 
-    Returns DataFrame: station_id (str), name, capacity, lat, lon.
+    Returns DataFrame: station_id (str), station_name, dt, bikes, docks, capacity, lat, lon.
     """
     schema = validate_pg_identifier(schema)
     sql = text(f"""
         SELECT
-            CAST(f.station_id AS text)          AS station_id,
-            COALESCE(ds.station_name, CAST(f.station_id AS text)) AS name,
-            COALESCE(ds.capacity, f.capacity)   AS capacity,
-            COALESCE(ds.latitude, f.lat)        AS lat,
-            COALESCE(ds.longitude, f.lon)       AS lon
+            CAST(f.station_id AS text)                      AS station_id,
+            COALESCE(ds.station_name, CAST(f.station_id AS text)) AS station_name,
+            f.dt                                           AS dt,
+            f.bikes                                        AS bikes,
+            f.docks                                        AS docks,
+            COALESCE(ds.capacity, f.capacity)              AS capacity,
+            COALESCE(ds.latitude, f.lat)                   AS lat,
+            COALESCE(ds.longitude, f.lon)                  AS lon,
+            f.util_bikes                                   AS util_bikes,
+            f.util_docks                                   AS util_docks
         FROM {schema}.feat_station_snapshot_latest f
         LEFT JOIN {schema}.dim_station ds
             ON f.city = ds.city

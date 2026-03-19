@@ -16,6 +16,7 @@ from dashboard.cloudwatch import (
 )
 from dashboard.contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus
 from dashboard.metadata import load_dashboard_model_metadata
+from dashboard.presentation import MetricSpec, build_station_risk_frame, resolve_selected_station
 from dashboard.queries import load_freshness, load_station_info
 from dashboard.s3_loader import (
     load_latest_predictions,
@@ -29,6 +30,8 @@ from dashboard.views import (
     render_history_chart,
     render_metric_section,
     render_prediction_map,
+    render_quality_status_panel,
+    render_selected_station_summary,
     render_status_cards,
     render_top_risk_table,
 )
@@ -52,8 +55,13 @@ st.markdown(
 }
 [data-testid="metric-container"] label { font-size: 0.78rem; color: #6c757d; }
 [data-testid="metric-container"] [data-testid="stMetricValue"] { font-size: 1.1rem; }
-[data-baseweb="tab-list"] { gap: 4px; }
-[data-baseweb="tab"] { border-radius: 6px 6px 0 0; font-weight: 500; }
+[data-baseweb="tab-list"] { gap: 18px; }
+[data-baseweb="tab"] {
+    border-radius: 8px 8px 0 0;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 0.7rem 1rem 0.9rem;
+}
 [data-testid="stSidebar"] { background: #f1f3f5; }
 [data-testid="stSidebar"] .block-container { padding-top: 1rem; }
 </style>
@@ -78,6 +86,14 @@ PG_SCHEMA = st.secrets.get("pg_schema", "analytics")
 PREDICTION_STALE_AFTER_MINUTES = int(
     _app.get("prediction_stale_after_minutes")
     or st.secrets.get("prediction_stale_after_minutes", 30)
+)
+QUALITY_STALE_AFTER_MINUTES = int(
+    _app.get("quality_stale_after_minutes")
+    or st.secrets.get("quality_stale_after_minutes", 45)
+)
+FEATURE_STALE_AFTER_MINUTES = int(
+    _app.get("feature_stale_after_minutes")
+    or st.secrets.get("feature_stale_after_minutes", 60)
 )
 FRESHNESS_TABLES: list[str] = list(
     st.secrets.get(
@@ -239,9 +255,16 @@ render_alert_banner(
     stale_after_minutes=PREDICTION_STALE_AFTER_MINUTES,
 )
 
+station_risk_frame = build_station_risk_frame(
+    station_info=station_info,
+    prediction_result=latest_predictions,
+    target_name=target.target_name,
+    threshold=threshold,
+)
+
 tab_map, tab_history, tab_quality, tab_system, tab_status = st.tabs(
     [
-        "Live Map & Risk Table",
+        "Live Ops",
         "Station History",
         "Prediction Quality",
         "System Health",
@@ -250,23 +273,30 @@ tab_map, tab_history, tab_quality, tab_system, tab_status = st.tabs(
 )
 
 with tab_map:
-    selected_station = render_prediction_map(
-        station_info=station_info,
-        prediction_result=latest_predictions,
+    render_prediction_map(
+        station_risk_frame=station_risk_frame,
         target=target,
         threshold=threshold,
     )
+    selected_station = resolve_selected_station(
+        station_risk_frame=station_risk_frame,
+        selected_station_id=st.session_state.get("selected_station_id"),
+    )
+    if selected_station is not None:
+        st.session_state["selected_station_id"] = str(selected_station["station_id"])
+        st.session_state["selected_station_name"] = str(selected_station["station_name"])
+    render_selected_station_summary(selected_station=selected_station, target=target)
     render_top_risk_table(
-        prediction_result=latest_predictions,
-        target=target,
+        station_risk_frame=station_risk_frame,
         top_n=top_n,
-        threshold=threshold,
     )
 
 with tab_history:
-    history_station = selected_station or (
-        str(latest_predictions.data.iloc[0]["station_id"]) if latest_predictions.ok and not latest_predictions.data.empty else None
+    selected_station = resolve_selected_station(
+        station_risk_frame=station_risk_frame,
+        selected_station_id=st.session_state.get("selected_station_id"),
     )
+    history_station = str(selected_station["station_id"]) if selected_station is not None else None
     if history_station:
         with st.spinner(f"Loading history for station {history_station}..."):
             history_result = load_prediction_history(
@@ -280,10 +310,15 @@ with tab_history:
     else:
         history_result = ArtifactLoadResult(
             status=LoadStatus.NO_OBJECTS,
-            message="Select a station on the map after prediction data becomes available.",
+            message="A station will appear here as soon as prediction data becomes available.",
             source_name="Prediction history",
         )
-    render_history_chart(history_result=history_result, target=target, threshold=threshold)
+    render_history_chart(
+        history_result=history_result,
+        target=target,
+        threshold=threshold,
+        selected_station=selected_station,
+    )
 
 with tab_quality:
     dims = build_dashboard_metric_dimensions(
@@ -312,10 +347,44 @@ with tab_quality:
             dimensions=dims,
             stat="Sum",
         ),
+        "ThresholdHitRate-24h": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="ThresholdHitRate-24h",
+            dimensions=dims,
+        ),
+        "Samples-24h": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="Samples-24h",
+            dimensions=dims,
+            stat="Sum",
+        ),
     }
-    render_metric_section(title="Model performance metrics", series_map=model_health)
+    render_quality_status_panel(
+        quality_result=latest_quality,
+        metric_series_map=model_health,
+    )
+    render_metric_section(
+        title="Prediction quality | last 24 hours (UTC)",
+        series_map=model_health,
+        quality_result=latest_quality,
+        metric_specs={
+            "PR-AUC-24h": MetricSpec(label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55, decimals=3),
+            "F1-24h": MetricSpec(label="F1 (24h)", direction="higher", warning=0.55, critical=0.40, decimals=3),
+            "PredictionHeartbeat": MetricSpec(label="Prediction Heartbeat (24h)", direction="higher", warning=1.0, critical=1.0, decimals=0),
+            "ThresholdHitRate-24h": MetricSpec(label="Threshold Hit Rate (24h)", direction="none", decimals=3),
+            "Samples-24h": MetricSpec(label="Samples (24h)", direction="higher", warning=1.0, critical=1.0, decimals=0),
+        },
+    )
 
 with tab_system:
+    dims = build_dashboard_metric_dimensions(
+        environment=ENVIRONMENT,
+        endpoint_name=target.endpoint_name,
+        city=CITY,
+        target_name=target.target_name,
+    )
     sm_dims = {
         "EndpointName": target.endpoint_name,
         "VariantName": "AllTraffic",
@@ -335,14 +404,101 @@ with tab_system:
             dimensions=sm_dims,
             stat="Sum",
         ),
+        "Invocation4XXErrors": fetch_metric_series(
+            _cw_client(),
+            namespace="AWS/SageMaker",
+            metric_name="Invocation4XXErrors",
+            dimensions=sm_dims,
+            stat="Sum",
+        ),
+        "Invocations": fetch_metric_series(
+            _cw_client(),
+            namespace="AWS/SageMaker",
+            metric_name="Invocations",
+            dimensions=sm_dims,
+            stat="Sum",
+        ),
+        "PredictionHeartbeat": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="PredictionHeartbeat",
+            dimensions=dims,
+            stat="Sum",
+        ),
+        "PSI": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="PSI",
+            dimensions=dims,
+        ),
     }
-    render_metric_section(title="Serving infrastructure health", series_map=system_health)
+    render_metric_section(
+        title="System health | serving SLA view | last 24 hours (UTC)",
+        series_map=system_health,
+        metric_specs={
+            "ModelLatency": MetricSpec(
+                label="ModelLatency p95 (ms)",
+                direction="lower",
+                warning=200.0,
+                critical=300.0,
+                decimals=0,
+                empty_message="No SageMaker latency samples are available for the selected endpoint.",
+            ),
+            "Invocation5XXErrors": MetricSpec(
+                label="Invocation5XXErrors (24h)",
+                direction="lower",
+                warning=0.0,
+                critical=0.0,
+                decimals=0,
+                empty_message="No 5xx error samples are available for the selected endpoint.",
+            ),
+            "Invocation4XXErrors": MetricSpec(
+                label="Invocation4XXErrors (24h)",
+                direction="lower",
+                warning=0.0,
+                critical=10.0,
+                decimals=0,
+                empty_message="No 4xx error samples are available for the selected endpoint.",
+            ),
+            "Invocations": MetricSpec(
+                label="Invocations (24h)",
+                direction="higher",
+                warning=1.0,
+                critical=1.0,
+                decimals=0,
+                empty_message="No invocation count is available for the selected endpoint.",
+            ),
+            "PredictionHeartbeat": MetricSpec(
+                label="Prediction Heartbeat (24h)",
+                direction="higher",
+                warning=1.0,
+                critical=1.0,
+                decimals=0,
+                empty_message="Heartbeat samples are missing for the selected target and environment.",
+            ),
+            "PSI": MetricSpec(
+                label="PSI (24h)",
+                direction="lower",
+                warning=0.20,
+                critical=0.30,
+                decimals=3,
+                empty_message="No PSI drift samples are available yet for the selected target.",
+            ),
+        },
+    )
+    st.caption(
+        "Runbook thresholds: latency warning 200 ms / critical 300 ms, 5xx must remain at 0, "
+        "and PSI warning/critical bands are 0.20 / 0.30."
+    )
 
 with tab_status:
     render_data_status_table(
         prediction_result=latest_predictions,
         quality_result=latest_quality,
         freshness_result=freshness_result,
+        prediction_sla_minutes=PREDICTION_STALE_AFTER_MINUTES,
+        quality_sla_minutes=QUALITY_STALE_AFTER_MINUTES,
+        feature_sla_minutes=FEATURE_STALE_AFTER_MINUTES,
     )
 
 if DEV_MODE:
