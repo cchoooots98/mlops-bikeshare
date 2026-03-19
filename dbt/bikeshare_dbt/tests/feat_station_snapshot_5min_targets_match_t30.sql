@@ -5,7 +5,7 @@ with expected_targets as (
         cur.city,
         cur.station_id,
         cur.dt,
-        max(fut.snapshot_bucket_at_utc) as expected_target_snapshot_bucket_at_utc
+        max({{ feature_dt_to_utc('fut.dt') }}) as expected_target_snapshot_bucket_at_utc
     from {{ ref('feat_station_snapshot_5min') }} cur
     left join {{ ref('feat_station_snapshot_5min') }} fut
         on cur.city = fut.city
