@@ -176,6 +176,7 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
     local_compose = Path("docker-compose.local.yml").read_text(encoding="utf-8")
 
     assert "AIRFLOW__CORE__EXECUTOR: CeleryExecutor" in base_compose
+    assert "AIRFLOW__WEBSERVER__SECRET_KEY" in base_compose
     assert "redis:" in base_compose
     assert "airflow-worker-tier1:" in base_compose
     assert "airflow-worker-tier2:" in base_compose
