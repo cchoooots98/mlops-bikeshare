@@ -16,10 +16,6 @@ DEFAULT_HOTPATH_BUILD_SELECT = [
     "int_station_status_enriched",
 ]
 DEFAULT_HOTPATH_TEST_SELECT = [
-    "dim_station",
-    "dim_date",
-    "dim_time",
-    "dim_weather",
     "fct_station_status",
     "int_station_status_enriched",
 ]
@@ -42,8 +38,9 @@ DEFAULT_FEATURE_BUILD_SELECTOR = "hf_feature_build_models"
 DEFAULT_HOTPATH_SELECTOR = "hf_station_status_hotpath_models"
 DEFAULT_WEATHER_REFRESH_SELECTOR = "weather_refresh_models"
 DEFAULT_STATION_TOPOLOGY_SELECTOR = "station_topology_daily_models"
-DEFAULT_FEATURE_TEST_SELECTOR = "hf_smoke_tests"
-DEFAULT_QUALITY_TEST_SELECTOR = "quality_gate_tests"
+DEFAULT_HOTPATH_TEST_SELECTOR = "hf_station_status_smoke_tests"
+DEFAULT_FEATURE_TEST_SELECTOR = "hf_feature_smoke_tests"
+DEFAULT_QUALITY_TEST_SELECTOR = "hourly_quality_gate_tests"
 DEFAULT_QUALITY_TEST_SELECT = [
     "stg_station_information",
     "stg_station_status",
@@ -54,6 +51,7 @@ DEFAULT_QUALITY_TEST_SELECT = [
     "dim_time",
     "dim_weather",
 ]
+DEFAULT_DEEP_QUALITY_TEST_SELECTOR = "daily_deep_quality_tests"
 DEFAULT_DEEP_QUALITY_TEST_SELECT = [
     "tag:deep_quality",
     "dim_station",
@@ -167,7 +165,7 @@ def run_dbt_source_freshness(
     project_dir: str = "dbt/bikeshare_dbt",
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
-    threads: int = 1,
+    threads: int = 2,
 ) -> dict[str, float | str | bool]:
     command = [
         "dbt",
@@ -208,7 +206,7 @@ def run_model_build(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     selector: str | None = None,
-    threads: int = 1,
+    threads: int = 2,
     dbt_vars: dict | None = None,
 ) -> dict[str, float | str | bool]:
     build_select = expand_with_parents(select_models) if select_models else None
@@ -236,7 +234,7 @@ def run_feature_model_build(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     selector: str | None = None,
-    threads: int = 1,
+    threads: int = 2,
     dbt_vars: dict | None = None,
 ) -> dict[str, float | str | bool]:
     summary = run_model_build(
@@ -256,7 +254,7 @@ def run_model_tests(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     selector: str | None = None,
-    threads: int = 1,
+    threads: int = 2,
     dbt_vars: dict | None = None,
     summary_label: str = "DBT_MODEL_TEST_SUMMARY",
     indirect_selection: str | None = None,
@@ -285,7 +283,7 @@ def run_feature_smoke_tests(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     selector: str | None = None,
-    threads: int = 1,
+    threads: int = 2,
     dbt_vars: dict | None = None,
 ) -> dict[str, float | str]:
     summary = run_model_tests(
@@ -305,7 +303,7 @@ def run_quality_tests(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     selector: str | None = None,
-    threads: int = 1,
+    threads: int = 2,
     dbt_vars: dict | None = None,
 ) -> dict[str, float | str]:
     summary = run_model_tests(
@@ -500,7 +498,7 @@ def run_feature_build(
     profiles_dir: str = "dbt",
     select_models: Sequence[str] | None = None,
     test_models: Sequence[str] | None = None,
-    threads: int = 1,
+    threads: int = 2,
     skip_tests: bool = False,
     dbt_vars: dict | None = None,
 ) -> dict[str, float | str | bool]:
@@ -539,3 +537,5 @@ def run_feature_build(
     }
     print(f"DBT_FEATURE_BUILD_SUMMARY {summary}")
     return summary
+
+

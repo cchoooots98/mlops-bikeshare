@@ -7,7 +7,7 @@
 with city_latest as (
     select
         city,
-        max({{ feature_dt_to_utc('dt') }}) as latest_dt
+        max({{ feature_dt_to_utc('dt') }}) + interval '5 minutes' as latest_dt
     from {{ ref('feat_station_snapshot_5min') }}
     group by city
 )

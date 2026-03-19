@@ -234,7 +234,7 @@ def test_feature_latest_window_null_test_uses_immature_window_not_full_horizon()
 
     assert "feature_snapshot_step_minutes" in test_sql
     assert "feature_label_horizon_minutes" in test_sql
-    assert "immature_window_minutes = label_horizon_minutes - snapshot_step_minutes" in test_sql
+    assert "immature_window_minutes = label_horizon_minutes" in test_sql
     assert "interval '{{ immature_window_minutes }} minutes'" in test_sql
 
 
@@ -249,3 +249,46 @@ def test_tiered_dbt_dags_use_explicit_queue_and_pool_assignments():
     assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in feature
     assert 'return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")' in quality
     assert 'return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")' in quality
+
+
+def test_dbt_runtime_selectors_and_thread_defaults_are_hotpath_safe():
+    selectors = Path("dbt/bikeshare_dbt/selectors.yml").read_text(encoding="utf-8")
+    feature = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
+    hotpath = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
+    quality = Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(encoding="utf-8")
+    diagnostic = Path("airflow/dags/dbt_diagnostic_daily_dag.py").read_text(encoding="utf-8")
+
+    for selector_name in (
+        "hf_feature_smoke_tests",
+        "hf_station_status_smoke_tests",
+        "hourly_quality_gate_tests",
+        "daily_deep_quality_tests",
+    ):
+        assert f"- name: {selector_name}" in selectors
+
+    assert '"DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "120"' in feature
+    assert "DBT_FEATURE_BUILD_TEST_SELECTOR" in feature
+    assert "DBT_STATION_STATUS_HOTPATH_TEST_SELECTOR" in hotpath
+    assert "DBT_QUALITY_TEST_SELECTOR" in quality
+    assert "DBT_DEEP_QUALITY_TEST_SELECTOR" in diagnostic
+
+    assert '"DBT_THREADS", "DBT_THREADS", "2"' in feature
+    assert '"DBT_THREADS", "DBT_THREADS", "2"' in hotpath
+    assert '"DBT_THREADS", "DBT_THREADS", "2"' in quality
+    assert '"DBT_THREADS", "DBT_THREADS", "2"' in diagnostic
+
+
+def test_hotpath_tests_are_retiered_out_of_quality_gate():
+    hotpath_unique = Path("dbt/bikeshare_dbt/tests/fct_station_status_unique_grain.sql").read_text(encoding="utf-8")
+    enriched_unique = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_unique_grain.sql").read_text(
+        encoding="utf-8"
+    )
+    weather_coverage = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_weather_context_coverage.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "hf_hotpath_smoke" in hotpath_unique
+    assert "quality_gate" not in hotpath_unique
+    assert "hf_hotpath_smoke" in enriched_unique
+    assert "quality_gate" not in enriched_unique
+    assert "quality_gate" in weather_coverage

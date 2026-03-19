@@ -14,8 +14,9 @@ if AIRFLOW_HOME not in sys.path:
 
 from src.orchestration.dbt_tasks import (
     DEFAULT_FEATURE_BUILD_SELECT,
-    DEFAULT_FEATURE_TEST_SELECT,
+    DEFAULT_FEATURE_TEST_SELECTOR,
     parse_bool,
+    parse_selector,
     parse_select_models,
     run_feature_model_build,
     run_feature_smoke_tests,
@@ -38,7 +39,7 @@ def _build_feature_model_vars(context: dict) -> dict[str, object]:
     return {
         "feature_window_end_utc": context["data_interval_end"].astimezone(pendulum.UTC).isoformat(),
         "feature_rebuild_lookback_minutes": int(
-            _get_setting("DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "180"),
+            _get_setting("DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES", "120"),
         ),
     }
 
@@ -61,7 +62,7 @@ def run_dbt_feature_build_task(**context):
         ),
         default_models=DEFAULT_FEATURE_BUILD_SELECT,
     )
-    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "1"))
+    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "2"))
     summary = run_feature_model_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
@@ -78,20 +79,26 @@ def run_dbt_feature_smoke_tests_task(**context):
         summary = {"skipped": True}
         print(f"AIRFLOW_TASK_METRIC run_dbt_feature_smoke_tests {summary}")
         return
-    test_select = parse_select_models(
-        _get_setting(
-            "DBT_FEATURE_BUILD_TEST_SELECT",
-            "DBT_FEATURE_BUILD_TEST_SELECT",
-            " ".join(DEFAULT_FEATURE_TEST_SELECT),
-        ),
-        default_models=DEFAULT_FEATURE_TEST_SELECT,
+    raw_test_select = _get_setting(
+        "DBT_FEATURE_BUILD_TEST_SELECT",
+        "DBT_FEATURE_BUILD_TEST_SELECT",
+        "",
     )
-    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "1"))
+    test_select = parse_select_models(raw_test_select, default_models=[]) if raw_test_select.strip() else None
+    test_selector = parse_selector(
+        _get_setting(
+            "DBT_FEATURE_BUILD_TEST_SELECTOR",
+            "DBT_FEATURE_BUILD_TEST_SELECTOR",
+            DEFAULT_FEATURE_TEST_SELECTOR,
+        ),
+        default_selector=DEFAULT_FEATURE_TEST_SELECTOR,
+    )
+    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "2"))
     summary = run_feature_smoke_tests(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=test_select,
-        selector=None,
+        selector=None if test_select else test_selector,
         threads=threads,
         dbt_vars=_build_feature_test_vars(context),
     )

@@ -12,8 +12,9 @@ if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
 from src.orchestration.dbt_tasks import (
-    DEFAULT_DEEP_QUALITY_TEST_SELECT,
+    DEFAULT_DEEP_QUALITY_TEST_SELECTOR,
     DEFAULT_FEATURE_BUILD_SELECT,
+    parse_selector,
     parse_select_models,
     run_feature_model_build,
     run_quality_tests,
@@ -60,27 +61,33 @@ def run_dbt_feature_reconcile_5d_task(**context):
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
         selector=None,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
+        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
         dbt_vars=_build_feature_reconcile_vars(context),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_feature_reconcile_5d {summary}")
 
 
 def run_dbt_deep_quality_tests_task():
-    test_select = parse_select_models(
+    raw_test_select = _get_setting(
+        "DBT_DEEP_QUALITY_TEST_SELECT",
+        "DBT_DEEP_QUALITY_TEST_SELECT",
+        "",
+    )
+    test_select = parse_select_models(raw_test_select, default_models=[]) if raw_test_select.strip() else None
+    test_selector = parse_selector(
         _get_setting(
-            "DBT_DEEP_QUALITY_TEST_SELECT",
-            "DBT_DEEP_QUALITY_TEST_SELECT",
-            " ".join(DEFAULT_DEEP_QUALITY_TEST_SELECT),
+            "DBT_DEEP_QUALITY_TEST_SELECTOR",
+            "DBT_DEEP_QUALITY_TEST_SELECTOR",
+            DEFAULT_DEEP_QUALITY_TEST_SELECTOR,
         ),
-        default_models=DEFAULT_DEEP_QUALITY_TEST_SELECT,
+        default_selector=DEFAULT_DEEP_QUALITY_TEST_SELECTOR,
     )
     summary = run_quality_tests(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=test_select,
-        selector=None,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
+        selector=None if test_select else test_selector,
+        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_deep_quality_tests {summary}")
 

@@ -37,12 +37,32 @@ selectors:
       method: tag
       value: hf_smoke
 
+  - name: hf_feature_smoke_tests
+    definition:
+      method: tag
+      value: hf_smoke
+
+  - name: hf_station_status_smoke_tests
+    definition:
+      method: tag
+      value: hf_hotpath_smoke
+
   - name: quality_gate_tests
     definition:
       method: tag
       value: quality_gate
 
+  - name: hourly_quality_gate_tests
+    definition:
+      method: tag
+      value: quality_gate
+
   - name: deep_quality_tests
+    definition:
+      method: tag
+      value: deep_quality
+
+  - name: daily_deep_quality_tests
     definition:
       method: tag
       value: deep_quality

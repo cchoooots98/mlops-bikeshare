@@ -41,7 +41,7 @@ def run_dbt_station_topology_task():
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
         selector=None,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "1")),
+        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_station_topology {summary}")
 

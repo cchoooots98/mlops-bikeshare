@@ -15,8 +15,8 @@ with feature_rows as (
 city_latest as (
     select
         city,
-        max(snapshot_bucket_at_utc) as latest_snapshot_bucket_at_utc
-    from {{ ref('int_station_status_enriched') }}
+        max(snapshot_bucket_at_utc) + interval '5 minutes' as latest_snapshot_bucket_at_utc
+    from feature_rows
     group by city
 ),
 eligible_rows as (
@@ -39,6 +39,7 @@ eligible_rows as (
             and fut.station_id = f.station_id
             and fut.snapshot_bucket_at_utc > f.snapshot_bucket_at_utc
             and fut.snapshot_bucket_at_utc <= f.snapshot_bucket_at_utc + interval '30 minutes'
+            and fut.snapshot_bucket_at_utc <= cl.latest_snapshot_bucket_at_utc
       )
 ),
 partial_null_rows as (
