@@ -165,6 +165,9 @@ station_features_windowed as (
             order by snapshot_bucket_at_utc
             range between interval '{{ max_roll_window_minutes }} minutes' preceding and current row
         ) as roll60_bikes_mean,
+        max(snapshot_bucket_at_utc) over (
+            partition by city
+        ) as latest_snapshot_bucket_at_utc,
         count(*) over (
             partition by city, station_id
             order by snapshot_bucket_at_utc
@@ -183,13 +186,17 @@ station_features_windowed as (
             range between interval '{{ snapshot_step_minutes }} minutes' following
             and interval '{{ label_horizon_minutes }} minutes' following
         ) as future_min_docks_30,
-        lead(bikes, {{ expected_future_snapshots }}) over (
+        last_value(bikes) over (
             partition by city, station_id
             order by snapshot_bucket_at_utc
+            range between interval '{{ snapshot_step_minutes }} minutes' following
+            and interval '{{ label_horizon_minutes }} minutes' following
         ) as target_bikes_t30_raw,
-        lead(docks, {{ expected_future_snapshots }}) over (
+        last_value(docks) over (
             partition by city, station_id
             order by snapshot_bucket_at_utc
+            range between interval '{{ snapshot_step_minutes }} minutes' following
+            and interval '{{ label_horizon_minutes }} minutes' following
         ) as target_docks_t30_raw
     from station_features sf
 ),
@@ -258,19 +265,23 @@ assembled as (
         sf.hourly_precipitation_probability_pct,
         sf.hourly_weather_code,
         case
-            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+            when sf.latest_snapshot_bucket_at_utc >= sf.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                and sf.future_snapshot_count >= 1
                 then sf.target_bikes_t30_raw
         end as target_bikes_t30,
         case
-            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+            when sf.latest_snapshot_bucket_at_utc >= sf.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                and sf.future_snapshot_count >= 1
                 then sf.target_docks_t30_raw
         end as target_docks_t30,
         case
-            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+            when sf.latest_snapshot_bucket_at_utc >= sf.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                and sf.future_snapshot_count >= 1
                 then case when sf.future_min_bikes_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_bikes_30,
         case
-            when sf.future_snapshot_count = {{ expected_future_snapshots }}
+            when sf.latest_snapshot_bucket_at_utc >= sf.snapshot_bucket_at_utc + interval '{{ label_horizon_minutes }} minutes'
+                and sf.future_snapshot_count >= 1
                 then case when sf.future_min_docks_30 <= {{ stockout_threshold }} then 1 else 0 end
         end as y_stockout_docks_30,
         sf.snapshot_bucket_at_utc

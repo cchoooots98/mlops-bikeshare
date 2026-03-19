@@ -16,13 +16,27 @@ expected_targets as (
         cur.city,
         cur.station_id,
         cur.snapshot_bucket_at_utc,
-        fut.bikes as expected_target_bikes_t30,
-        fut.docks as expected_target_docks_t30
+        max(fut.snapshot_bucket_at_utc) as expected_target_snapshot_bucket_at_utc
     from source_rows cur
     left join source_rows fut
         on cur.city = fut.city
        and cur.station_id = fut.station_id
-       and fut.snapshot_bucket_at_utc = cur.snapshot_bucket_at_utc + interval '30 minutes'
+       and fut.snapshot_bucket_at_utc > cur.snapshot_bucket_at_utc
+       and fut.snapshot_bucket_at_utc <= cur.snapshot_bucket_at_utc + interval '30 minutes'
+    group by cur.city, cur.station_id, cur.snapshot_bucket_at_utc
+),
+expected_target_values as (
+    select
+        expected.city,
+        expected.station_id,
+        expected.snapshot_bucket_at_utc,
+        fut.bikes as expected_target_bikes_t30,
+        fut.docks as expected_target_docks_t30
+    from expected_targets expected
+    left join source_rows fut
+        on expected.city = fut.city
+       and expected.station_id = fut.station_id
+       and expected.expected_target_snapshot_bucket_at_utc = fut.snapshot_bucket_at_utc
 ),
 violations as (
     select
@@ -34,7 +48,7 @@ violations as (
         f.target_docks_t30,
         e.expected_target_docks_t30
     from {{ ref('feat_station_snapshot_5min') }} f
-    inner join expected_targets e
+    inner join expected_target_values e
         on f.city = e.city
        and f.station_id = e.station_id
        and {{ feature_dt_to_utc('f.dt') }} = e.snapshot_bucket_at_utc

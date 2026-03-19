@@ -2,7 +2,7 @@
 
 {% set snapshot_step_minutes = var('feature_snapshot_step_minutes', 5) | int %}
 {% set label_horizon_minutes = var('feature_label_horizon_minutes', 30) | int %}
-{% set immature_window_minutes = label_horizon_minutes - snapshot_step_minutes %}
+{% set immature_window_minutes = label_horizon_minutes %}
 
 with city_latest as (
     select
@@ -23,5 +23,7 @@ inner join city_latest cl
 where {{ feature_dt_to_utc('f.dt') }} > cl.latest_dt - interval '{{ immature_window_minutes }} minutes'
   and (
     f.y_stockout_bikes_30 is not null
+    or f.target_bikes_t30 is not null
     or f.y_stockout_docks_30 is not null
+    or f.target_docks_t30 is not null
   )
