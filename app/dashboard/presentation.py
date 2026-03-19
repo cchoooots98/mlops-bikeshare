@@ -101,7 +101,7 @@ def build_station_risk_frame(
     merged = (
         merged.sort_values(
             ["score", "_inventory_sort", "_capacity_sort", "station_name", "station_id"],
-            ascending=[False, False, False, True, True],
+            ascending=[False, True, False, True, True],
         )
         .drop(columns=["_inventory_sort", "_capacity_sort"])
         .reset_index(drop=True)
