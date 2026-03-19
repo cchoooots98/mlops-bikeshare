@@ -200,6 +200,8 @@ docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
 ```
 
+If the release changes feature-label SQL or `feat_station_snapshot_5min` target logic, do not stop after the container refresh. Follow [ec2_release_update_guide.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/ec2_release_update_guide.md) and run the temporary long-window feature reconcile before trusting `dbt_quality_hourly`.
+
 Before unpausing staging DAGs again, smoke-test both prediction tasks:
 
 ```bash

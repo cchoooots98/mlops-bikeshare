@@ -56,6 +56,16 @@ def test_formal_docs_use_target_specific_deployment_state_and_local_sqlite_mlflo
     assert "--environment staging" in deployment_guide
 
 
+def test_ec2_release_update_guide_exists_and_covers_feature_reconcile():
+    release_guide = Path("docs/ec2_release_update_guide.md").read_text(encoding="utf-8")
+    deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
+
+    assert "DBT_FEATURE_REBUILD_LOOKBACK_MINUTES 10080" in release_guide
+    assert "dbt_feature_build_5min" in release_guide
+    assert "dbt_quality_hourly" in release_guide
+    assert "ec2_release_update_guide.md" in deployment_guide
+
+
 def test_terraform_platform_module_has_no_placeholder_lambda():
     lambda_tf = Path("infra/terraform/modules/platform/lambda_eventbridge.tf").read_text(encoding="utf-8")
     cloudwatch_tf = Path("infra/terraform/modules/platform/cloudwatch.tf").read_text(encoding="utf-8")
@@ -238,6 +248,16 @@ def test_feature_label_maturity_consistency_test_is_runtime_scoped():
     assert "snapshot_bucket_at_utc + interval '30 minutes' <= {{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
 
 
+def test_feature_targets_match_t30_test_is_runtime_scoped():
+    test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_targets_match_t30.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "runtime_window_start_utc_expr(default_lookback_hours=72)" in test_sql
+    assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
+    assert "{{ runtime_utc_expr('test_window_end_utc') }} + interval '30 minutes'" in test_sql
+
+
 def test_feature_latest_window_null_test_uses_immature_window_not_full_horizon():
     test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_latest_window_labels_null.sql").read_text(
         encoding="utf-8"
@@ -292,6 +312,17 @@ def test_dbt_runtime_selectors_and_thread_defaults_are_hotpath_safe():
     assert '"DBT_THREADS", "DBT_THREADS", "2"' in diagnostic
 
 
+def test_legacy_selector_aliases_are_removed():
+    selectors = Path("dbt/bikeshare_dbt/selectors.yml").read_text(encoding="utf-8")
+
+    for selector_name in (
+        "hf_smoke_tests",
+        "quality_gate_tests",
+        "deep_quality_tests",
+    ):
+        assert f"- name: {selector_name}" not in selectors
+
+
 def test_hotpath_tests_are_retiered_out_of_quality_gate():
     hotpath_unique = Path("dbt/bikeshare_dbt/tests/fct_station_status_unique_grain.sql").read_text(encoding="utf-8")
     enriched_unique = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_unique_grain.sql").read_text(
@@ -306,3 +337,33 @@ def test_hotpath_tests_are_retiered_out_of_quality_gate():
     assert "hf_hotpath_smoke" in enriched_unique
     assert "quality_gate" not in enriched_unique
     assert "quality_gate" in weather_coverage
+
+
+def test_hourly_quality_gate_excludes_static_dim_and_daily_source_checks():
+    dim_date = Path("dbt/bikeshare_dbt/tests/dim_date_contiguous.sql").read_text(encoding="utf-8")
+    dim_time_grid = Path("dbt/bikeshare_dbt/tests/dim_time_complete_5min_grid.sql").read_text(encoding="utf-8")
+    dim_time_bucket = Path("dbt/bikeshare_dbt/tests/dim_time_bucket_label_consistent.sql").read_text(encoding="utf-8")
+    neighbor_defaults = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_neighbor_defaults.sql").read_text(
+        encoding="utf-8"
+    )
+    targets_match_t30 = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_targets_match_t30.sql").read_text(
+        encoding="utf-8"
+    )
+    staging_schema = Path("dbt/bikeshare_dbt/models/staging/schema.yml").read_text(encoding="utf-8")
+
+    for content in (dim_date, dim_time_grid, dim_time_bucket, neighbor_defaults, targets_match_t30):
+        assert "deep_quality" in content
+        assert "quality_gate" not in content
+
+    assert 'tags: ["deep_quality"]' in staging_schema
+
+
+def test_compose_uses_canonical_dbt_test_selectors():
+    base_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert 'DBT_STATION_STATUS_HOTPATH_TEST_SELECTOR: "hf_station_status_smoke_tests"' in base_compose
+    assert 'DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_feature_smoke_tests"' in base_compose
+    assert 'DBT_QUALITY_TEST_SELECTOR: "hourly_quality_gate_tests"' in base_compose
+    assert 'DBT_DEEP_QUALITY_TEST_SELECTOR: "daily_deep_quality_tests"' in base_compose
+    assert 'DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_smoke_tests"' not in base_compose
+    assert 'DBT_QUALITY_TEST_SELECTOR: "quality_gate_tests"' not in base_compose

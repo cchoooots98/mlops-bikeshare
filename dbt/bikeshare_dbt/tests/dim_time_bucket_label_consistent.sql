@@ -1,4 +1,4 @@
-{{ config(tags=['quality_gate']) }}
+{{ config(tags=['deep_quality']) }}
 
 select
     time_id,

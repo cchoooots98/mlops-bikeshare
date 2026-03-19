@@ -1,4 +1,4 @@
-{{ config(tags=['quality_gate']) }}
+{{ config(tags=['deep_quality']) }}
 
 with stations_without_neighbors as (
     select

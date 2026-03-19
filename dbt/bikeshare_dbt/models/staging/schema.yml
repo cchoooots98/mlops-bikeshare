@@ -7,7 +7,7 @@ models:
           arguments:
             columns: ["city", "snapshot_bucket_at_utc", "station_id"]
           config:
-            tags: ["quality_gate"]
+            tags: ["deep_quality"]
     columns:
       - name: station_info_pk
         tests:
@@ -181,7 +181,7 @@ models:
           arguments:
             columns: ["country_code", "holiday_date"]
           config:
-            tags: ["quality_gate"]
+            tags: ["deep_quality"]
     columns:
       - name: holiday_pk
         tests:
