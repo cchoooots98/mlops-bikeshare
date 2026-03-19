@@ -206,6 +206,8 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
     assert "METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)" in factory_source
     assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
     assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
+    assert 'external_task_id=f"predict_{target}"' in factory_source
+    assert 'external_task_id=f"backfill_quality_{target}"' in factory_source
     assert "wait_for_metrics_dag" not in factory_source
     assert "queue=_tier1_queue()" in factory_source
     assert "queue=_tier2_queue()" in factory_source

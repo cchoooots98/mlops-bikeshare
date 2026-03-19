@@ -201,20 +201,20 @@ def build_serving_dags(
         default_args=DEFAULT_ARGS,
         tags=quality_tags,
     ) as quality_dag:
-        wait_for_prediction = ExternalTaskSensor(
-            task_id="wait_for_prediction_dag",
-            external_dag_id=prediction_dag_id,
-            external_task_id=None,
-            allowed_states=["success"],
-            failed_states=["failed"],
-            check_existence=True,
-            execution_delta=QUALITY_TO_PREDICTION_DELTA,
-            mode="reschedule",
-            poke_interval=60,
-            timeout=15 * 60,
-            queue=_tier2_queue(),
-        )
         for target in TARGETS:
+            wait_for_prediction = ExternalTaskSensor(
+                task_id=f"wait_for_predict_{target}",
+                external_dag_id=prediction_dag_id,
+                external_task_id=f"predict_{target}",
+                allowed_states=["success"],
+                failed_states=["failed", "upstream_failed"],
+                check_existence=True,
+                execution_delta=QUALITY_TO_PREDICTION_DELTA,
+                mode="reschedule",
+                poke_interval=60,
+                timeout=15 * 60,
+                queue=_tier2_queue(),
+            )
             task = PythonOperator(
                 task_id=f"backfill_quality_{target}",
                 python_callable=run_quality_backfill_task,
@@ -233,20 +233,20 @@ def build_serving_dags(
         default_args=DEFAULT_ARGS,
         tags=metrics_tags,
     ) as metrics_dag:
-        wait_for_quality = ExternalTaskSensor(
-            task_id="wait_for_quality_dag",
-            external_dag_id=quality_dag_id,
-            external_task_id=None,
-            allowed_states=["success"],
-            failed_states=["failed"],
-            check_existence=True,
-            execution_delta=METRICS_TO_QUALITY_DELTA,
-            mode="reschedule",
-            poke_interval=60,
-            timeout=20 * 60,
-            queue=_tier2_queue(),
-        )
         for target in TARGETS:
+            wait_for_quality = ExternalTaskSensor(
+                task_id=f"wait_for_backfill_quality_{target}",
+                external_dag_id=quality_dag_id,
+                external_task_id=f"backfill_quality_{target}",
+                allowed_states=["success"],
+                failed_states=["failed", "upstream_failed"],
+                check_existence=True,
+                execution_delta=METRICS_TO_QUALITY_DELTA,
+                mode="reschedule",
+                poke_interval=60,
+                timeout=20 * 60,
+                queue=_tier2_queue(),
+            )
             task = PythonOperator(
                 task_id=f"publish_metrics_{target}",
                 python_callable=run_metrics_publish_task,

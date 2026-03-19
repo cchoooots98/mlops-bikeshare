@@ -167,6 +167,10 @@ def main():
     latest_dt = prediction_dts[-1]
     candidates = _make_candidate_dts(latest_dt, datetime.now(timezone.utc))
     shards_written = 0
+    print(
+        f"[quality] target={settings.target_name} latest_prediction_dt={latest_dt} "
+        f"candidate_windows={len(candidates)}"
+    )
 
     for dt_pred in candidates:
         pred_key = prediction_key(settings.city, dt_pred, settings.target_name)
@@ -183,10 +187,18 @@ def main():
         qual_key = quality_key(settings.city, dt_pred, target_spec.target_name)
         acts = _load_actuals_for_dt(engine, pg_config, settings.city, dt_pred, target_spec)
         if acts.empty:
+            print(
+                f"[quality] skip target={target_spec.target_name} dt={dt_pred}: "
+                f"no mature actuals found in {pg_config.pg_schema}.{pg_config.training_table}"
+            )
             continue
 
         joined = _build_quality_rows(preds, acts, dt_pred, target_spec)
         if joined.empty:
+            print(
+                f"[quality] skip target={target_spec.target_name} dt={dt_pred}: "
+                "predictions and mature actuals did not overlap on station_id"
+            )
             continue
 
         _write_parquet_s3(joined, settings.bucket, qual_key)

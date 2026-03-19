@@ -195,7 +195,10 @@ def main():
     # Load data (use 'dt' as the time column)
     df = load_quality_dataframe(args.bucket, quality_root, time_col_hint="dt")
     if df.empty:
-        print("No quality data found for the last 24h. Skipping metric publish.")
+        print(
+            "No quality data found for the last 24h. "
+            f"Skipping metric publish for target={target_name}, environment={args.environment}, prefix={quality_root}."
+        )
         return
 
     predict_bikes = None if args.predict_bikes is None else parse_bool_value(args.predict_bikes)

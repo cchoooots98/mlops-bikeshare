@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -152,6 +152,7 @@ def summarize_quality_availability(
     metric_series_map: dict[str, pd.DataFrame],
 ) -> tuple[str, str, str]:
     missing_metrics = [metric_name for metric_name, series in metric_series_map.items() if series.empty]
+    now_utc = datetime.now(timezone.utc)
 
     if quality_result.status == LoadStatus.NO_OBJECTS:
         return (
@@ -170,6 +171,16 @@ def summarize_quality_availability(
             "error",
             "Quality artifact could not be trusted.",
             quality_result.message or "The latest quality artifact could not be read or did not match the expected schema.",
+        )
+    if (
+        quality_result.status == LoadStatus.OK
+        and quality_result.latest_dt is not None
+        and quality_result.latest_dt < now_utc - timedelta(hours=24)
+    ):
+        return (
+            "warning",
+            "Quality artifact is stale for the 24-hour window.",
+            "The latest quality artifact for this target is older than 24 hours, so the dashboard has no recent quality evidence to summarize. Check the quality backfill job before investigating CloudWatch dimensions.",
         )
     if missing_metrics:
         return (
@@ -217,6 +228,15 @@ def metric_empty_message(
             return "No mature quality shard is available yet for the last 24 hours."
         if quality_result.status == LoadStatus.ALL_SCORES_NULL:
             return "The latest quality shard is invalid because all prediction scores are null or unusable."
+        if (
+            quality_result.status == LoadStatus.OK
+            and quality_result.latest_dt is not None
+            and quality_result.latest_dt < datetime.now(timezone.utc) - timedelta(hours=24)
+        ):
+            return (
+                "No metric samples in the last 24 hours because the latest quality shard for this target is from "
+                f"{format_utc_label(quality_result.latest_dt)}."
+            )
     if spec is not None:
         return spec.empty_message
     return "No metric samples available yet."

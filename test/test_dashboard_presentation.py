@@ -186,6 +186,22 @@ def test_summarize_quality_availability_explains_missing_cloudwatch_metrics():
     assert "CloudWatch series" in message
 
 
+def test_summarize_quality_availability_flags_stale_quality_artifact():
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime.now(timezone.utc) - timedelta(days=2),
+    )
+
+    severity, title, message = summarize_quality_availability(
+        quality_result=quality_result,
+        metric_series_map={"PR-AUC-24h": pd.DataFrame(columns=["ts", "PR-AUC-24h"])},
+    )
+
+    assert severity == "warning"
+    assert "stale" in title.lower()
+    assert "older than 24 hours" in message
+
+
 def test_build_data_status_frame_marks_stale_and_waiting_sources():
     now = datetime.now(timezone.utc)
     prediction_result = ArtifactLoadResult(
