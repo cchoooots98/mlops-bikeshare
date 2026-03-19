@@ -78,3 +78,32 @@ def test_train_main_defaults_package_root_by_target(monkeypatch, predict_bikes, 
 
     assert result == {"ok": True}
     assert Path(captured["package_root"]) == expected_root
+
+
+def test_runtime_settings_prefers_explicit_target_name_over_default_predict_bikes(monkeypatch, tmp_path):
+    runtime_defaults = {
+        "Variables": {
+            "PGHOST": "localhost",
+            "PGPORT": "15432",
+            "PGDATABASE": "velib_dw",
+            "PGUSER": "velib",
+            "PGPASSWORD": "velib",
+            "AWS_REGION": "eu-west-3",
+            "CITY": "paris",
+            "BUCKET": "bucket",
+            "PREDICT_BIKES": "true",
+            "TARGET_NAME": "bikes",
+            "SERVING_ENVIRONMENT": "staging",
+        }
+    }
+    config_path = tmp_path / "env.json"
+    config_path.write_text(json.dumps(runtime_defaults), encoding="utf-8")
+
+    monkeypatch.setattr("src.config.runtime.DEFAULT_RUNTIME_CONFIG_PATH", config_path)
+    monkeypatch.setenv("TARGET_NAME", "docks")
+    monkeypatch.delenv("PREDICT_BIKES", raising=False)
+
+    settings = load_runtime_settings()
+
+    assert settings.target_name == "docks"
+    assert settings.predict_bikes is False

@@ -60,6 +60,13 @@ def _setting(name: str, default: str | None = None) -> str | None:
     return default
 
 
+def _env_setting(name: str) -> str | None:
+    value = os.getenv(name)
+    if value in {None, ""}:
+        return None
+    return value
+
+
 def load_runtime_settings() -> RuntimeSettings:
     pg_host = _setting("PGHOST")
     pg_db = _setting("PGDATABASE")
@@ -78,11 +85,27 @@ def load_runtime_settings() -> RuntimeSettings:
     if missing:
         raise ValueError(f"missing required runtime settings: {missing}")
 
-    target_name = resolve_target_name(
-        predict_bikes=_setting("PREDICT_BIKES"),
-        target_name=_setting("TARGET_NAME"),
-    )
-    predict_bikes = parse_bool_value(_setting("PREDICT_BIKES", str(target_name == "bikes").lower()), default=True)
+    explicit_target_name = _env_setting("TARGET_NAME")
+    explicit_predict_bikes = _env_setting("PREDICT_BIKES")
+    configured_target_name = _setting("TARGET_NAME")
+    configured_predict_bikes = _setting("PREDICT_BIKES")
+
+    if explicit_target_name is not None:
+        target_name = resolve_target_name(target_name=explicit_target_name)
+    elif explicit_predict_bikes is not None:
+        target_name = resolve_target_name(predict_bikes=explicit_predict_bikes)
+    else:
+        target_name = resolve_target_name(
+            target_name=configured_target_name,
+            predict_bikes=configured_predict_bikes if configured_target_name in {None, ""} else None,
+        )
+
+    if explicit_predict_bikes is not None:
+        predict_bikes = parse_bool_value(explicit_predict_bikes, default=True)
+    elif explicit_target_name is not None or configured_target_name not in {None, ""}:
+        predict_bikes = target_name == "bikes"
+    else:
+        predict_bikes = parse_bool_value(_setting("PREDICT_BIKES", str(target_name == "bikes").lower()), default=True)
     serving_environment = str(_setting("SERVING_ENVIRONMENT", "local"))
     deployment_root = str(_setting("DEPLOYMENT_STATE_ROOT", str(DEFAULT_DEPLOYMENT_STATE_ROOT)))
     resolved_deployment_state_path = _setting("DEPLOYMENT_STATE_PATH")
