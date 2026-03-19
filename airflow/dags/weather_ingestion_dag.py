@@ -20,7 +20,7 @@ def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
 
 
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
+    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
 
 
 def _dw_conn_uri() -> str:
@@ -73,6 +73,7 @@ with DAG(
     start_date=start,
     schedule="*/10 * * * *",
     catchup=False,
+    max_active_runs=1,
     default_args=default_args,
     tags=["weather", "openweather", "10min", "dual-write"],
 ):

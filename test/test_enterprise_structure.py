@@ -227,6 +227,16 @@ def test_feature_future_window_label_smoke_test_is_runtime_scoped():
     assert "from mature_feature_rows cur" in test_sql
 
 
+def test_feature_label_maturity_consistency_test_is_runtime_scoped():
+    test_sql = Path(
+        "dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_label_maturity_consistency.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "runtime_window_start_utc_expr(default_lookback_hours=72)" in test_sql
+    assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
+    assert "snapshot_bucket_at_utc + interval '30 minutes' <= {{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
+
+
 def test_feature_latest_window_null_test_uses_immature_window_not_full_horizon():
     test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_latest_window_labels_null.sql").read_text(
         encoding="utf-8"
@@ -242,6 +252,7 @@ def test_tiered_dbt_dags_use_explicit_queue_and_pool_assignments():
     hotpath = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
     feature = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
     quality = Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(encoding="utf-8")
+    weather = Path("airflow/dags/weather_ingestion_dag.py").read_text(encoding="utf-8")
 
     assert 'return _get_setting("DBT_HOTPATH_POOL", "DBT_HOTPATH_POOL", "dbt_hotpath_pool")' in hotpath
     assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in hotpath
@@ -249,6 +260,8 @@ def test_tiered_dbt_dags_use_explicit_queue_and_pool_assignments():
     assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in feature
     assert 'return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")' in quality
     assert 'return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")' in quality
+    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in weather
+    assert "max_active_runs=1" in weather
 
 
 def test_dbt_runtime_selectors_and_thread_defaults_are_hotpath_safe():

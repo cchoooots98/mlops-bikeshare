@@ -11,13 +11,8 @@ with feature_rows as (
         y_stockout_bikes_30,
         y_stockout_docks_30
     from {{ ref('feat_station_snapshot_5min') }}
-),
-city_latest as (
-    select
-        city,
-        max(snapshot_bucket_at_utc) + interval '5 minutes' as latest_snapshot_bucket_at_utc
-    from feature_rows
-    group by city
+    where {{ feature_dt_to_utc('dt') }} >= {{ runtime_window_start_utc_expr(default_lookback_hours=72) }}
+      and {{ feature_dt_to_utc('dt') }} < {{ runtime_utc_expr('test_window_end_utc') }}
 ),
 eligible_rows as (
     select
@@ -29,9 +24,7 @@ eligible_rows as (
         f.y_stockout_bikes_30,
         f.y_stockout_docks_30
     from feature_rows f
-    inner join city_latest cl
-        on f.city = cl.city
-    where cl.latest_snapshot_bucket_at_utc >= f.snapshot_bucket_at_utc + interval '30 minutes'
+    where f.snapshot_bucket_at_utc + interval '30 minutes' <= {{ runtime_utc_expr('test_window_end_utc') }}
       and exists (
           select 1
           from {{ ref('int_station_status_enriched') }} fut
@@ -39,7 +32,7 @@ eligible_rows as (
             and fut.station_id = f.station_id
             and fut.snapshot_bucket_at_utc > f.snapshot_bucket_at_utc
             and fut.snapshot_bucket_at_utc <= f.snapshot_bucket_at_utc + interval '30 minutes'
-            and fut.snapshot_bucket_at_utc <= cl.latest_snapshot_bucket_at_utc
+            and fut.snapshot_bucket_at_utc <= {{ runtime_utc_expr('test_window_end_utc') }}
       )
 ),
 partial_null_rows as (
