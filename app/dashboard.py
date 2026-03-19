@@ -195,6 +195,14 @@ def _load_freshness_safely() -> FreshnessLoadResult:
         )
 
 
+def _model_latency_ms(series: pd.DataFrame) -> pd.DataFrame:
+    if series.empty or "ModelLatency" not in series.columns:
+        return series
+    converted = series.copy()
+    converted["ModelLatency"] = pd.to_numeric(converted["ModelLatency"], errors="coerce") / 1000.0
+    return converted
+
+
 with st.sidebar:
     st.markdown("### Velib Paris")
     st.markdown("---")
@@ -208,7 +216,6 @@ with st.sidebar:
     top_n = st.slider("Top-N stations to show", 5, 50, 20, 5)
     history_limit = st.slider("History snapshots", 12, 96, 24, 12)
     st.markdown("---")
-    st.caption(f"City: {CITY} | Env: {ENVIRONMENT}")
     if DEV_MODE:
         st.info("Development mode is enabled. Operator debug details are visible.")
 
@@ -417,12 +424,14 @@ with tab_system:
         "VariantName": "AllTraffic",
     }
     system_health = {
-        "ModelLatency": fetch_metric_series(
-            _cw_client(),
-            namespace="AWS/SageMaker",
-            metric_name="ModelLatency",
-            dimensions=sm_dims,
-            stat="p95",
+        "ModelLatency": _model_latency_ms(
+            fetch_metric_series(
+                _cw_client(),
+                namespace="AWS/SageMaker",
+                metric_name="ModelLatency",
+                dimensions=sm_dims,
+                stat="p95",
+            )
         ),
         "Invocation5XXErrors": fetch_metric_series(
             _cw_client(),

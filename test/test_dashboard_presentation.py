@@ -84,6 +84,62 @@ def test_build_station_risk_frame_adds_business_columns_and_sorts_by_risk():
     assert frame.iloc[0]["current_status"] == "Stockout now"
 
 
+def test_build_station_risk_frame_breaks_ties_by_inventory_then_capacity():
+    station_info = pd.DataFrame(
+        [
+            {
+                "station_id": "1",
+                "station_name": "Alpha",
+                "dt": "2026-03-19-00-35",
+                "bikes": 7,
+                "docks": 13,
+                "capacity": 20,
+                "lat": 48.86,
+                "lon": 2.36,
+            },
+            {
+                "station_id": "2",
+                "station_name": "Bravo",
+                "dt": "2026-03-19-00-35",
+                "bikes": 7,
+                "docks": 12,
+                "capacity": 24,
+                "lat": 48.85,
+                "lon": 2.35,
+            },
+            {
+                "station_id": "3",
+                "station_name": "Charlie",
+                "dt": "2026-03-19-00-35",
+                "bikes": 9,
+                "docks": 10,
+                "capacity": 18,
+                "lat": 48.84,
+                "lon": 2.34,
+            },
+        ]
+    )
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {"station_id": "1", "ts": datetime(2026, 3, 19, 0, 35, tzinfo=timezone.utc), "score": 0.70},
+                {"station_id": "2", "ts": datetime(2026, 3, 19, 0, 35, tzinfo=timezone.utc), "score": 0.70},
+                {"station_id": "3", "ts": datetime(2026, 3, 19, 0, 35, tzinfo=timezone.utc), "score": 0.70},
+            ]
+        ),
+    )
+
+    frame = build_station_risk_frame(
+        station_info=station_info,
+        prediction_result=prediction_result,
+        target_name="bikes",
+        threshold=0.60,
+    )
+
+    assert list(frame["station_id"]) == ["3", "2", "1"]
+
+
 def test_resolve_selected_station_falls_back_to_highest_risk_station():
     frame = pd.DataFrame(
         [

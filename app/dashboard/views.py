@@ -76,6 +76,13 @@ def _format_metric_value(value: float, decimals: int) -> str:
     return f"{value:.{decimals}f}"
 
 
+def _coerce_int(value: object) -> str:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        return "n/a"
+    return str(int(numeric))
+
+
 def _slugify_key_part(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "section"
@@ -108,13 +115,29 @@ def render_status_cards(
     )
 
     latest_label = latest_prediction_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if latest_prediction_dt else "Unavailable"
-    cols = st.columns(5)
+    cols = st.columns(2)
     cols[0].metric("Pipeline state", pipeline_state)
     cols[1].metric("Prediction target", target.display_name)
-    cols[2].metric("Active endpoint", endpoint_name)
-    cols[3].metric("Active model", model_version)
-    cols[4].metric("Latest prediction", latest_label)
-    st.caption(f"City: paris. Environment: {environment}. Alert threshold: {threshold:.2f}.")
+    st.markdown(
+        (
+            "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));"
+            "gap:0.75rem;margin-top:0.6rem;margin-bottom:0.25rem'>"
+            f"<div style='padding:0.7rem 0.9rem;border:1px solid #e9ecef;border-radius:8px;background:#fbfcfd'>"
+            f"<div style='font-size:0.74rem;color:#6c757d;margin-bottom:0.2rem'>Active endpoint</div>"
+            f"<div style='font-size:0.95rem;font-weight:600;line-height:1.35;word-break:break-word'>{endpoint_name}</div>"
+            "</div>"
+            f"<div style='padding:0.7rem 0.9rem;border:1px solid #e9ecef;border-radius:8px;background:#fbfcfd'>"
+            f"<div style='font-size:0.74rem;color:#6c757d;margin-bottom:0.2rem'>Active model</div>"
+            f"<div style='font-size:0.95rem;font-weight:600;line-height:1.35;word-break:break-word'>{model_version}</div>"
+            "</div>"
+            f"<div style='padding:0.7rem 0.9rem;border:1px solid #e9ecef;border-radius:8px;background:#fbfcfd'>"
+            f"<div style='font-size:0.74rem;color:#6c757d;margin-bottom:0.2rem'>Latest prediction</div>"
+            f"<div style='font-size:0.95rem;font-weight:600;line-height:1.35;word-break:break-word'>{latest_label}</div>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def render_artifact_issue(result: ArtifactLoadResult, *, default_message: str | None = None) -> None:
@@ -187,16 +210,18 @@ def render_prediction_map(
 
     for row in station_risk_frame.itertuples():
         tooltip = f"{row.station_id} | {row.station_name}"
+        current_inventory_label = "Current bikes" if target.target_name == "bikes" else "Current docks"
+        current_inventory_value = row.bikes if target.target_name == "bikes" else row.docks
         popup_html = (
-            f"<b>{row.station_name}</b><br>"
-            f"Station ID: {row.station_id}<br>"
-            f"Current bikes: {int(row.bikes) if pd.notna(row.bikes) else 'n/a'}<br>"
-            f"Current docks: {int(row.docks) if pd.notna(row.docks) else 'n/a'}<br>"
-            f"Capacity: {int(row.capacity) if pd.notna(row.capacity) else 'n/a'}<br>"
-            f"Current status: {row.current_status}<br>"
-            f"{target.display_name} risk level: {row.risk_level}<br>"
-            f"{target.display_name} probability (30 min): {row.stockout_probability:.3f}<br>"
-            f"Last updated: {format_utc_label(row.ts)}"
+            "<div style='font-size:0.98rem;line-height:1.3'>"
+            f"<div style='font-weight:700;margin-bottom:0.2rem'>{row.station_name}</div>"
+            f"<div><b>ID:</b> {row.station_id}</div>"
+            f"<div><b>{current_inventory_label}:</b> {_coerce_int(current_inventory_value)}</div>"
+            f"<div><b>Capacity:</b> {_coerce_int(row.capacity)}</div>"
+            f"<div><b>Status:</b> {row.current_status}</div>"
+            f"<div><b>Risk:</b> {row.risk_level} ({row.stockout_probability:.3f})</div>"
+            f"<div><b>Updated:</b> {format_utc_label(row.ts)}</div>"
+            "</div>"
         )
         folium.CircleMarker(
             location=[row.lat, row.lon],
@@ -206,7 +231,7 @@ def render_prediction_map(
             fill_color=row.risk_color,
             fill_opacity=0.85,
             tooltip=tooltip,
-            popup=folium.Popup(popup_html, max_width=280),
+            popup=folium.Popup(popup_html, max_width=240),
         ).add_to(fmap)
 
     event = st_folium(fmap, width=None, height=440, returned_objects=["last_object_clicked_tooltip"])
@@ -242,17 +267,36 @@ def render_selected_station_summary(
 
     station_name = str(selected_station.get("station_name") or selected_station.get("station_id"))
     station_id = str(selected_station.get("station_id"))
-    st.markdown(f"**{station_name}**")
+    st.markdown(
+        f"<div style='font-size:1.35rem;font-weight:700;line-height:1.3;margin-bottom:0.2rem'>{station_name}</div>",
+        unsafe_allow_html=True,
+    )
     st.caption(f"Station ID: {station_id}. Forecast horizon: next 30 minutes (UTC).")
-
-    cols = st.columns(6)
-    cols[0].metric("Current bikes", int(selected_station["bikes"]) if pd.notna(selected_station.get("bikes")) else "n/a")
-    cols[1].metric("Current docks", int(selected_station["docks"]) if pd.notna(selected_station.get("docks")) else "n/a")
-    cols[2].metric("Capacity", int(selected_station["capacity"]) if pd.notna(selected_station.get("capacity")) else "n/a")
-    cols[3].metric("Current status", str(selected_station.get("current_status") or "Unavailable"))
-    cols[4].metric(f"{target.display_name} risk", str(selected_station.get("risk_level") or "Unavailable"))
     probability = float(selected_station["stockout_probability"]) if pd.notna(selected_station.get("stockout_probability")) else None
-    cols[5].metric("30-minute probability", f"{probability:.3f}" if probability is not None else "n/a")
+    summary_cards = [
+        ("Current bikes", _coerce_int(selected_station.get("bikes"))),
+        ("Current docks", _coerce_int(selected_station.get("docks"))),
+        ("Capacity", _coerce_int(selected_station.get("capacity"))),
+        ("Current status", str(selected_station.get("current_status") or "Unavailable")),
+        (f"{target.display_name} risk", str(selected_station.get("risk_level") or "Unavailable")),
+        ("30-minute probability", f"{probability:.3f}" if probability is not None else "n/a"),
+    ]
+    summary_html = "".join(
+        (
+            "<div style='padding:0.9rem 1rem;border:1px solid #e9ecef;border-radius:10px;background:#fbfcfd;'>"
+            f"<div style='font-size:0.78rem;color:#6c757d;margin-bottom:0.35rem'>{label}</div>"
+            f"<div style='font-size:1.05rem;font-weight:600;line-height:1.35;word-break:break-word'>{value}</div>"
+            "</div>"
+        )
+        for label, value in summary_cards
+    )
+    st.markdown(
+        (
+            "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));"
+            f"gap:0.75rem;margin:0.5rem 0 0.25rem'>{summary_html}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
     st.caption(f"Latest serving snapshot: {format_utc_label(selected_station.get('dt') or selected_station.get('ts'))}")
 
 
@@ -285,8 +329,8 @@ def render_top_risk_table(
     st.dataframe(
         ranked[
             [
-                "Station name",
                 "Station ID",
+                "Station name",
                 "Current bikes",
                 "Current docks",
                 "Capacity",

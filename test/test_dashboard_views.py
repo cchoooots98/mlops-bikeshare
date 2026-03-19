@@ -124,3 +124,40 @@ def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
     assert captured["subheader"] == ["Station History"]
     assert captured["caption"][0] == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
     assert captured["key"] == "history-chart-bikes-54000604"
+
+
+def test_render_selected_station_summary_renders_full_status_text(monkeypatch):
+    captured_markdown = []
+    captured_caption = []
+
+    monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "info", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        views.st,
+        "markdown",
+        lambda text, **kwargs: captured_markdown.append(text),
+    )
+    monkeypatch.setattr(
+        views.st,
+        "caption",
+        lambda text: captured_caption.append(text),
+    )
+
+    views.render_selected_station_summary(
+        selected_station={
+            "station_id": "54000604",
+            "station_name": "Gergovie - Vercingetorix",
+            "bikes": 4,
+            "docks": 25,
+            "capacity": 29,
+            "current_status": "Low inventory now",
+            "risk_level": "Normal",
+            "stockout_probability": 0.154,
+            "ts": datetime(2026, 3, 19, 11, 50, tzinfo=timezone.utc),
+        },
+        target=_target(),
+    )
+
+    assert "Gergovie - Vercingetorix" in captured_markdown[0]
+    assert "Low inventory now" in captured_markdown[1]
+    assert captured_caption[0] == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."

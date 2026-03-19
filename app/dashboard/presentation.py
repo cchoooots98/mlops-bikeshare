@@ -95,7 +95,17 @@ def build_station_risk_frame(
         ),
         axis=1,
     )
-    merged = merged.sort_values(["score", "station_name", "station_id"], ascending=[False, True, True]).reset_index(drop=True)
+    inventory_column = "bikes" if target_name == "bikes" else "docks"
+    merged["_inventory_sort"] = pd.to_numeric(merged[inventory_column], errors="coerce").fillna(-1)
+    merged["_capacity_sort"] = pd.to_numeric(merged["capacity"], errors="coerce").fillna(-1)
+    merged = (
+        merged.sort_values(
+            ["score", "_inventory_sort", "_capacity_sort", "station_name", "station_id"],
+            ascending=[False, False, False, True, True],
+        )
+        .drop(columns=["_inventory_sort", "_capacity_sort"])
+        .reset_index(drop=True)
+    )
     return merged
 
 
