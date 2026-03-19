@@ -1,6 +1,7 @@
 """Dashboard rendering functions."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from math import ceil
 
@@ -18,6 +19,7 @@ from .presentation import (
     critical_threshold_for,
     format_utc_label,
     metric_empty_message,
+    station_history_context,
     station_history_title,
     summarize_quality_availability,
 )
@@ -74,6 +76,11 @@ def _format_metric_value(value: float, decimals: int) -> str:
     return f"{value:.{decimals}f}"
 
 
+def _slugify_key_part(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "section"
+
+
 def render_status_cards(
     *,
     target: DashboardTargetConfig,
@@ -107,7 +114,7 @@ def render_status_cards(
     cols[2].metric("Active endpoint", endpoint_name)
     cols[3].metric("Active model", model_version)
     cols[4].metric("Latest prediction", latest_label)
-    st.caption(f"City: paris | Environment: {environment} | Alert threshold: {threshold:.2f}")
+    st.caption(f"City: paris. Environment: {environment}. Alert threshold: {threshold:.2f}.")
 
 
 def render_artifact_issue(result: ArtifactLoadResult, *, default_message: str | None = None) -> None:
@@ -169,7 +176,8 @@ def render_prediction_map(
     target: DashboardTargetConfig,
     threshold: float,
 ) -> None:
-    st.subheader(f"Live operations map | {target.display_name} | next 30 minutes (UTC)")
+    st.subheader("Live Operations Map")
+    st.caption(f"{target.display_name} risk for the next 30 minutes (UTC).")
     if station_risk_frame.empty:
         st.warning("Business-ready station risk data is unavailable.")
         return
@@ -227,14 +235,15 @@ def render_selected_station_summary(
     selected_station: dict[str, object] | None,
     target: DashboardTargetConfig,
 ) -> None:
-    st.subheader("Selected station summary | next 30 minutes (UTC)")
+    st.subheader("Selected Station Summary")
     if selected_station is None:
         st.info("No station is available yet. Once predictions load, the highest-risk station will be selected automatically.")
         return
 
     station_name = str(selected_station.get("station_name") or selected_station.get("station_id"))
     station_id = str(selected_station.get("station_id"))
-    st.markdown(f"**{station_name}**  |  Station ID: `{station_id}`")
+    st.markdown(f"**{station_name}**")
+    st.caption(f"Station ID: {station_id}. Forecast horizon: next 30 minutes (UTC).")
 
     cols = st.columns(6)
     cols[0].metric("Current bikes", int(selected_station["bikes"]) if pd.notna(selected_station.get("bikes")) else "n/a")
@@ -251,8 +260,10 @@ def render_top_risk_table(
     *,
     station_risk_frame: pd.DataFrame,
     top_n: int,
+    target: DashboardTargetConfig,
 ) -> None:
-    st.subheader(f"Station risk table | top {top_n} stations | next 30 minutes (UTC)")
+    st.subheader(f"Top {top_n} Stations by 30-Minute Risk")
+    st.caption(f"{target.display_name} view with current inventory and the latest serving snapshot (UTC).")
     if station_risk_frame.empty:
         st.warning("Risk table is unavailable.")
         return
@@ -307,9 +318,10 @@ def render_history_chart(
     threshold: float,
     selected_station: dict[str, object] | None,
 ) -> None:
-    st.subheader(station_history_title(selected_station))
+    st.subheader(station_history_title())
+    st.caption(station_history_context(selected_station))
     st.caption(
-        "30-minute stockout definition: min bikes/docks in the next 30 minutes <= 2 | "
+        "30-minute stockout definition: min bikes/docks in the next 30 minutes <= 2. "
         "Alert threshold: model-specific operating threshold learned during training."
     )
     if history_result.status != LoadStatus.OK:
@@ -342,7 +354,12 @@ def render_history_chart(
         margin=dict(l=0, r=0, t=30, b=0),
         showlegend=False,
     )
-    st.plotly_chart(fig, width="stretch")
+    station_id = str((selected_station or {}).get("station_id") or "none")
+    st.plotly_chart(
+        fig,
+        width="stretch",
+        key=f"history-chart-{_slugify_key_part(target.target_name)}-{_slugify_key_part(station_id)}",
+    )
 
 
 def render_quality_status_panel(
@@ -374,8 +391,12 @@ def render_metric_section(
     human_labels: dict[str, str] | None = None,
     quality_result: ArtifactLoadResult | None = None,
     cols_per_row: int = 3,
+    description: str | None = None,
+    key_prefix: str | None = None,
 ) -> None:
     st.subheader(title)
+    if description:
+        st.caption(description)
     labels = {**_METRIC_LABELS, **(human_labels or {})}
     specs = metric_specs or {}
     items = list(series_map.items())
@@ -429,7 +450,9 @@ def render_metric_section(
                     showlegend=False,
                     height=160,
                 )
-                st.plotly_chart(fig, width="stretch")
+                chart_key_prefix = key_prefix or _slugify_key_part(title)
+                chart_key = f"metric-chart-{_slugify_key_part(chart_key_prefix)}-{_slugify_key_part(metric_name)}"
+                st.plotly_chart(fig, width="stretch", key=chart_key)
 
 
 def render_data_status_table(
@@ -441,7 +464,8 @@ def render_data_status_table(
     quality_sla_minutes: int,
     feature_sla_minutes: int,
 ) -> None:
-    st.subheader("Data pipeline status | operator SLA view")
+    st.subheader("Data Pipeline Status")
+    st.caption("Freshness and artifact availability against the operator SLA window.")
     frame = build_data_status_frame(
         prediction_result=prediction_result,
         quality_result=quality_result,

@@ -313,6 +313,7 @@ with tab_map:
     render_top_risk_table(
         station_risk_frame=station_risk_frame,
         top_n=top_n,
+        target=target,
     )
 
 with tab_history:
@@ -390,7 +391,8 @@ with tab_quality:
         metric_series_map=model_health,
     )
     render_metric_section(
-        title="Prediction quality | last 24 hours (UTC)",
+        title="Prediction Quality",
+        description="Last 24 hours in UTC. These metrics summarize mature quality evidence and published monitoring signals.",
         series_map=model_health,
         quality_result=latest_quality,
         metric_specs={
@@ -400,6 +402,7 @@ with tab_quality:
             "ThresholdHitRate-24h": MetricSpec(label="Threshold Hit Rate (24h)", direction="none", decimals=3),
             "Samples-24h": MetricSpec(label="Samples (24h)", direction="higher", warning=1.0, critical=1.0, decimals=0),
         },
+        key_prefix="prediction-quality",
     )
 
 with tab_system:
@@ -457,7 +460,8 @@ with tab_system:
         ),
     }
     render_metric_section(
-        title="System health | serving SLA view | last 24 hours (UTC)",
+        title="System Health",
+        description="Serving SLA view for the last 24 hours in UTC.",
         series_map=system_health,
         metric_specs={
             "ModelLatency": MetricSpec(
@@ -509,6 +513,7 @@ with tab_system:
                 empty_message="No PSI drift samples are available yet for the selected target.",
             ),
         },
+        key_prefix="system-health",
     )
     st.caption(
         "Runbook thresholds: latency warning 200 ms / critical 300 ms, 5xx must remain at 0, "

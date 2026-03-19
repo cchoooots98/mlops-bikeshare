@@ -16,6 +16,7 @@ from dashboard.presentation import (  # noqa: E402
     build_station_risk_frame,
     classify_metric_status,
     resolve_selected_station,
+    station_history_context,
     station_history_title,
     summarize_quality_availability,
 )
@@ -97,10 +98,16 @@ def test_resolve_selected_station_falls_back_to_highest_risk_station():
     assert selected["station_id"] == "10"
 
 
-def test_station_history_title_uses_station_name_and_id():
-    title = station_history_title({"station_id": "123", "station_name": "Republique"})
+def test_station_history_title_is_clean_section_label():
+    title = station_history_title()
 
-    assert title == "Station history | Republique (123) | next 30-minute risk (UTC)"
+    assert title == "Station History"
+
+
+def test_station_history_context_uses_station_name_and_id():
+    context = station_history_context({"station_id": "123", "station_name": "Republique"})
+
+    assert context == "Station: Republique (123). Forecast horizon: next 30 minutes (UTC)."
 
 
 def test_summarize_quality_availability_explains_missing_cloudwatch_metrics():

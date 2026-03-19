@@ -115,10 +115,14 @@ def resolve_selected_station(
     return station_risk_frame.iloc[0].to_dict()
 
 
-def station_history_title(selected_station: dict[str, object] | None) -> str:
+def station_history_title() -> str:
+    return "Station History"
+
+
+def station_history_context(selected_station: dict[str, object] | None) -> str:
     station_name = str((selected_station or {}).get("station_name") or "No station selected")
     station_id = str((selected_station or {}).get("station_id") or "n/a")
-    return f"Station history | {station_name} ({station_id}) | next 30-minute risk (UTC)"
+    return f"Station: {station_name} ({station_id}). Forecast horizon: next 30 minutes (UTC)."
 
 
 def format_utc_label(value: object) -> str:
