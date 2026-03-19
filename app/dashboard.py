@@ -145,6 +145,8 @@ def _determine_pipeline_state(
     freshness_result: FreshnessLoadResult,
     stale_after_minutes: int,
 ) -> str:
+    if freshness_result.status != LoadStatus.OK:
+        return "Degraded"
     if prediction_result.status in {
         LoadStatus.ALL_SCORES_NULL,
         LoadStatus.ACCESS_DENIED,
@@ -168,6 +170,29 @@ def _determine_pipeline_state(
     ):
         return "Degraded"
     return "Healthy"
+
+
+def _load_station_info_safely() -> tuple[pd.DataFrame, str]:
+    try:
+        return load_station_info(engine=_pg_engine(), schema=PG_SCHEMA, city=CITY), ""
+    except Exception as exc:
+        return pd.DataFrame(), f"Station metadata is unavailable because PostgreSQL could not be reached: {exc}"
+
+
+def _load_freshness_safely() -> FreshnessLoadResult:
+    try:
+        return load_freshness(
+            engine=_pg_engine(),
+            schema=PG_SCHEMA,
+            city=CITY,
+            tables=FRESHNESS_TABLES,
+        )
+    except Exception as exc:
+        return FreshnessLoadResult(
+            status=LoadStatus.READ_ERROR,
+            data=pd.DataFrame(),
+            message=f"Feature freshness is unavailable because PostgreSQL could not be reached: {exc}",
+        )
 
 
 with st.sidebar:
@@ -204,7 +229,7 @@ threshold = model_metadata.threshold if model_metadata.threshold is not None els
 st.markdown("## Velib Paris Station Risk Monitor")
 
 with st.spinner("Loading station metadata..."):
-    station_info = load_station_info(engine=_pg_engine(), schema=PG_SCHEMA, city=CITY)
+    station_info, station_info_error = _load_station_info_safely()
 
 with st.spinner("Loading latest prediction artifact..."):
     latest_predictions = load_latest_predictions(
@@ -223,12 +248,7 @@ with st.spinner("Loading latest quality artifact..."):
     )
 
 with st.spinner("Checking feature freshness..."):
-    freshness_result = load_freshness(
-        engine=_pg_engine(),
-        schema=PG_SCHEMA,
-        city=CITY,
-        tables=FRESHNESS_TABLES,
-    )
+    freshness_result = _load_freshness_safely()
 
 pipeline_state = _determine_pipeline_state(
     prediction_result=latest_predictions,
@@ -247,6 +267,10 @@ render_status_cards(
 )
 if model_metadata.message:
     st.warning(model_metadata.message)
+if station_info_error:
+    st.warning(station_info_error)
+if freshness_result.message and freshness_result.status != LoadStatus.OK:
+    st.warning(freshness_result.message)
 
 render_alert_banner(
     prediction_result=latest_predictions,
