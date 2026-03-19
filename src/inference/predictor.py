@@ -1,6 +1,8 @@
 import io
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 import boto3
 import pandas as pd
@@ -13,6 +15,12 @@ from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.inference.featurize_online import build_online_features
 from src.model_target import PredictionTargetSpec, target_spec_from_metadata
 from src.config import load_runtime_settings
+
+
+@dataclass(frozen=True)
+class PredictionFailure:
+    inference_id: str
+    error: str
 
 
 def _s3():
@@ -36,6 +44,8 @@ def build_endpoint_payload(feature_row: list[float], feature_columns: list[str])
 
 
 def _coerce_prediction_value(output) -> float:
+    if not isinstance(output, (dict, list)):
+        raise ValueError(f"endpoint returned non-JSON prediction payload: {type(output).__name__}")
     preds = output.get("predictions", output) if isinstance(output, dict) else output
     if isinstance(preds, list):
         value = preds[0] if len(preds) == 1 else preds
@@ -43,10 +53,18 @@ def _coerce_prediction_value(output) -> float:
         value = preds
     if isinstance(value, list) and len(value) == 1 and isinstance(value[0], (int, float)):
         value = value[0]
-    try:
-        return float(value if not isinstance(value, dict) else value.get("yhat", "nan"))
-    except Exception:
-        return float("nan")
+    if isinstance(value, dict):
+        if "yhat" not in value:
+            raise ValueError(f"endpoint returned dict prediction without 'yhat': {value}")
+        value = value["yhat"]
+    if isinstance(value, list):
+        raise ValueError(f"endpoint returned multiple predictions for a single row: {value}")
+    score = float(value)
+    if not math.isfinite(score):
+        raise ValueError(f"endpoint returned non-finite prediction: {value}")
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(f"endpoint returned prediction outside [0, 1]: {score}")
+    return score
 
 
 def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
@@ -59,7 +77,9 @@ def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: 
         InferenceId=inference_id,
     )
     body = resp["Body"].read().decode("utf-8", errors="ignore")
-    out = json.loads(body) if body.strip().startswith(("{", "[")) else body
+    if not body.strip().startswith(("{", "[")):
+        raise ValueError(f"endpoint returned non-JSON body for {inference_id}: {body[:200]}")
+    out = json.loads(body)
     return _coerce_prediction_value(out)
 
 
@@ -111,6 +131,7 @@ def _predict_rowwise_threaded(
     feats = X[feature_columns].astype("float64").values.tolist()
     ids = (X["dt"].astype(str) + "_" + X["station_id"].astype(str)).tolist()
     yhat = [None] * len(feats)
+    failures: list[PredictionFailure] = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -121,8 +142,20 @@ def _predict_rowwise_threaded(
             index = futures[future]
             try:
                 yhat[index] = future.result()
-            except Exception:
-                yhat[index] = float("nan")
+            except Exception as exc:
+                failures.append(PredictionFailure(inference_id=ids[index], error=str(exc)[:240]))
+
+    if failures:
+        examples = "; ".join(f"{item.inference_id}: {item.error}" for item in failures[:3])
+        raise RuntimeError(
+            f"endpoint={endpoint} failed predictions for {len(failures)}/{len(feats)} rows; examples: {examples}"
+        )
+
+    valid_prediction_count = sum(
+        1 for value in yhat if value is not None and math.isfinite(float(value))
+    )
+    if valid_prediction_count == 0:
+        raise RuntimeError(f"endpoint={endpoint} produced all predictions invalid for {len(feats)} rows")
 
     out = X[["city", "station_id", "dt"]].copy()
     out["prediction_target"] = target_spec.target_name
@@ -130,6 +163,10 @@ def _predict_rowwise_threaded(
     out[target_spec.score_bin_column] = (out[target_spec.score_column] >= threshold).astype("float64")
     out["inferenceId"] = ids
     out["raw"] = ""
+    print(
+        f"[predictor] endpoint={endpoint} target={target_spec.target_name} "
+        f"valid_predictions={valid_prediction_count}/{len(feats)}"
+    )
     return out
 
 

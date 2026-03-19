@@ -60,6 +60,7 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     lambda_tf = Path("infra/terraform/modules/platform/lambda_eventbridge.tf").read_text(encoding="utf-8")
     cloudwatch_tf = Path("infra/terraform/modules/platform/cloudwatch.tf").read_text(encoding="utf-8")
     variables_tf = Path("infra/terraform/modules/platform/variables.tf").read_text(encoding="utf-8")
+    ec2_tf = Path("infra/terraform/modules/platform/iam_ec2.tf").read_text(encoding="utf-8")
 
     assert "placeholder" not in lambda_tf.lower()
     assert "placeholder" not in cloudwatch_tf.lower()
@@ -73,6 +74,10 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     assert "PSI" in cloudwatch_tf
     assert "aws_cloudwatch_event_rule" not in lambda_tf
     assert "events.amazonaws.com" not in lambda_tf
+    assert "sagemaker:InvokeEndpoint" in ec2_tf
+    assert "sagemaker:DescribeEndpoint" in ec2_tf
+    assert "AmazonSageMakerFullAccess" not in ec2_tf
+    assert 'values(var.sagemaker_endpoints)' in ec2_tf
 
 
 def test_terraform_uses_s3_native_locking_and_modern_version_floor():
@@ -130,8 +135,8 @@ def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
     architecture = Path("docs/architecture.md").read_text(encoding="utf-8")
     cicd = Path("docs/cicd.md").read_text(encoding="utf-8")
     deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
-    runbook = Path("docs/runbook_prod.md").read_text(encoding="utf-8")
-    monitoring = Path("docs/monitoring_runbook.md").read_text(encoding="utf-8")
+    runbook = Path("docs/operations_runbook.md").read_text(encoding="utf-8")
+    monitoring = Path("docs/operations_runbook.md").read_text(encoding="utf-8")
     operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(encoding="utf-8")
     production_dag_path = Path("airflow/dags/production_serving_dags.py")
     staging_dag_path = Path("airflow/dags/staging_serving_dags.py")
@@ -174,11 +179,13 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
     assert "redis:" in base_compose
     assert "airflow-worker-tier1:" in base_compose
     assert "airflow-worker-tier2:" in base_compose
-    assert "command: celery worker --queues tier1 --concurrency 2" in base_compose
-    assert "command: celery worker --queues tier2,default --concurrency 1" in base_compose
+    assert "exec airflow celery worker" in base_compose
+    assert "--queues tier1" in base_compose
+    assert "--queues tier2,default" in base_compose
     assert "airflow-worker-tier1:" in local_compose
     assert "airflow-worker-tier2:" in local_compose
     assert "./model_dir:/opt/airflow/model_dir" in base_compose
+    assert "./model_dir:/app/model_dir:ro" in base_compose
     assert "AWS_PROFILE: Shirley-fr" not in base_compose
     assert "${USERPROFILE}/.aws/config" not in base_compose
     assert "${USERPROFILE}/.aws/credentials" not in base_compose

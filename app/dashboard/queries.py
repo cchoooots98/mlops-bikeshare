@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from dashboard.contracts import FreshnessLoadResult, LoadStatus
 from dashboard.utils import validate_pg_identifier
 
 
@@ -24,19 +25,15 @@ def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame
     sql = text(f"""
         SELECT
             CAST(f.station_id AS text)          AS station_id,
-            s.name                              AS name,
-            f.capacity,
-            f.lat,
-            f.lon
+            COALESCE(ds.station_name, CAST(f.station_id AS text)) AS name,
+            COALESCE(ds.capacity, f.capacity)   AS capacity,
+            COALESCE(ds.latitude, f.lat)        AS lat,
+            COALESCE(ds.longitude, f.lon)       AS lon
         FROM {schema}.feat_station_snapshot_latest f
-        LEFT JOIN (
-            SELECT DISTINCT ON (city, station_id)
-                city,
-                station_id,
-                name
-            FROM public.stg_station_information
-            ORDER BY city, station_id, ingested_at DESC
-        ) s ON f.city = s.city AND f.station_id = s.station_id
+        LEFT JOIN {schema}.dim_station ds
+            ON f.city = ds.city
+           AND CAST(f.station_id AS text) = CAST(ds.station_id AS text)
+           AND ds.is_current = TRUE
         WHERE f.city = :city
     """)
     with engine.connect() as conn:
@@ -44,13 +41,15 @@ def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame
     return df
 
 
-def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str]) -> pd.DataFrame:
+def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str]) -> FreshnessLoadResult:
     """Return the latest dt string and computed delay for each monitored table.
 
     Returns DataFrame: source (str), latest_dt_str (str or None).
     """
     schema = validate_pg_identifier(schema)
     rows = []
+    overall_status = LoadStatus.OK
+    overall_messages: list[str] = []
     for table in tables:
         table = validate_pg_identifier(table)
         sql = text(f"""
@@ -62,7 +61,24 @@ def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str])
             with engine.connect() as conn:
                 result = conn.execute(sql, {"city": city}).fetchone()
             latest = result[0] if result else None
-        except Exception:
+            row_status = "ok"
+            row_message = ""
+        except Exception as exc:
             latest = None
-        rows.append({"source": table, "latest_dt_str": latest})
-    return pd.DataFrame(rows)
+            row_status = LoadStatus.READ_ERROR.value
+            row_message = str(exc)
+            overall_status = LoadStatus.READ_ERROR
+            overall_messages.append(f"{table}: {exc}")
+        rows.append(
+            {
+                "source": table,
+                "latest_dt_str": latest,
+                "loader_status": row_status,
+                "message": row_message,
+            }
+        )
+    return FreshnessLoadResult(
+        status=overall_status,
+        data=pd.DataFrame(rows),
+        message="; ".join(overall_messages),
+    )

@@ -193,6 +193,37 @@ def test_predict_rowwise_uses_package_threshold(monkeypatch, predict_bikes):
     assert above.loc[0, target_spec.score_bin_column] == 1.0
 
 
+def test_predict_rowwise_threaded_fails_fast_on_any_invoke_error(monkeypatch):
+    def _raise(endpoint, feature_row, inference_id, feature_columns):
+        raise RuntimeError(f"boom for {inference_id}")
+
+    monkeypatch.setattr(predictor, "_invoke_endpoint_one", _raise)
+
+    with pytest.raises(RuntimeError, match="failed predictions for 1/1 rows"):
+        predictor._predict_rowwise_threaded(
+            "endpoint",
+            _online_features_df(),
+            target_spec=target_spec_from_predict_bikes(True),
+            threshold=0.25,
+            feature_columns=FEATURE_COLUMNS,
+            max_workers=1,
+        )
+
+
+def test_predict_rowwise_threaded_fails_when_all_predictions_invalid(monkeypatch):
+    monkeypatch.setattr(predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: float("nan"))
+
+    with pytest.raises(RuntimeError, match="produced all predictions invalid"):
+        predictor._predict_rowwise_threaded(
+            "endpoint",
+            _online_features_df(),
+            target_spec=target_spec_from_predict_bikes(True),
+            threshold=0.25,
+            feature_columns=FEATURE_COLUMNS,
+            max_workers=1,
+        )
+
+
 def test_formal_codepaths_do_not_reference_legacy_feature_builder():
     forbidden = ("src.features.build_features", "features_offline", "athena_conn(", "read_env(", "engineer(")
     paths = [

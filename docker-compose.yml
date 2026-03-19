@@ -221,6 +221,7 @@ services:
       BUCKET: ${BUCKET}
     volumes:
       - ./.streamlit:/app/.streamlit
+      - ./model_dir:/app/model_dir:ro
     restart: unless-stopped
 
 volumes:

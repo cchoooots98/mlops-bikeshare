@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m pytest test/test_s3_loader.py -v)"
+      "Bash(python -m pytest test/test_s3_loader.py -v)",
+      "Bash(aws configure:*)",
+      "Bash(aws sts:*)",
+      "Bash(python3 -c \":*)"
     ]
   }
 }

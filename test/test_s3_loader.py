@@ -23,9 +23,11 @@ from dashboard.s3_loader import (  # noqa: E402
     _list_dt_keys,
     _parse_dt,
     load_latest_predictions,
+    load_latest_quality_status,
     load_prediction_history,
     load_quality_recent,
 )
+from dashboard.contracts import LoadStatus  # noqa: E402
 
 # ── Fixtures / helpers ────────────────────────────────────────────────
 
@@ -145,10 +147,11 @@ def test_load_latest_predictions_returns_correct_schema():
 
     result = load_latest_predictions(bucket="b", city="paris", target_name="bikes", s3_client=client)
 
-    assert list(result.columns) == ["station_id", "ts", "score"]
-    assert result["station_id"].dtype == object  # str
-    assert len(result) == 2
-    assert result["score"].between(0.0, 1.0).all()
+    assert result.status == LoadStatus.OK
+    assert list(result.data.columns) == ["station_id", "ts", "score"]
+    assert result.data["station_id"].dtype == object  # str
+    assert len(result.data) == 2
+    assert result.data["score"].between(0.0, 1.0).all()
 
 
 def test_load_latest_predictions_picks_last_key():
@@ -166,20 +169,22 @@ def test_load_latest_predictions_picks_last_key():
     # Verify get_object was called with the last (most recent) key
     call_args = client.get_object.call_args
     assert call_args.kwargs["Key"] == keys[-1]
-    assert len(result) == 1
+    assert result.status == LoadStatus.OK
+    assert len(result.data) == 1
 
 
 def test_load_latest_predictions_bucket_not_found_returns_empty():
     client = _s3_mock_error("NoSuchBucket")
     result = load_latest_predictions(bucket="bad-bucket", city="paris", target_name="bikes", s3_client=client)
-    assert result.empty
-    assert list(result.columns) == ["station_id", "ts", "score"]
+    assert result.status == LoadStatus.READ_ERROR
+    assert result.data.empty
 
 
 def test_load_latest_predictions_empty_bucket_returns_empty():
     client = _s3_mock([])
     result = load_latest_predictions(bucket="b", city="paris", target_name="bikes", s3_client=client)
-    assert result.empty
+    assert result.status == LoadStatus.NO_OBJECTS
+    assert result.data.empty
 
 
 def test_load_latest_predictions_missing_score_column_returns_empty():
@@ -189,7 +194,20 @@ def test_load_latest_predictions_missing_score_column_returns_empty():
     client = _s3_mock([key], parquet)
 
     result = load_latest_predictions(bucket="b", city="paris", target_name="bikes", s3_client=client)
-    assert result.empty
+    assert result.status == LoadStatus.SCHEMA_ERROR
+    assert result.data.empty
+
+
+def test_load_latest_predictions_all_scores_null_returns_explicit_failure():
+    df = pd.DataFrame({"station_id": ["s1"], "dt": ["2026-03-18-15-30"], "yhat_bikes": [float("nan")]})
+    parquet = _make_parquet_bytes(df)
+    key = "inference/target=bikes/city=paris/dt=2026-03-18-15-30/predictions.parquet"
+    client = _s3_mock([key], parquet)
+
+    result = load_latest_predictions(bucket="b", city="paris", target_name="bikes", s3_client=client)
+
+    assert result.status == LoadStatus.ALL_SCORES_NULL
+    assert result.valid_score_count == 0
 
 
 # ── load_prediction_history ───────────────────────────────────────────
@@ -206,8 +224,9 @@ def test_load_prediction_history_filters_by_station_id():
         bucket="b", city="paris", target_name="bikes", station_id="s2", n_periods=5, s3_client=client
     )
 
-    assert len(result) == 1
-    assert result.iloc[0]["station_id"] == "s2"
+    assert result.status == LoadStatus.OK
+    assert len(result.data) == 1
+    assert result.data.iloc[0]["station_id"] == "s2"
 
 
 def test_load_prediction_history_limits_to_n_periods():
@@ -233,8 +252,21 @@ def test_load_prediction_history_bucket_not_found_returns_empty():
     result = load_prediction_history(
         bucket="bad", city="paris", target_name="bikes", station_id="s1", n_periods=5, s3_client=client
     )
-    assert result.empty
-    assert list(result.columns) == ["station_id", "ts", "score"]
+    assert result.status == LoadStatus.READ_ERROR
+    assert result.data.empty
+
+
+def test_load_prediction_history_station_without_valid_scores_is_explicit_failure():
+    df = pd.DataFrame({"station_id": ["s1"], "dt": ["2026-03-18-15-30"], "yhat_bikes": [float("nan")]})
+    parquet = _make_parquet_bytes(df)
+    key = "inference/target=bikes/city=paris/dt=2026-03-18-15-30/predictions.parquet"
+    client = _s3_mock([key], parquet)
+
+    result = load_prediction_history(
+        bucket="b", city="paris", target_name="bikes", station_id="s1", n_periods=5, s3_client=client
+    )
+
+    assert result.status == LoadStatus.ALL_SCORES_NULL
 
 
 # ── load_quality_recent ───────────────────────────────────────────────
@@ -291,3 +323,16 @@ def test_load_quality_recent_bucket_not_found_returns_empty():
     result = load_quality_recent(bucket="bad", city="paris", target_name="bikes", s3_client=client)
     assert result.empty
     assert list(result.columns) == ["dt", "score", "label"]
+
+
+def test_load_latest_quality_status_reports_schema_and_latest_key():
+    df = _quality_df(["s1"], "2026-03-18-15-30")
+    parquet = _make_parquet_bytes(df)
+    key = "monitoring/quality/target=bikes/city=paris/ds=2026-03-18/part-2026-03-18-15-30.parquet"
+    client = _s3_mock([key], parquet)
+
+    result = load_latest_quality_status(bucket="b", city="paris", target_name="bikes", s3_client=client)
+
+    assert result.status == LoadStatus.OK
+    assert result.latest_key == key
+    assert result.valid_score_count == 1
