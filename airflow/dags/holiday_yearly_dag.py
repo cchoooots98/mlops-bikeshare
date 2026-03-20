@@ -65,7 +65,7 @@ start = pendulum.datetime(2026, 1, 1, tz="Europe/Paris")
 with DAG(
     dag_id="holiday_yearly",
     start_date=start,
-    schedule="0 2 1 1 *",
+    schedule="11 2 1 1 *",
     catchup=False,
     default_args=default_args,
     tags=["holidays", "yearly", "dual-write"],

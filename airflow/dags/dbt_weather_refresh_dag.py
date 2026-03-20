@@ -57,7 +57,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_weather_refresh_10min",
     start_date=start,
-    schedule="*/10 * * * *",
+    schedule="7-59/10 * * * *",
     catchup=False,
     max_active_runs=1,
     default_args=default_args,
@@ -69,6 +69,7 @@ with DAG(
         external_task_id=None,
         allowed_states=["success"],
         failed_states=["failed"],
+        execution_delta=timedelta(minutes=6),
         check_existence=True,
         mode="reschedule",
         poke_interval=30,

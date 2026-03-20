@@ -57,7 +57,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_station_topology_daily",
     start_date=start,
-    schedule="5 2 * * *",
+    schedule="9 2 * * *",
     catchup=False,
     max_active_runs=1,
     default_args=default_args,
@@ -69,7 +69,7 @@ with DAG(
         external_task_id=None,
         allowed_states=["success"],
         failed_states=["failed"],
-        execution_delta=timedelta(minutes=5),
+        execution_delta=timedelta(minutes=7),
         check_existence=True,
         mode="reschedule",
         poke_interval=60,

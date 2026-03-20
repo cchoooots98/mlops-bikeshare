@@ -31,6 +31,10 @@ DEFAULT_ARGS = {
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
+PREDICTION_SCHEDULE = "1-59/15 * * * *"
+QUALITY_SCHEDULE = "8-59/15 * * * *"
+METRICS_SCHEDULE = "43 * * * *"
+PSI_SCHEDULE = "3 * * * *"
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -177,7 +181,7 @@ def build_serving_dags(
     with DAG(
         dag_id=prediction_dag_id,
         start_date=start,
-        schedule="*/15 * * * *",
+        schedule=PREDICTION_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -195,7 +199,7 @@ def build_serving_dags(
     with DAG(
         dag_id=quality_dag_id,
         start_date=start,
-        schedule="7,22,37,52 * * * *",
+        schedule=QUALITY_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -227,7 +231,7 @@ def build_serving_dags(
     with DAG(
         dag_id=metrics_dag_id,
         start_date=start,
-        schedule="12 * * * *",
+        schedule=METRICS_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -259,7 +263,7 @@ def build_serving_dags(
     with DAG(
         dag_id=psi_dag_id,
         start_date=start,
-        schedule="18 * * * *",
+        schedule=PSI_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,

@@ -92,7 +92,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="gbfs_station_information_daily",
     start_date=start,
-    schedule="0 2 * * *",
+    schedule="2 2 * * *",
     catchup=False,
     default_args=default_args,
     tags=["gbfs", "paris", "daily"],

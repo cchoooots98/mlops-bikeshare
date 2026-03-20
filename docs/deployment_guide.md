@@ -433,12 +433,14 @@ Keep the production DAG set paused at this point:
 - `serving_psi_publish_hourly`
 
 Timing contract for the staging/serving DAG chain:
-- `staging_prediction_15min` / `serving_prediction_15min` run every 15 minutes
-- `staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `7,22,37,52 * * * *`
+- `staging_prediction_15min` / `serving_prediction_15min` run on `1,16,31,46 * * * *`
+- `staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `8,23,38,53 * * * *`
 - quality waits for the prediction DAG run from 37 minutes earlier:
   - 30 minutes for label maturity
   - 7 extra minutes for the post-maturity backfill slot
 - hourly metrics wait for the quality DAG run from 5 minutes earlier
+- `staging_metrics_publish_hourly` / `serving_metrics_publish_hourly` run on `43 * * * *`
+- `staging_psi_publish_hourly` / `serving_psi_publish_hourly` run on `3 * * * *`
 - hourly PSI no longer waits for hourly metrics
 - hourly PSI publishes independently and fails fast if the feature store is stale or the recent feature window is empty
 
