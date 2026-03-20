@@ -1,6 +1,7 @@
 import io
 import json
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
@@ -15,6 +16,10 @@ from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.inference.featurize_online import build_online_features
 from src.model_target import PredictionTargetSpec, target_spec_from_metadata
 from src.config import load_runtime_settings
+
+DEFAULT_MAX_WORKERS = 16
+DEFAULT_MAX_ATTEMPTS = 3
+BASE_RETRY_BACKOFF_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,23 @@ def _coerce_prediction_value(output) -> float:
     return score
 
 
+def _validate_feature_row(feature_row: list[float], feature_columns: list[str], inference_id: str) -> None:
+    invalid_columns: list[str] = []
+    for index, value in enumerate(feature_row):
+        try:
+            is_finite = math.isfinite(float(value))
+        except Exception:
+            is_finite = False
+        if not is_finite:
+            invalid_columns.append(feature_columns[index])
+    if invalid_columns:
+        preview = ", ".join(invalid_columns[:5])
+        suffix = "..." if len(invalid_columns) > 5 else ""
+        raise ValueError(
+            f"inference_id={inference_id} contains non-finite feature values; columns={preview}{suffix}"
+        )
+
+
 def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
     payload = build_endpoint_payload(feature_row, feature_columns)
     resp = _smr().invoke_endpoint(
@@ -81,6 +103,40 @@ def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: 
         raise ValueError(f"endpoint returned non-JSON body for {inference_id}: {body[:200]}")
     out = json.loads(body)
     return _coerce_prediction_value(out)
+
+
+def _invoke_endpoint_with_retry(
+    endpoint: str,
+    feature_row: list[float],
+    inference_id: str,
+    feature_columns: list[str],
+    *,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    base_retry_backoff_seconds: float = BASE_RETRY_BACKOFF_SECONDS,
+) -> float:
+    _validate_feature_row(feature_row, feature_columns, inference_id)
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _invoke_endpoint_one(endpoint, feature_row, inference_id, feature_columns)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts:
+                break
+            sleep_seconds = base_retry_backoff_seconds * (2 ** (attempt - 1))
+            print(
+                f"[predictor] endpoint={endpoint} inference_id={inference_id} "
+                f"attempt={attempt}/{max_attempts} failed with {type(exc).__name__}: {str(exc)[:180]} "
+                f"retrying_after={sleep_seconds:.2f}s"
+            )
+            time.sleep(sleep_seconds)
+
+    assert last_exc is not None
+    raise RuntimeError(
+        f"inference_id={inference_id} exhausted {max_attempts} attempts with "
+        f"{type(last_exc).__name__}: {str(last_exc)[:200]}"
+    )
 
 
 def load_prediction_manifest(
@@ -126,7 +182,8 @@ def _predict_rowwise_threaded(
     target_spec: PredictionTargetSpec,
     threshold: float,
     feature_columns: list[str],
-    max_workers: int = 16,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> pd.DataFrame:
     feats = X[feature_columns].astype("float64").values.tolist()
     ids = (X["dt"].astype(str) + "_" + X["station_id"].astype(str)).tolist()
@@ -135,7 +192,14 @@ def _predict_rowwise_threaded(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_invoke_endpoint_one, endpoint, feats[index], ids[index], feature_columns): index
+            executor.submit(
+                _invoke_endpoint_with_retry,
+                endpoint,
+                feats[index],
+                ids[index],
+                feature_columns,
+                max_attempts=max_attempts,
+            ): index
             for index in range(len(feats))
         }
         for future in as_completed(futures):
@@ -143,7 +207,12 @@ def _predict_rowwise_threaded(
             try:
                 yhat[index] = future.result()
             except Exception as exc:
-                failures.append(PredictionFailure(inference_id=ids[index], error=str(exc)[:240]))
+                failures.append(
+                    PredictionFailure(
+                        inference_id=ids[index],
+                        error=f"{type(exc).__name__}: {str(exc)}"[:320],
+                    )
+                )
 
     if failures:
         examples = "; ".join(f"{item.inference_id}: {item.error}" for item in failures[:3])
@@ -189,7 +258,8 @@ def main():
         target_spec=target_spec,
         threshold=metadata["best_threshold"],
         feature_columns=metadata["feature_columns"],
-        max_workers=16,
+        max_workers=DEFAULT_MAX_WORKERS,
+        max_attempts=DEFAULT_MAX_ATTEMPTS,
     )
 
     for dt_value, shard in predictions.groupby("dt", sort=True):
