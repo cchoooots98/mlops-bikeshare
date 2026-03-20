@@ -1,6 +1,7 @@
 services:
   airflow-postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
@@ -15,6 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,6 +25,7 @@ services:
 
   dw-postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: velib
       POSTGRES_PASSWORD: velib
@@ -56,6 +59,8 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
       AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
       AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__OPERATION_TIMEOUT: "10.0"
+      AIRFLOW__CELERY__BROKER_CONNECTION_RETRY_ON_STARTUP: "true"
       AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: "1"
       AIRFLOW__CELERY__TASK_ACKS_LATE: "true"
       # Airflow 2.10.3 still emits this deprecation warning internally even when the new key is used.
@@ -105,6 +110,8 @@ services:
       BUCKET: ${BUCKET}
       PSI_MAX_FEATURE_AGE_MINUTES: "45"
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      PROJECT_RUNTIME_PYTHON: "/opt/project-venv/bin/python"
+      PROJECT_RUNTIME_DBT: "/opt/project-venv/bin/dbt"
     volumes: &airflow-volumes
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/plugins:/opt/airflow/plugins
@@ -124,6 +131,7 @@ services:
 
   airflow-webserver:
     image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -143,6 +151,7 @@ services:
 
   airflow-scheduler:
     image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -156,6 +165,7 @@ services:
 
   airflow-worker-tier1:
     image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -173,6 +183,7 @@ services:
 
   airflow-worker-tier2:
     image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -191,6 +202,7 @@ services:
   mlflow-postgres:
     image: postgres:15
     container_name: mlflow-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: mlflow
       POSTGRES_PASSWORD: mlflow
@@ -207,6 +219,7 @@ services:
   
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.22.1
+    restart: unless-stopped
     depends_on:
       mlflow-postgres:
         condition: service_healthy

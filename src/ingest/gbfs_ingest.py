@@ -524,6 +524,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("GBFS_HTTP_TIMEOUT_SEC", "30")))
     parser.add_argument("--raw-bucket", default=os.getenv("BUCKET", BUCKET or ""))
     parser.add_argument(
+        "--feed",
+        choices=["both", "station_information", "station_status"],
+        default="both",
+        help="Choose which GBFS feed to ingest after staging tables are ensured.",
+    )
+    parser.add_argument(
+        "--ensure-only",
+        action="store_true",
+        help="Only create/repair staging tables and exit without fetching any feeds.",
+    )
+    parser.add_argument(
         "--staging-only",
         action="store_true",
         help="Skip raw S3 backup and only write Postgres staging tables.",
@@ -541,12 +552,51 @@ if __name__ == "__main__":
         raise RuntimeError(f"Unsupported city '{args.city}'. Provide --gbfs-root-url for a custom feed.")
 
     gbfs_root_url = args.gbfs_root_url.strip() or GBFS_ROOT[city]
-    result = ingest_gbfs_to_staging(
-        conn_uri=args.conn_uri,
-        city=city,
-        run_id=args.run_id,
-        gbfs_root_url=gbfs_root_url,
-        timeout_sec=args.timeout_sec,
-        raw_bucket=None if args.staging_only else (args.raw_bucket.strip() or None),
-    )
+    ensure_staging_tables(conn_uri=args.conn_uri)
+
+    if args.ensure_only:
+        result = {"ok": True, "city": city, "ensured_staging_tables": True}
+        print(json.dumps(result))
+        raise SystemExit(0)
+
+    raw_bucket = None if args.staging_only else (args.raw_bucket.strip() or None)
+    if args.feed == "station_information":
+        result = {
+            "ok": True,
+            "city": city,
+            "run_id": args.run_id,
+            "raw": raw_bucket is not None,
+            "station_information": ingest_station_information_to_staging(
+                conn_uri=args.conn_uri,
+                gbfs_root_url=gbfs_root_url,
+                run_id=args.run_id,
+                timeout_sec=args.timeout_sec,
+                raw_bucket=raw_bucket,
+                raw_city=city,
+            ),
+        }
+    elif args.feed == "station_status":
+        result = {
+            "ok": True,
+            "city": city,
+            "run_id": args.run_id,
+            "raw": raw_bucket is not None,
+            "station_status": ingest_station_status_to_staging(
+                conn_uri=args.conn_uri,
+                gbfs_root_url=gbfs_root_url,
+                run_id=args.run_id,
+                timeout_sec=args.timeout_sec,
+                raw_bucket=raw_bucket,
+                raw_city=city,
+            ),
+        }
+    else:
+        result = ingest_gbfs_to_staging(
+            conn_uri=args.conn_uri,
+            city=city,
+            run_id=args.run_id,
+            gbfs_root_url=gbfs_root_url,
+            timeout_sec=args.timeout_sec,
+            raw_bucket=raw_bucket,
+        )
     print(json.dumps(result))

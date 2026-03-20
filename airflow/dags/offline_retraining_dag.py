@@ -12,6 +12,8 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from src.config import run_project_module
+
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
     return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
 
@@ -27,8 +29,6 @@ def _dag_conf(context: dict) -> dict:
 
 
 def run_retraining_task(**context):
-    from src.orchestration.retrain import main as retrain_main
-
     conf = _dag_conf(context)
     dw_conn = _dw_connection()
     args = [
@@ -65,7 +65,12 @@ def run_retraining_task(**context):
         "--summary-path",
         _get_setting("RETRAIN_SUMMARY_PATH", "RETRAIN_SUMMARY_PATH", "model_dir/candidates/retrain_summary.json"),
     ]
-    retrain_main(args)
+    return run_project_module(
+        "src.orchestration.retrain",
+        args=args,
+        cwd=AIRFLOW_HOME,
+        result_prefix="RETRAIN_RESULT_JSON::",
+    )
 
 
 default_args = {

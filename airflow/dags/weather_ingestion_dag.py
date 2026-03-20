@@ -12,7 +12,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.ingest.weather_ingest import ensure_weather_staging_tables, ingest_weather_dual_write
+from src.config import run_project_module
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -42,22 +42,39 @@ def _raw_bucket() -> str:
 
 
 def create_weather_staging_tables_task():
-    ensure_weather_staging_tables(conn_uri=_dw_conn_uri())
+    return run_project_module(
+        "src.ingest.weather_ingest",
+        args=[
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--ensure-only",
+        ],
+        cwd=AIRFLOW_HOME,
+    )
 
 
 def ingest_weather_task(**context):
     api_key = _get_setting("OPENWEATHER_API_KEY", "OPENWEATHER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENWEATHER_API_KEY is required for weather ingestion")
-    result = ingest_weather_dual_write(
-        conn_uri=_dw_conn_uri(),
-        city=_get_setting("CITY", "CITY", "paris"),
-        run_id=context["run_id"],
-        raw_bucket=_raw_bucket(),
-        api_key=api_key,
-        timeout_sec=int(_get_setting("WEATHER_HTTP_TIMEOUT_SEC", "WEATHER_HTTP_TIMEOUT_SEC", "30")),
+    return run_project_module(
+        "src.ingest.weather_ingest",
+        args=[
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--city",
+            _get_setting("CITY", "CITY", "paris"),
+            "--run-id",
+            context["run_id"],
+            "--raw-bucket",
+            _raw_bucket(),
+            "--api-key",
+            api_key,
+            "--timeout-sec",
+            _get_setting("WEATHER_HTTP_TIMEOUT_SEC", "WEATHER_HTTP_TIMEOUT_SEC", "30"),
+        ],
+        cwd=AIRFLOW_HOME,
     )
-    return result
 
 
 default_args = {

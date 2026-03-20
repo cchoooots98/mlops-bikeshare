@@ -1,5 +1,4 @@
 import os
-import subprocess
 import sys
 from datetime import timedelta
 
@@ -13,6 +12,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from src.config import run_project_module
 from src.config.naming import deployment_state_path, endpoint_name
 
 
@@ -90,13 +90,11 @@ def _base_runtime_env(*, target_name: str, environment: str) -> dict[str, str]:
 
 
 def _run_module(module_name: str, *, args: list[str] | None = None, extra_env: dict[str, str] | None = None) -> None:
-    env = dict(os.environ)
-    env.update(extra_env or {})
-    subprocess.run(
-        [sys.executable, "-m", module_name, *(args or [])],
-        check=True,
+    run_project_module(
+        module_name,
+        args=args,
+        extra_env=extra_env,
         cwd=AIRFLOW_HOME,
-        env=env,
     )
 
 

@@ -537,6 +537,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", default=f"manual_{int(time.time())}")
     parser.add_argument("--api-key", default=os.getenv("OPENWEATHER_API_KEY", API_KEY))
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("WEATHER_HTTP_TIMEOUT_SEC", "30")))
+    parser.add_argument(
+        "--ensure-only",
+        action="store_true",
+        help="Only create/repair staging tables and exit without fetching weather data.",
+    )
     return parser
 
 
@@ -544,6 +549,13 @@ if __name__ == "__main__":
     args = _build_arg_parser().parse_args()
     if not args.conn_uri:
         raise RuntimeError("--conn-uri (or env DW_CONN_URI / PGHOST+PGDATABASE+PGUSER+PGPASSWORD) is required")
+    ensure_weather_staging_tables(args.conn_uri)
+
+    if args.ensure_only:
+        result = {"ok": True, "city": args.city, "ensured_staging_tables": True}
+        print(json.dumps(result))
+        raise SystemExit(0)
+
     if not args.raw_bucket:
         raise RuntimeError("--raw-bucket (or env BUCKET) is required")
     if not args.api_key:

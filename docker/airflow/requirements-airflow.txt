@@ -1,11 +1,4 @@
-pandas==2.1.4
-requests==2.32.3
-dbt-postgres==1.10.0
-sqlalchemy==1.4.54
-numpy==1.26.4
-scikit-learn==1.8.0
-matplotlib==3.10.8
-seaborn==0.13.2
-xgboost==3.2.0
-lightgbm==4.6.0
-mlflow==3.10.1
+# Airflow services now rely on the official apache/airflow base environment.
+# Project runtime dependencies are installed into the isolated venv configured in:
+# - requirements.txt
+# - docker/airflow/requirements-project-runtime.txt

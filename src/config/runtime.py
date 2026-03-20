@@ -1,13 +1,20 @@
 import json
 import os
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from src.config.naming import DEFAULT_DEPLOYMENT_STATE_ROOT, deployment_state_path, endpoint_name, resolve_target_name
 from src.model_target import parse_bool_value
 
 
 DEFAULT_RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[1] / "env.json"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PROJECT_RUNTIME_PYTHON = "/opt/project-venv/bin/python"
+DEFAULT_PROJECT_RUNTIME_DBT = "/opt/project-venv/bin/dbt"
 
 
 @dataclass(frozen=True)
@@ -65,6 +72,81 @@ def _env_setting(name: str) -> str | None:
     if value in {None, ""}:
         return None
     return value
+
+
+def get_project_runtime_python() -> str:
+    configured = os.getenv("PROJECT_RUNTIME_PYTHON", "").strip()
+    if configured:
+        return configured
+
+    if Path(DEFAULT_PROJECT_RUNTIME_PYTHON).exists():
+        return DEFAULT_PROJECT_RUNTIME_PYTHON
+
+    return sys.executable
+
+
+def get_project_runtime_dbt() -> str:
+    configured = os.getenv("PROJECT_RUNTIME_DBT", "").strip()
+    if configured:
+        return configured
+
+    if Path(DEFAULT_PROJECT_RUNTIME_DBT).exists():
+        return DEFAULT_PROJECT_RUNTIME_DBT
+
+    discovered = shutil.which("dbt")
+    if discovered:
+        return discovered
+
+    return "dbt"
+
+
+def run_project_module(
+    module_name: str,
+    *,
+    args: Sequence[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    result_prefix: str | None = None,
+) -> object | None:
+    env = os.environ.copy()
+    env.update(extra_env or {})
+    command = [get_project_runtime_python(), "-m", module_name, *(args or [])]
+    process = subprocess.Popen(
+        command,
+        cwd=cwd or str(REPO_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    stdout_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="")
+        stdout_lines.append(line)
+
+    return_code = process.wait()
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command)
+
+    output_lines = [line.strip() for line in stdout_lines if line.strip()]
+    if not output_lines:
+        return None
+
+    candidate = output_lines[-1]
+    if result_prefix:
+        prefixed = next((line for line in reversed(output_lines) if line.startswith(result_prefix)), None)
+        if prefixed:
+            candidate = prefixed[len(result_prefix):]
+        else:
+            return None
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return candidate
 
 
 def load_runtime_settings() -> RuntimeSettings:

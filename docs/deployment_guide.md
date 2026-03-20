@@ -191,14 +191,21 @@ git fetch origin
 git checkout <your-branch>
 git pull --ff-only origin <your-branch>
 git rev-parse HEAD
+docker compose build airflow-init
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
 docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
+docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
 ```
+
+Why this order matters:
+
+- the Airflow image is now split into the official `apache/airflow` base plus an isolated `/opt/project-venv` for project runtime dependencies such as dbt, pandas, boto3, and model-serving packages
+- `airflow-init` remains a one-shot metadata bootstrap job and should complete before the long-lived scheduler, webserver, and workers are recreated
+- `--no-deps` prevents Docker Compose from re-triggering `airflow-init` while refreshing long-lived Airflow services
 
 If the release changes feature-label SQL or `feat_station_snapshot_5min` target logic, do not stop after the container refresh. Follow [ec2_release_update_guide.md](C:/Career/selfGrowth/projects/mlops-bikeshare-202508/docs/ec2_release_update_guide.md) and run the temporary long-window feature reconcile before trusting `dbt_quality_hourly`.
 

@@ -12,7 +12,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.ingest.gbfs_ingest import ensure_staging_tables, ingest_station_information_to_staging, ingest_station_status_to_staging
+from src.config import run_project_module
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -46,39 +46,69 @@ def _raw_bucket() -> str:
 
 
 def create_staging_tables_task():
-    ensure_staging_tables(conn_uri=_dw_conn_uri())
+    return run_project_module(
+        "src.ingest.gbfs_ingest",
+        args=[
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--ensure-only",
+        ],
+        cwd=AIRFLOW_HOME,
+    )
 
 
 def ingest_station_information_task(**context):
-    result = ingest_station_information_to_staging(
-        conn_uri=_dw_conn_uri(),
-        gbfs_root_url=_get_setting(
-            "GBFS_BASE_URL",
-            "GBFS_BASE_URL",
-            "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
-        ),
-        run_id=context["run_id"],
-        timeout_sec=int(_get_setting("GBFS_HTTP_TIMEOUT_SEC", "GBFS_HTTP_TIMEOUT_SEC", "30")),
-        raw_bucket=_raw_bucket(),
-        raw_city=_get_setting("GBFS_CITY", "GBFS_CITY", "paris"),
+    return run_project_module(
+        "src.ingest.gbfs_ingest",
+        args=[
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--gbfs-root-url",
+            _get_setting(
+                "GBFS_BASE_URL",
+                "GBFS_BASE_URL",
+                "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
+            ),
+            "--run-id",
+            context["run_id"],
+            "--timeout-sec",
+            _get_setting("GBFS_HTTP_TIMEOUT_SEC", "GBFS_HTTP_TIMEOUT_SEC", "30"),
+            "--raw-bucket",
+            _raw_bucket(),
+            "--city",
+            _get_setting("GBFS_CITY", "GBFS_CITY", "paris"),
+            "--feed",
+            "station_information",
+        ],
+        cwd=AIRFLOW_HOME,
     )
-    return result
 
 
 def ingest_station_status_task(**context):
-    result = ingest_station_status_to_staging(
-        conn_uri=_dw_conn_uri(),
-        gbfs_root_url=_get_setting(
-            "GBFS_BASE_URL",
-            "GBFS_BASE_URL",
-            "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
-        ),
-        run_id=context["run_id"],
-        timeout_sec=int(_get_setting("GBFS_HTTP_TIMEOUT_SEC", "GBFS_HTTP_TIMEOUT_SEC", "30")),
-        raw_bucket=_raw_bucket(),
-        raw_city=_get_setting("GBFS_CITY", "GBFS_CITY", "paris"),
+    return run_project_module(
+        "src.ingest.gbfs_ingest",
+        args=[
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--gbfs-root-url",
+            _get_setting(
+                "GBFS_BASE_URL",
+                "GBFS_BASE_URL",
+                "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json",
+            ),
+            "--run-id",
+            context["run_id"],
+            "--timeout-sec",
+            _get_setting("GBFS_HTTP_TIMEOUT_SEC", "GBFS_HTTP_TIMEOUT_SEC", "30"),
+            "--raw-bucket",
+            _raw_bucket(),
+            "--city",
+            _get_setting("GBFS_CITY", "GBFS_CITY", "paris"),
+            "--feed",
+            "station_status",
+        ],
+        cwd=AIRFLOW_HOME,
     )
-    return result
 
 
 default_args = {

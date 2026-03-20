@@ -19,10 +19,11 @@ git fetch origin
 git checkout <your-branch>
 git pull --ff-only origin <your-branch>
 git rev-parse HEAD
+docker compose build airflow-init
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
 docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --build --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
+docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
@@ -32,6 +33,13 @@ Expected result:
 
 - `git rev-parse HEAD` matches the commit you validated locally
 - Airflow parses without import errors
+- `airflow-init` exits with code `0` and does not restart during the later webserver/scheduler/worker refresh
+
+The Airflow image is intentionally layered now:
+
+- the official `apache/airflow:2.10.3` Python environment stays reserved for Airflow itself
+- project runtime dependencies install into `/opt/project-venv`
+- ingestion, dbt, retraining, and serving subprocesses run from that isolated venv so scheduler/webserver imports stay lightweight and stable
 
 ## 2. Re-apply Runtime Airflow Variables
 

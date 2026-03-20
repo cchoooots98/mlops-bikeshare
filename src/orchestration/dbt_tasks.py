@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from sqlalchemy import create_engine, text
+from src.config.runtime import get_project_runtime_dbt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_HOTPATH_BUILD_SELECT = [
@@ -122,7 +123,7 @@ def run_dbt_command(
     indirect_selection: str | None = None,
 ) -> tuple[subprocess.CompletedProcess, float]:
     command = [
-        "dbt",
+        get_project_runtime_dbt(),
         action,
         "--project-dir",
         project_dir,
@@ -168,7 +169,7 @@ def run_dbt_source_freshness(
     threads: int = 2,
 ) -> dict[str, float | str | bool]:
     command = [
-        "dbt",
+        get_project_runtime_dbt(),
         "source",
         "freshness",
         "--project-dir",

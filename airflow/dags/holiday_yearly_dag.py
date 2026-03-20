@@ -12,7 +12,7 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
-from src.ingest.holidays_ingest import ingest_holidays_year
+from src.config import run_project_module
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -42,16 +42,24 @@ def ingest_holidays_year_task(**context):
     dag_run = context.get("dag_run")
     conf = (dag_run.conf or {}) if dag_run else {}
     year = int(conf.get("year", logical_year))
-
-    result = ingest_holidays_year(
-        conn_uri=_dw_conn_uri(),
-        year=year,
-        run_id=context["run_id"],
-        country_code=_get_setting("HOLIDAY_COUNTRY_CODE", "HOLIDAY_COUNTRY_CODE", "FR"),
-        timeout_sec=int(_get_setting("HOLIDAY_HTTP_TIMEOUT_SEC", "HOLIDAY_HTTP_TIMEOUT_SEC", "30")),
-        raw_bucket=_raw_bucket(),
+    return run_project_module(
+        "src.ingest.holidays_ingest",
+        args=[
+            "--year",
+            str(year),
+            "--conn-uri",
+            _dw_conn_uri(),
+            "--run-id",
+            context["run_id"],
+            "--country-code",
+            _get_setting("HOLIDAY_COUNTRY_CODE", "HOLIDAY_COUNTRY_CODE", "FR"),
+            "--timeout-sec",
+            _get_setting("HOLIDAY_HTTP_TIMEOUT_SEC", "HOLIDAY_HTTP_TIMEOUT_SEC", "30"),
+            "--raw-bucket",
+            _raw_bucket(),
+        ],
+        cwd=AIRFLOW_HOME,
     )
-    return result
 
 
 default_args = {

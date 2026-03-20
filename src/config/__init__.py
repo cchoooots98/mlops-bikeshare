@@ -10,7 +10,14 @@ from src.config.naming import (
     resolve_predict_bikes,
     resolve_target_name,
 )
-from src.config.runtime import DEFAULT_RUNTIME_CONFIG_PATH, RuntimeSettings, load_runtime_settings
+from src.config.runtime import (
+    DEFAULT_RUNTIME_CONFIG_PATH,
+    RuntimeSettings,
+    get_project_runtime_dbt,
+    get_project_runtime_python,
+    load_runtime_settings,
+    run_project_module,
+)
 
 __all__ = [
     "DEFAULT_DEPLOYMENT_STATE_ROOT",
@@ -19,6 +26,8 @@ __all__ = [
     "RuntimeSettings",
     "deployment_state_path",
     "endpoint_name",
+    "get_project_runtime_dbt",
+    "get_project_runtime_python",
     "load_runtime_settings",
     "prediction_key",
     "prediction_prefix",
@@ -26,4 +35,5 @@ __all__ = [
     "quality_prefix",
     "resolve_predict_bikes",
     "resolve_target_name",
+    "run_project_module",
 ]
