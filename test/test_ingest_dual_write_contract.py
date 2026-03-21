@@ -1,5 +1,6 @@
 import importlib
 import sys
+from datetime import datetime, timezone
 
 
 def _reload_module(module_name: str):
@@ -33,6 +34,32 @@ def test_weather_import_is_lazy_about_s3_client(monkeypatch):
     weather_ingest = _reload_module("src.ingest.weather_ingest")
 
     assert weather_ingest._default_s3_client.cache_info().currsize == 0
+
+
+def test_weather_hourly_dataframe_defaults_missing_precipitation_to_zero():
+    weather_ingest = _reload_module("src.ingest.weather_ingest")
+    observed_at = datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc)
+    payload = {
+        "current": {"dt": int(observed_at.timestamp())},
+        "hourly": [
+            {
+                "dt": int(observed_at.replace(minute=30).timestamp()),
+                "temp": 12.5,
+                "humidity": 72,
+                "wind_speed": 4.0,
+                "pop": 0.25,
+                "weather": [{"id": 500, "main": "Rain", "description": "light rain"}],
+            }
+        ],
+        "_meta_ingest": {
+            "snapshot_bucket_at_utc": observed_at.isoformat(),
+            "source": "openweather-onecall-3.0",
+        },
+    }
+
+    df = weather_ingest.weather_hourly_dataframe(payload, city="paris", run_id="run-1")
+
+    assert df.loc[0, "precipitation_mm"] == 0.0
 
 
 def test_holidays_cli_defaults_to_dual_write_from_env(monkeypatch):

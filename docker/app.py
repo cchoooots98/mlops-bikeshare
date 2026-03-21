@@ -6,6 +6,7 @@
 
 import os
 import json
+import math
 import traceback
 from typing import Optional
 
@@ -13,10 +14,16 @@ import mlflow.pyfunc
 import pandas as pd
 from flask import Flask, request, jsonify, Response
 try:
-    from src.features.schema import FEATURE_COLUMNS  # training feature list (25 columns)
+    from src.features.schema import (
+        FEATURE_COLUMNS,
+        NULLABLE_NAN_PRESERVED_COLUMNS,
+        NULLABLE_ZERO_FILL_COLUMNS,
+    )
 except ImportError:
-    from schema import FEATURE_COLUMNS               # fallback if schema.py is at project root  # exact 25 features used for training
+    from schema import FEATURE_COLUMNS, NULLABLE_NAN_PRESERVED_COLUMNS, NULLABLE_ZERO_FILL_COLUMNS
 EXPECTED_COLUMNS = FEATURE_COLUMNS  # keep a single source of truth
+NULLABLE_NAN_PRESERVED_COLUMN_SET = set(NULLABLE_NAN_PRESERVED_COLUMNS)
+NULLABLE_ZERO_FILL_COLUMN_SET = set(NULLABLE_ZERO_FILL_COLUMNS)
 
 
 app = Flask(__name__)
@@ -26,6 +33,53 @@ MODEL_DIR = "/opt/ml/model"
 
 # Cache the loaded model in memory after first successful load.
 _cached_model: Optional[mlflow.pyfunc.PyFuncModel] = None
+
+
+def _is_finite_number(value: object) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except Exception:
+        return False
+
+
+def _sanitize_nullable_features(df: pd.DataFrame) -> pd.DataFrame:
+    zero_filled: list[str] = []
+    nan_preserved: list[str] = []
+    hard_failures: list[str] = []
+
+    for column in EXPECTED_COLUMNS:
+        invalid_mask = ~df[column].map(_is_finite_number)
+        if not invalid_mask.any():
+            continue
+
+        bad_count = int(invalid_mask.sum())
+        if column in NULLABLE_ZERO_FILL_COLUMN_SET:
+            df.loc[invalid_mask, column] = 0.0
+            zero_filled.append(f"{column}={bad_count}")
+            continue
+        if column in NULLABLE_NAN_PRESERVED_COLUMN_SET:
+            df.loc[invalid_mask, column] = math.nan
+            nan_preserved.append(f"{column}={bad_count}")
+            continue
+        hard_failures.append(f"{column}={bad_count}")
+
+    if zero_filled:
+        app.logger.info(
+            "Coerced non-finite nullable feature values to 0.0 for columns: %s",
+            ", ".join(zero_filled[:5]) + ("..." if len(zero_filled) > 5 else ""),
+        )
+    if nan_preserved:
+        app.logger.info(
+            "Coerced non-finite nullable feature values to NaN for columns: %s",
+            ", ".join(nan_preserved[:5]) + ("..." if len(nan_preserved) > 5 else ""),
+        )
+    if hard_failures:
+        raise ValueError(
+            "non-finite values found in non-nullable feature columns: "
+            + ", ".join(hard_failures[:5])
+        )
+
+    return df
 
 
 def try_load_model() -> Optional[mlflow.pyfunc.PyFuncModel]:
@@ -118,8 +172,8 @@ def invocations():
         
         df = df.apply(lambda s: pd.to_numeric(s, errors="coerce") if s.dtype == "object" else s)
 
-        # 4) Optionally fill NaN for a robust smoke test (tune for your use case)
-        df = df.fillna(0)
+        # 4) Normalize nullable columns with explicit per-column policy.
+        df = _sanitize_nullable_features(df)
             
 
         # Run prediction

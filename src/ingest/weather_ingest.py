@@ -260,7 +260,7 @@ def weather_hourly_dataframe(
                 "temperature_c": hourly_row.get("temp"),
                 "humidity_pct": hourly_row.get("humidity"),
                 "wind_speed_ms": hourly_row.get("wind_speed"),
-                "precipitation_mm": _precipitation_mm(hourly_row),
+                "precipitation_mm": _precipitation_mm(hourly_row, default=0.0),
                 "precipitation_probability_pct": float(hourly_row.get("pop")) * 100 if hourly_row.get("pop") is not None else None,
                 "weather_code": summary["weather_code"],
                 "weather_main": summary["weather_main"],

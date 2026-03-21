@@ -61,6 +61,17 @@ WEATHER_FEATURE_COLUMNS = [
 ]
 
 NULLABLE_FEATURE_COLUMNS = ["nbr_bikes_weighted", "nbr_docks_weighted"] + WEATHER_FEATURE_COLUMNS
+NULLABLE_NAN_PRESERVED_COLUMNS = [
+    "nbr_bikes_weighted",
+    "nbr_docks_weighted",
+    "temperature_c",
+    "weather_code",
+    "hourly_temperature_c",
+    "hourly_weather_code",
+]
+NULLABLE_ZERO_FILL_COLUMNS = [
+    column for column in NULLABLE_FEATURE_COLUMNS if column not in NULLABLE_NAN_PRESERVED_COLUMNS
+]
 NON_NULLABLE_FEATURE_COLUMNS = [column for column in FEATURE_COLUMNS if column not in NULLABLE_FEATURE_COLUMNS]
 
 # Previous threshold was 1% across all 30 features. After excluding nullable-by-contract

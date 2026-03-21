@@ -224,6 +224,47 @@ def test_predict_rowwise_threaded_fails_when_all_predictions_invalid(monkeypatch
         )
 
 
+def test_predict_rowwise_threaded_coerces_nullable_weather_nan_values(monkeypatch):
+    captured = {}
+    features = _online_features_df()
+    features.loc[0, "hourly_precipitation_mm"] = float("nan")
+    target_spec = target_spec_from_predict_bikes(True)
+
+    def _capture(endpoint, feature_row, inference_id, feature_columns):
+        captured["feature_row"] = feature_row
+        return 0.2
+
+    monkeypatch.setattr(predictor, "_invoke_endpoint_one", _capture)
+
+    predictions = predictor._predict_rowwise_threaded(
+        "endpoint",
+        features,
+        target_spec=target_spec,
+        threshold=0.25,
+        feature_columns=FEATURE_COLUMNS,
+        max_workers=1,
+    )
+
+    assert captured["feature_row"][FEATURE_COLUMNS.index("hourly_precipitation_mm")] == 0.0
+    assert predictions.loc[0, target_spec.score_column] == 0.2
+
+
+def test_predict_rowwise_threaded_rejects_non_nullable_nan_values(monkeypatch):
+    features = _online_features_df()
+    features.loc[0, "util_bikes"] = float("nan")
+    monkeypatch.setattr(predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: 0.2)
+
+    with pytest.raises(ValueError, match="non-nullable feature columns"):
+        predictor._predict_rowwise_threaded(
+            "endpoint",
+            features,
+            target_spec=target_spec_from_predict_bikes(True),
+            threshold=0.25,
+            feature_columns=FEATURE_COLUMNS,
+            max_workers=1,
+        )
+
+
 def test_formal_codepaths_do_not_reference_legacy_feature_builder():
     forbidden = ("src.features.build_features", "features_offline", "athena_conn(", "read_env(", "engineer(")
     paths = [

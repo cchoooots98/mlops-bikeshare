@@ -11,6 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.config import prediction_key
+from src.features.schema import NULLABLE_NAN_PRESERVED_COLUMNS, NULLABLE_ZERO_FILL_COLUMNS
 from src.monitoring.metrics.metrics_helper import publish_heartbeat
 from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.inference.featurize_online import build_online_features
@@ -20,12 +21,21 @@ from src.config import load_runtime_settings
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_MAX_ATTEMPTS = 3
 BASE_RETRY_BACKOFF_SECONDS = 0.5
+NULLABLE_NAN_PRESERVED_COLUMN_SET = set(NULLABLE_NAN_PRESERVED_COLUMNS)
+NULLABLE_ZERO_FILL_COLUMN_SET = set(NULLABLE_ZERO_FILL_COLUMNS)
 
 
 @dataclass(frozen=True)
 class PredictionFailure:
     inference_id: str
     error: str
+
+
+def _is_finite_number(value: object) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except Exception:
+        return False
 
 
 def _s3():
@@ -75,11 +85,7 @@ def _coerce_prediction_value(output) -> float:
 def _validate_feature_row(feature_row: list[float], feature_columns: list[str], inference_id: str) -> None:
     invalid_columns: list[str] = []
     for index, value in enumerate(feature_row):
-        try:
-            is_finite = math.isfinite(float(value))
-        except Exception:
-            is_finite = False
-        if not is_finite:
+        if not _is_finite_number(value) and feature_columns[index] not in NULLABLE_NAN_PRESERVED_COLUMN_SET:
             invalid_columns.append(feature_columns[index])
     if invalid_columns:
         preview = ", ".join(invalid_columns[:5])
@@ -87,6 +93,60 @@ def _validate_feature_row(feature_row: list[float], feature_columns: list[str], 
         raise ValueError(
             f"inference_id={inference_id} contains non-finite feature values; columns={preview}{suffix}"
         )
+
+
+def _sanitize_feature_frame(
+    feature_frame: pd.DataFrame,
+    feature_columns: list[str],
+    inference_ids: list[str],
+) -> pd.DataFrame:
+    zero_filled: list[str] = []
+    nan_preserved: list[str] = []
+    hard_failures: list[str] = []
+
+    for column in feature_columns:
+        invalid_mask = ~feature_frame[column].map(_is_finite_number)
+        if not invalid_mask.any():
+            continue
+
+        bad_positions = [index for index, is_bad in enumerate(invalid_mask.tolist()) if is_bad]
+        bad_count = len(bad_positions)
+        if column in NULLABLE_ZERO_FILL_COLUMN_SET:
+            feature_frame.loc[invalid_mask, column] = 0.0
+            zero_filled.append(f"{column}={bad_count}")
+            continue
+
+        if column in NULLABLE_NAN_PRESERVED_COLUMN_SET:
+            feature_frame.loc[invalid_mask, column] = math.nan
+            nan_preserved.append(f"{column}={bad_count}")
+            continue
+
+        bad_examples = ", ".join(inference_ids[index] for index in bad_positions[:3])
+        hard_failures.append(f"{column}={bad_count} rows (examples: {bad_examples})")
+
+    if zero_filled:
+        preview = ", ".join(zero_filled[:5])
+        suffix = "..." if len(zero_filled) > 5 else ""
+        print(
+            "[predictor] coerced non-finite nullable feature values to 0.0 "
+            f"for columns: {preview}{suffix}"
+        )
+
+    if nan_preserved:
+        preview = ", ".join(nan_preserved[:5])
+        suffix = "..." if len(nan_preserved) > 5 else ""
+        print(
+            "[predictor] coerced non-finite nullable feature values to NaN "
+            f"for columns: {preview}{suffix}"
+        )
+
+    if hard_failures:
+        raise ValueError(
+            "non-finite values found in non-nullable feature columns: "
+            + "; ".join(hard_failures[:5])
+        )
+
+    return feature_frame
 
 
 def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
@@ -185,8 +245,13 @@ def _predict_rowwise_threaded(
     max_workers: int = DEFAULT_MAX_WORKERS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> pd.DataFrame:
-    feats = X[feature_columns].astype("float64").values.tolist()
     ids = (X["dt"].astype(str) + "_" + X["station_id"].astype(str)).tolist()
+    feature_frame = _sanitize_feature_frame(
+        X[feature_columns].astype("float64").reset_index(drop=True),
+        feature_columns,
+        ids,
+    )
+    feats = feature_frame.values.tolist()
     yhat = [None] * len(feats)
     failures: list[PredictionFailure] = []
 
