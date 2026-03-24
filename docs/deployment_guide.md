@@ -358,7 +358,7 @@ Verify in AWS:
 - ECR repo exists
 - router lambda exists
 - CloudWatch dashboard exists
-- custom metric alarms exist for PR-AUC, F1, PredictionHeartbeat, and PSI
+- custom metric alarms exist for PR-AUC, F1, PredictionHeartbeat, and PSI_core
 - service alarms exist for latency and 5xx
 
 ## 6. AWS Staging Deployment
@@ -450,6 +450,7 @@ Timing contract for the staging/serving DAG chain:
 - `staging_psi_publish_hourly` / `serving_psi_publish_hourly` run on `3 * * * *`
 - hourly PSI no longer waits for hourly metrics
 - hourly PSI publishes independently and fails fast if the feature store is stale or the recent feature window is empty
+- the drift publisher emits `PSI` (aggregate trimmed mean), `PSI_core`, and `PSI_weather`; the gate hard-fails only on `PSI_core`
 
 Expected SageMaker object lifecycle per deploy:
 - one timestamped `Model`

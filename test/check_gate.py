@@ -3,18 +3,25 @@
 # Run: python test/check_gate.py --endpoint bikeshare-bikes-staging --city paris --region eu-west-3 --target-name bikes --environment staging
 
 import argparse
+import math
 import sys
 from datetime import datetime, timedelta, timezone
 
 import boto3
 
-# ---- Admission thresholds (tune to your SLOs) ----S
+# ---- Admission thresholds (tune to your SLOs) ----
 AUC_MIN = 0.70  # PR-AUC >= 0.70 over the last 24h (Average)
 F1_MIN = 0.55  # F1 >= 0.55 over the last 24h (Average)
-PSI_WARN = 0.20  # PSI should stay below 0.20 (optional gate; warn/fail as you prefer)
-P95_LATENCY_MAX_US = 200_000  # 200 ms in microseconds (SageMaker ModelLatency unit is µs)
+PSI_CORE_WARN = 0.20  # Core feature drift should stay below 0.20 over the last 24h.
+P95_LATENCY_MAX_US = 200_000  # 200 ms in microseconds
 FIVE_XX_MAX = 0  # No 5xx errors allowed over the window
-HEARTBEAT_MIN = 6 * 24  # Expect ~6 batches/hour (10-min cadence) => 144 in 24h
+PREDICTION_CADENCE_MINUTES = 15
+OBSERVATION_WINDOW_HOURS = 24
+HEARTBEAT_COVERAGE_MIN = 0.95
+EXPECTED_HEARTBEATS = int((60 / PREDICTION_CADENCE_MINUTES) * OBSERVATION_WINDOW_HOURS)
+# Allow minor scheduler jitter or a few missed batches, but still require strong continuity.
+HEARTBEAT_MIN = math.ceil(EXPECTED_HEARTBEATS * HEARTBEAT_COVERAGE_MIN)  # 92/96 at 15-min cadence
+MAX_HEARTBEAT_GAP_MINUTES = (PREDICTION_CADENCE_MINUTES * 2) + 5
 
 
 def get_series(cw, namespace, metric, dims, minutes=24 * 60, stat="Average", period=300):
@@ -27,7 +34,7 @@ def get_series(cw, namespace, metric, dims, minutes=24 * 60, stat="Average", per
             "Id": "m1",
             "MetricStat": {
                 "Metric": {"Namespace": namespace, "MetricName": metric, "Dimensions": d},
-                "Period": period,  # 300s matches your 5-min cadence and lowers API cost
+                "Period": period,
                 "Stat": stat,
             },
             "ReturnData": True,
@@ -40,6 +47,17 @@ def get_series(cw, namespace, metric, dims, minutes=24 * 60, stat="Average", per
 
 def avg(values):
     return sum(values) / len(values) if values else None
+
+
+def max_gap_minutes(points):
+    timestamps = sorted(ts for ts, _ in points)
+    if len(timestamps) < 2:
+        return None
+    gaps = [
+        (current - previous).total_seconds() / 60
+        for previous, current in zip(timestamps, timestamps[1:])
+    ]
+    return max(gaps) if gaps else None
 
 
 def parse_args():
@@ -62,8 +80,6 @@ def main():
 
     cw = boto3.client("cloudwatch", region_name=args.region)
 
-    # --- Custom namespace KPIs from your Step 9/dashboard ---
-    # Namespace and dimensions match the formal target-aware monitoring contract.
     ns = "Bikeshare/Model"
     dims_full = {
         "Environment": args.environment,
@@ -74,28 +90,25 @@ def main():
 
     pr_auc = get_series(cw, ns, "PR-AUC-24h", dims_full, stat="Average")
     f1 = get_series(cw, ns, "F1-24h", dims_full, stat="Average")
-    psi = get_series(cw, ns, "PSI", dims_full, stat="Average")  # optional gate
+    psi_core = get_series(cw, ns, "PSI_core", dims_full, stat="Average")
 
     pr_auc_avg = avg([v for _, v in pr_auc])
     f1_avg = avg([v for _, v in f1])
-    psi_max = max([v for _, v in psi]) if psi else 0.0
+    psi_core_max = max([v for _, v in psi_core]) if psi_core else 0.0
 
-    # --- SageMaker service metrics (AWS/SageMaker) ---
     sm_ns = "AWS/SageMaker"
     dims_sm = {"EndpointName": args.endpoint, "VariantName": "AllTraffic"}
 
-    # Use true p95 for ModelLatency (your docs mention p95 SLO=200ms)
     p95_latency = get_series(cw, sm_ns, "ModelLatency", dims_sm, stat="p95")
     p95_max = max([v for _, v in p95_latency]) if p95_latency else None
 
     five_xx = get_series(cw, sm_ns, "Invocation5XXErrors", dims_sm, stat="Sum")
     five_xx_sum = sum([v for _, v in five_xx]) if five_xx else 0
 
-    # Heartbeat (proxy for batch success & cadence)
     hb = get_series(cw, ns, "PredictionHeartbeat", dims_full, stat="Sum")
     hb_sum = sum([v for _, v in hb]) if hb else 0
+    hb_max_gap = max_gap_minutes(hb)
 
-    # ---- Evaluate gates ----
     failures = []
 
     if pr_auc_avg is None or pr_auc_avg < AUC_MIN:
@@ -104,25 +117,31 @@ def main():
         failures.append(f"F1-24h avg {f1_avg} < {F1_MIN}")
 
     if p95_max is None or p95_max > P95_LATENCY_MAX_US:
-        failures.append(f"ModelLatency p95 max {p95_max} µs > {P95_LATENCY_MAX_US} µs")
+        failures.append(f"ModelLatency p95 max {p95_max} us > {P95_LATENCY_MAX_US} us")
 
     if five_xx_sum > FIVE_XX_MAX:
         failures.append(f"Invocation5XXErrors sum {five_xx_sum} > {FIVE_XX_MAX}")
 
     if hb_sum < HEARTBEAT_MIN:
-        failures.append(f"PredictionHeartbeat sum {hb_sum} < {HEARTBEAT_MIN} (batches in 24h)")
+        failures.append(
+            f"PredictionHeartbeat sum {hb_sum} < {HEARTBEAT_MIN} "
+            f"({HEARTBEAT_COVERAGE_MIN:.0%} of expected {EXPECTED_HEARTBEATS} batches in 24h)"
+        )
+    if hb_max_gap is None or hb_max_gap > MAX_HEARTBEAT_GAP_MINUTES:
+        failures.append(
+            f"PredictionHeartbeat max gap {hb_max_gap} min > {MAX_HEARTBEAT_GAP_MINUTES} min"
+        )
 
-    # Optional: treat PSI>0.2 as warning or failure
-    if psi_max >= PSI_WARN:
-        failures.append(f"PSI max {psi_max} ≥ {PSI_WARN} (feature drift)")
+    if psi_core_max >= PSI_CORE_WARN:
+        failures.append(f"PSI_core max {psi_core_max} >= {PSI_CORE_WARN} (core feature drift)")
 
     if failures:
-        print("❌ Admission gate FAILED:")
-        for f in failures:
-            print(" -", f)
+        print("Admission gate FAILED:")
+        for failure in failures:
+            print(" -", failure)
         sys.exit(1)
-    else:
-        print("✅ Admission gate PASSED: all thresholds satisfied for the last 24h.")
+
+    print("Admission gate PASSED: all thresholds satisfied for the last 24h.")
 
 
 if __name__ == "__main__":

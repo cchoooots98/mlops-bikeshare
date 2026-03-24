@@ -41,7 +41,9 @@ _METRIC_LABELS: dict[str, str] = {
     "Invocation5XXErrors": "Invocation5XXErrors (24h)",
     "Invocation4XXErrors": "Invocation4XXErrors (24h)",
     "Invocations": "Invocations (24h)",
-    "PSI": "PSI (24h)",
+    "PSI": "PSI Overall (24h)",
+    "PSI_core": "PSI Core (24h)",
+    "PSI_weather": "PSI Weather (24h)",
 }
 
 _ENV_BADGES: dict[str, str] = {

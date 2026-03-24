@@ -467,6 +467,18 @@ with tab_system:
             metric_name="PSI",
             dimensions=dims,
         ),
+        "PSI_core": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="PSI_core",
+            dimensions=dims,
+        ),
+        "PSI_weather": fetch_metric_series(
+            _cw_client(),
+            namespace=CW_NAMESPACE,
+            metric_name="PSI_weather",
+            dimensions=dims,
+        ),
     }
     render_metric_section(
         title="System Health",
@@ -514,19 +526,31 @@ with tab_system:
                 empty_message="Heartbeat samples are missing for the selected target and environment.",
             ),
             "PSI": MetricSpec(
-                label="PSI (24h)",
+                label="PSI Overall (24h)",
+                direction="none",
+                decimals=3,
+                empty_message="No aggregate PSI drift samples are available yet for the selected target.",
+            ),
+            "PSI_core": MetricSpec(
+                label="PSI Core (24h)",
                 direction="lower",
                 warning=0.20,
                 critical=0.30,
                 decimals=3,
-                empty_message="No PSI drift samples are available yet for the selected target.",
+                empty_message="No core-feature PSI drift samples are available yet for the selected target.",
+            ),
+            "PSI_weather": MetricSpec(
+                label="PSI Weather (24h)",
+                direction="none",
+                decimals=3,
+                empty_message="No weather-feature PSI drift samples are available yet for the selected target.",
             ),
         },
         key_prefix="system-health",
     )
     st.caption(
         "Runbook thresholds: latency warning 200 ms / critical 300 ms, 5xx must remain at 0, "
-        "and PSI warning/critical bands are 0.20 / 0.30."
+        "PSI_core warning/critical bands are 0.20 / 0.30, and aggregate/weather PSI are advisory."
     )
 
 with tab_status:

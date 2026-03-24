@@ -82,6 +82,8 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     assert "F1-24h" in cloudwatch_tf
     assert "PredictionHeartbeat" in cloudwatch_tf
     assert "PSI" in cloudwatch_tf
+    assert "PSI_core" in cloudwatch_tf
+    assert "PSI_weather" in cloudwatch_tf
     assert "aws_cloudwatch_event_rule" not in lambda_tf
     assert "events.amazonaws.com" not in lambda_tf
     assert "sagemaker:InvokeEndpoint" in ec2_tf
@@ -224,6 +226,7 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
     assert "queue=_tier2_queue()" in factory_source
     assert "pool=_serving_prediction_pool()" in factory_source
     assert "pool=_serving_observability_pool()" in factory_source
+    assert '"PSI_AGGREGATOR", "PSI_AGGREGATOR", "trimmed_mean"' in factory_source
 
 
 def test_feature_future_window_label_smoke_test_is_runtime_scoped():
@@ -245,7 +248,7 @@ def test_feature_label_maturity_consistency_test_is_runtime_scoped():
 
     assert "runtime_window_start_utc_expr(default_lookback_hours=72)" in test_sql
     assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
-    assert "snapshot_bucket_at_utc + interval '30 minutes' <= {{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
+    assert "snapshot_bucket_at_utc + interval '30 minutes' <= f.latest_feature_snapshot_bucket_at_utc" in test_sql
 
 
 def test_feature_targets_match_t30_test_is_runtime_scoped():

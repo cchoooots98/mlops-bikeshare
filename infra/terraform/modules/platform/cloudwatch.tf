@@ -88,6 +88,38 @@ locals {
     ]
   ]
 
+  dashboard_psi_core_metrics = [
+    for ctx in values(local.endpoint_alarm_context) : [
+      "Bikeshare/Model",
+      "PSI_core",
+      "Environment",
+      ctx.environment,
+      "EndpointName",
+      ctx.endpoint_name,
+      "City",
+      var.city,
+      "TargetName",
+      ctx.target_name,
+      { label = "${ctx.short_label} PSI core", region = var.aws_region },
+    ]
+  ]
+
+  dashboard_psi_weather_metrics = [
+    for ctx in values(local.endpoint_alarm_context) : [
+      "Bikeshare/Model",
+      "PSI_weather",
+      "Environment",
+      ctx.environment,
+      "EndpointName",
+      ctx.endpoint_name,
+      "City",
+      var.city,
+      "TargetName",
+      ctx.target_name,
+      { label = "${ctx.short_label} PSI weather", region = var.aws_region },
+    ]
+  ]
+
   dashboard_latency_metrics = [
     for ctx in values(local.endpoint_alarm_context) : [
       "AWS/SageMaker",
@@ -225,15 +257,15 @@ resource "aws_cloudwatch_metric_alarm" "quality_heartbeat_low" {
 
 resource "aws_cloudwatch_metric_alarm" "quality_psi_high" {
   for_each            = local.endpoint_alarm_context
-  alarm_name          = "${local.project}-${each.value.endpoint_name}-psi-high"
+  alarm_name          = "${local.project}-${each.value.endpoint_name}-psi-core-high"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 1
-  metric_name         = "PSI"
+  metric_name         = "PSI_core"
   namespace           = "Bikeshare/Model"
   period              = 900
   statistic           = "Maximum"
   threshold           = 0.20
-  alarm_description   = "Target-aware PSI has crossed the warning threshold"
+  alarm_description   = "Target-aware core-feature PSI has crossed the warning threshold"
   dimensions = {
     Environment  = each.value.environment
     EndpointName = each.value.endpoint_name
@@ -279,11 +311,16 @@ resource "aws_cloudwatch_dashboard" "monitoring" {
         width  = 12
         height = 6
         properties = {
-          title   = "PredictionHeartbeat / PSI"
+          title   = "PredictionHeartbeat / PSI Signals"
           region  = var.aws_region
           view    = "timeSeries"
           stacked = false
-          metrics = concat(local.dashboard_heartbeat_metrics, local.dashboard_psi_metrics)
+          metrics = concat(
+            local.dashboard_heartbeat_metrics,
+            local.dashboard_psi_metrics,
+            local.dashboard_psi_core_metrics,
+            local.dashboard_psi_weather_metrics,
+          )
         }
       },
       {

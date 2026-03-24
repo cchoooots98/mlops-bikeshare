@@ -33,3 +33,13 @@ def test_gate_requires_explicit_environment(monkeypatch):
 
     with pytest.raises(SystemExit):
         check_gate.parse_args()
+
+
+def test_gate_heartbeat_threshold_matches_15_minute_cadence():
+    check_gate = _load_check_gate_module()
+
+    assert check_gate.PREDICTION_CADENCE_MINUTES == 15
+    assert check_gate.EXPECTED_HEARTBEATS == 96
+    assert check_gate.HEARTBEAT_MIN == 92
+    assert check_gate.MAX_HEARTBEAT_GAP_MINUTES == 35
+    assert check_gate.PSI_CORE_WARN == 0.20

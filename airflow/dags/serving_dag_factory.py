@@ -157,6 +157,8 @@ def run_psi_publish_task(*, target_name: str, environment: str) -> None:
             env["PGUSER"],
             "--pg-password",
             env["PGPASSWORD"],
+            "--aggregator",
+            _get_setting("PSI_AGGREGATOR", "PSI_AGGREGATOR", "trimmed_mean"),
         ],
         extra_env=env,
     )

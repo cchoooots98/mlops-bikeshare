@@ -14,8 +14,9 @@ This section defines minimum operating thresholds for the dual-target production
 | 5xx errors | `AWS/SageMaker.Invocation5XXErrors` | 0 |
 | PR-AUC 24h | `Bikeshare/Model.PR-AUC-24h` | at or above 0.70 |
 | F1 24h | `Bikeshare/Model.F1-24h` | at or above 0.55 |
-| Prediction cadence | `Bikeshare/Model.PredictionHeartbeat` | at least one heartbeat per 15-minute window |
-| Drift | `Bikeshare/Model.PSI` | warning at 0.20, critical at 0.30 |
+| Prediction cadence | `Bikeshare/Model.PredictionHeartbeat` | target one heartbeat per 15-minute window; gate requires at least 92 heartbeats over 24h and no prolonged heartbeat gap |
+| Core drift | `Bikeshare/Model.PSI_core` | warning at 0.20, critical at 0.30 |
+| Weather drift | `Bikeshare/Model.PSI_weather` | advisory signal; investigate with context before using it to block release |
 
 All custom metric evaluations must filter by:
 - `Environment`
@@ -31,8 +32,8 @@ Before promotion, the target-specific staging endpoint must satisfy:
 2. `F1-24h` meets or exceeds `0.55`.
 3. `ModelLatency p95` stays below the warning threshold.
 4. `Invocation5XXErrors` stays at `0`.
-5. `PredictionHeartbeat` is continuous for the observation window.
-6. `PSI` stays below the warning threshold or has an approved waiver.
+5. `PredictionHeartbeat` stays above the admission threshold for the observation window: at least `92` heartbeats over 24 hours, with no prolonged heartbeat gap.
+6. `PSI_core` stays below the warning threshold. `PSI_weather` is advisory and may require an operator waiver rather than an automatic block.
 
 Formal gate commands must pass `--environment staging`.
 
@@ -82,6 +83,8 @@ Every morning:
    - `PR-AUC-24h`
    - `F1-24h`
    - `PSI`
+   - `PSI_core`
+   - `PSI_weather`
 6. Confirm the dashboard reflects the expected prod versions.
 
 ### Monitoring Dimensions
@@ -101,6 +104,8 @@ Custom metrics in `Bikeshare/Model`:
 - `Samples-24h`
 - `PredictionHeartbeat`
 - `PSI`
+- `PSI_core`
+- `PSI_weather`
 
 Native metrics in `AWS/SageMaker`:
 - `ModelLatency`
@@ -115,7 +120,7 @@ Native metrics in `AWS/SageMaker`:
 The formal AWS stack should expose:
 - one CloudWatch dashboard for the environment
 - latency and 5xx alarms for each formal endpoint
-- PR-AUC, F1, PredictionHeartbeat, and PSI alarms for each formal endpoint
+- PR-AUC, F1, PredictionHeartbeat, and PSI_core alarms for each formal endpoint
 - one SNS topic for monitoring notifications
 
 ### First Triage Steps
@@ -161,7 +166,8 @@ Immediate action:
 Symptoms:
 - low `PR-AUC-24h`
 - low `F1-24h`
-- high `PSI`
+- high `PSI_core`
+- unusual `PSI_weather`
 
 Checks:
 - verify the dimensions include the correct target
@@ -221,9 +227,9 @@ Immediate action:
 
 - 5xx errors appear
 - latency breaches the critical threshold
-- heartbeat drops below the required cadence
+- heartbeat drops below the required cadence or shows a prolonged gap
 - quality metrics fall below the approved threshold
-- PSI crosses the approved warning threshold and the service is degrading
+- PSI_core crosses the approved warning threshold and the service is degrading
 - deployment state points to the wrong package or endpoint
 
 ### Rollback Procedure
