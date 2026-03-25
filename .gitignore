@@ -1,6 +1,7 @@
 ﻿# Terraform local cache (must not be versioned)
 **/.terraform/
 infra/terraform/.terraform/
+*.tfplan
 
 # Python virtual envs / builds / MLflow runs
 .venv/
@@ -39,3 +40,4 @@ dbt/bikeshare_dbt/logs/
 
 # local planning attachments
 docs/plan_detail/
+.claude/*
