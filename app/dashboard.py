@@ -88,7 +88,7 @@ PREDICTION_STALE_AFTER_MINUTES = int(
     _app.get("prediction_stale_after_minutes") or st.secrets.get("prediction_stale_after_minutes", 30)
 )
 QUALITY_STALE_AFTER_MINUTES = int(
-    _app.get("quality_stale_after_minutes") or st.secrets.get("quality_stale_after_minutes", 45)
+    _app.get("quality_stale_after_minutes") or st.secrets.get("quality_stale_after_minutes", 60)
 )
 FEATURE_STALE_AFTER_MINUTES = int(
     _app.get("feature_stale_after_minutes") or st.secrets.get("feature_stale_after_minutes", 60)
