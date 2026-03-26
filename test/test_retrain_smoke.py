@@ -2,9 +2,14 @@ import pytest
 
 pytest.importorskip("mlflow")
 
-from src.model_package import compute_package_sha256, ensure_package_dir, load_package_manifest, write_package_manifest
-from src.model_target import target_spec_from_predict_bikes
-from src.orchestration import retrain
+from src.model_package import (  # noqa: E402
+    compute_package_sha256,
+    ensure_package_dir,
+    load_package_manifest,
+    write_package_manifest,
+)
+from src.model_target import target_spec_from_predict_bikes  # noqa: E402
+from src.orchestration import retrain  # noqa: E402
 
 
 def _base_config(tmp_path, reason: str, predict_bikes: bool = True) -> retrain.RetrainConfig:

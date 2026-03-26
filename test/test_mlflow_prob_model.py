@@ -4,8 +4,8 @@ import pytest
 
 pytest.importorskip("xgboost")
 
-import xgboost as xgb
-from src.mlflow_pyfunc_model import PositiveClassProbabilityModel
+import xgboost as xgb  # noqa: E402
+from src.mlflow_pyfunc_model import PositiveClassProbabilityModel  # noqa: E402
 
 
 def test_embedded_xgboost_classifier_returns_positive_class_probability():

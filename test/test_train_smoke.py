@@ -6,12 +6,12 @@ import pytest
 
 pytest.importorskip("mlflow")
 
-from pipelines.register_model import register_model_version
-from src.features.schema import TRAINING_REQUIRED_COLUMNS
-from src.model_package import load_package_manifest
-from src.model_target import target_spec_from_predict_bikes
-from src.training import eval as train_eval
-from src.training import train
+from pipelines.register_model import register_model_version  # noqa: E402
+from src.features.schema import TRAINING_REQUIRED_COLUMNS  # noqa: E402
+from src.model_package import load_package_manifest  # noqa: E402
+from src.model_target import target_spec_from_predict_bikes  # noqa: E402
+from src.training import eval as train_eval  # noqa: E402
+from src.training import train  # noqa: E402
 
 
 def _make_training_df() -> pd.DataFrame:
