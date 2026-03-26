@@ -125,6 +125,24 @@ def test_terraform_uses_s3_native_locking_and_modern_version_floor():
         assert "tf_lock_table_name" not in doc
 
 
+def test_terraform_oidc_subject_is_decoupled_from_project_resource_prefix():
+    live_vars = Path("infra/terraform/live/variables.tf").read_text(encoding="utf-8")
+    live_main = Path("infra/terraform/live/main.tf").read_text(encoding="utf-8")
+    module_vars = Path("infra/terraform/modules/platform/variables.tf").read_text(encoding="utf-8")
+    oidc_role = Path("infra/terraform/modules/platform/oidc_role.tf").read_text(encoding="utf-8")
+
+    assert 'variable "github_repo_name"' in live_vars
+    assert 'default = "mlops-bikeshare"' in live_vars
+    assert "github_repo_name     = var.github_repo_name" in live_main
+
+    assert 'variable "github_repo_name"' in module_vars
+    assert "coalesce(var.github_repo_name, var.repo_name)" in module_vars
+    assert 'data_bucket_name     = "${var.repo_name}-${local.account_id}-${var.aws_region}"' in module_vars
+
+    assert 'repo:${var.github_owner}/${local.github_repo_subject_name}:ref:refs/heads/main' in oidc_role
+    assert 'repo:${var.github_owner}/${var.repo_name}:ref:refs/heads/main' not in oidc_role
+
+
 def test_formal_repo_cleanup_removes_legacy_runtime_and_scheduler_surfaces():
     removed_paths = [
         ".github/workflows/predictor.yml",

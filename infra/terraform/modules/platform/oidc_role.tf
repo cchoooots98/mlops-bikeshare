@@ -22,9 +22,9 @@ data "aws_iam_policy_document" "assume" {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${var.github_owner}/${var.repo_name}:ref:refs/heads/main",
-        "repo:${var.github_owner}/${var.repo_name}:environment:staging",
-        "repo:${var.github_owner}/${var.repo_name}:environment:prod",
+        "repo:${var.github_owner}/${local.github_repo_subject_name}:ref:refs/heads/main",
+        "repo:${var.github_owner}/${local.github_repo_subject_name}:environment:staging",
+        "repo:${var.github_owner}/${local.github_repo_subject_name}:environment:prod",
       ]
     }
 

@@ -21,8 +21,14 @@ variable "github_owner" {
 
 variable "repo_name" {
   type        = string
-  description = "GitHub repository name"
+  description = "Project/resource prefix used for AWS resources"
   default     = "mlops-bikeshare"
+}
+
+variable "github_repo_name" {
+  type        = string
+  description = "GitHub repository name allowed to assume the OIDC role"
+  default     = null
 }
 
 variable "role_name" {
@@ -49,8 +55,9 @@ variable "alarm_email_endpoint" {
 }
 
 locals {
-  project    = var.repo_name
-  account_id = data.aws_caller_identity.current.account_id
+  project                  = var.repo_name
+  account_id               = data.aws_caller_identity.current.account_id
+  github_repo_subject_name = coalesce(var.github_repo_name, var.repo_name)
   # Data lake bucket: <repo>-<account>-<region>
   data_bucket_name     = "${var.repo_name}-${local.account_id}-${var.aws_region}"
   cw_namespace         = "Bikeshare/Model"

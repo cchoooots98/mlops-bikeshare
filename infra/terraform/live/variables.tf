@@ -23,6 +23,11 @@ variable "github_owner" {
   default = "cchoooots98"
 }
 
+variable "github_repo_name" {
+  type    = string
+  default = "mlops-bikeshare"
+}
+
 variable "repo_name" {
   type    = string
   default = "bikeshare-paris"
