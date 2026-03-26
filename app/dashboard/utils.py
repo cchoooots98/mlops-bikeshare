@@ -1,9 +1,8 @@
 """Shared utilities for the dashboard package."""
+
 from __future__ import annotations
 
-_VALID_IDENTIFIER_CHARS = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
-)
+_VALID_IDENTIFIER_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 def validate_pg_identifier(name: str) -> str:

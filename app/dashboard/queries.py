@@ -3,6 +3,7 @@
 Replaces the former Athena-based SQL functions.
 Reads station metadata and data-freshness from the analytics schema.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -22,7 +23,8 @@ def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame
     Returns DataFrame: station_id (str), station_name, dt, bikes, docks, capacity, lat, lon.
     """
     schema = validate_pg_identifier(schema)
-    sql = text(f"""
+    sql = text(
+        f"""
         SELECT
             CAST(f.station_id AS text)                      AS station_id,
             COALESCE(ds.station_name, CAST(f.station_id AS text)) AS station_name,
@@ -40,7 +42,8 @@ def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame
            AND CAST(f.station_id AS text) = CAST(ds.station_id AS text)
            AND ds.is_current = TRUE
         WHERE f.city = :city
-    """)
+    """
+    )
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"city": city})
     return df
@@ -57,11 +60,13 @@ def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str])
     overall_messages: list[str] = []
     for table in tables:
         table = validate_pg_identifier(table)
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT MAX(dt) AS latest_dt_str
             FROM {schema}.{table}
             WHERE city = :city
-        """)
+        """
+        )
         try:
             with engine.connect() as conn:
                 result = conn.execute(sql, {"city": city}).fetchone()

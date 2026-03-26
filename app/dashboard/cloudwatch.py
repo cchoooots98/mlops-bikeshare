@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import boto3
 import botocore.exceptions
 import pandas as pd
-
 from src.monitoring.metrics.metrics_helper import build_metric_dimensions
 
 
@@ -14,7 +13,9 @@ def create_cloudwatch_client(*, region_name: str, profile_name: str | None = Non
     return session.client("cloudwatch", region_name=region_name)
 
 
-def build_dashboard_metric_dimensions(*, environment: str, endpoint_name: str, city: str, target_name: str) -> dict[str, str]:
+def build_dashboard_metric_dimensions(
+    *, environment: str, endpoint_name: str, city: str, target_name: str
+) -> dict[str, str]:
     return {
         item["Name"]: item["Value"]
         for item in build_metric_dimensions(

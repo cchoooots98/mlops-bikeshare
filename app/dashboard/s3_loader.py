@@ -4,6 +4,7 @@ Replaces the former Athena-based queries. Reads directly from S3 using
 boto3 + pandas, following the same key structure written by predictor.py
 and quality_backfill.py.
 """
+
 from __future__ import annotations
 
 import io
@@ -11,16 +12,15 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import botocore.exceptions
-
 import pandas as pd
-
-from dashboard.contracts import ArtifactLoadResult, LoadStatus
-from src.config.naming import prediction_prefix, quality_prefix
 from src.config import resolve_target_name
+from src.config.naming import prediction_prefix, quality_prefix
 from src.model_target import target_spec_from_name
 
+from dashboard.contracts import ArtifactLoadResult, LoadStatus
+
 if TYPE_CHECKING:
-    import boto3
+    pass
 
 
 def _status_from_client_error(exc: botocore.exceptions.ClientError) -> tuple[LoadStatus, str]:

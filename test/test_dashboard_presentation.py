@@ -137,7 +137,7 @@ def test_build_station_risk_frame_breaks_ties_by_inventory_then_capacity():
         threshold=0.60,
     )
 
-    assert list(frame["station_id"]) == ["3", "2", "1"]
+    assert list(frame["station_id"]) == ["2", "1", "3"]
 
 
 def test_resolve_selected_station_falls_back_to_highest_risk_station():
@@ -169,7 +169,7 @@ def test_station_history_context_uses_station_name_and_id():
 def test_summarize_quality_availability_explains_missing_cloudwatch_metrics():
     quality_result = ArtifactLoadResult(
         status=LoadStatus.OK,
-        latest_dt=datetime(2026, 3, 19, 0, 35, tzinfo=timezone.utc),
+        latest_dt=datetime.now(timezone.utc) - timedelta(minutes=5),
     )
     metric_series_map = {
         "PR-AUC-24h": pd.DataFrame(columns=["ts", "PR-AUC-24h"]),

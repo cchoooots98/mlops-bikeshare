@@ -3,6 +3,7 @@
 Uses unittest.mock to simulate boto3 S3 responses.
 No AWS credentials or network access required.
 """
+
 import io
 import os
 import sys
@@ -10,7 +11,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 from botocore.exceptions import ClientError
 
 # Mirror Streamlit's runtime: add app/ to sys.path so `dashboard.*` is importable.
@@ -19,6 +19,7 @@ _APP_DIR = os.path.join(_REPO_ROOT, "app")
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
+from dashboard.contracts import LoadStatus  # noqa: E402
 from dashboard.s3_loader import (  # noqa: E402
     _list_dt_keys,
     _parse_dt,
@@ -27,7 +28,6 @@ from dashboard.s3_loader import (  # noqa: E402
     load_prediction_history,
     load_quality_recent,
 )
-from dashboard.contracts import LoadStatus  # noqa: E402
 
 # ── Fixtures / helpers ────────────────────────────────────────────────
 
@@ -44,11 +44,13 @@ def _prediction_df(
     target: str = "bikes",
 ) -> pd.DataFrame:
     score_col = "yhat_bikes" if target == "bikes" else "yhat_docks"
-    return pd.DataFrame({
-        "station_id": station_ids,
-        "dt": [dt] * len(station_ids),
-        score_col: [0.75] * len(station_ids),
-    })
+    return pd.DataFrame(
+        {
+            "station_id": station_ids,
+            "dt": [dt] * len(station_ids),
+            score_col: [0.75] * len(station_ids),
+        }
+    )
 
 
 def _quality_df(
@@ -58,12 +60,14 @@ def _quality_df(
 ) -> pd.DataFrame:
     score_col = "yhat_bikes" if target == "bikes" else "yhat_docks"
     label_col = "y_stockout_bikes_30" if target == "bikes" else "y_stockout_docks_30"
-    return pd.DataFrame({
-        "station_id": station_ids,
-        "dt": [dt] * len(station_ids),
-        score_col: [0.6] * len(station_ids),
-        label_col: [0] * len(station_ids),
-    })
+    return pd.DataFrame(
+        {
+            "station_id": station_ids,
+            "dt": [dt] * len(station_ids),
+            score_col: [0.6] * len(station_ids),
+            label_col: [0] * len(station_ids),
+        }
+    )
 
 
 def _s3_mock(keys: list[str], parquet_bytes: bytes | None = None) -> MagicMock:
@@ -230,10 +234,7 @@ def test_load_prediction_history_filters_by_station_id():
 
 
 def test_load_prediction_history_limits_to_n_periods():
-    keys = [
-        f"inference/target=bikes/city=paris/dt=2026-03-18-15-{i:02d}/predictions.parquet"
-        for i in range(10)
-    ]
+    keys = [f"inference/target=bikes/city=paris/dt=2026-03-18-15-{i:02d}/predictions.parquet" for i in range(10)]
     dt = "2026-03-18-15-05"
     df = _prediction_df(["s1"], dt)
     parquet = _make_parquet_bytes(df)
@@ -304,17 +305,13 @@ def test_load_quality_recent_returns_rows_within_lookback():
     client.get_object.side_effect = _get_object
 
     # Very large lookback — recent_dt row should survive the cutoff filter
-    result = load_quality_recent(
-        bucket="b", city="paris", target_name="bikes", s3_client=client, lookback_hours=999999
-    )
+    result = load_quality_recent(bucket="b", city="paris", target_name="bikes", s3_client=client, lookback_hours=999999)
     assert not result.empty
     assert set(result.columns) >= {"dt", "score", "label", "ts"}
 
     # With 0 lookback everything should be filtered out (all ts < now - 0h is impossible,
     # but any ts strictly before "now" will be excluded when lookback_hours=0)
-    result_zero = load_quality_recent(
-        bucket="b", city="paris", target_name="bikes", s3_client=client, lookback_hours=0
-    )
+    result_zero = load_quality_recent(bucket="b", city="paris", target_name="bikes", s3_client=client, lookback_hours=0)
     assert result_zero.empty
 
 

@@ -41,4 +41,3 @@ class FreshnessLoadResult:
     @property
     def ok(self) -> bool:
         return self.status == LoadStatus.OK
-

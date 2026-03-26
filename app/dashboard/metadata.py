@@ -48,7 +48,9 @@ def load_dashboard_model_metadata(
         return DashboardModelMetadata(
             status="read_error",
             message=f"Unable to load deployment metadata: {exc}",
-            model_name=fallback_model_version if fallback_model_version and fallback_model_version != "unknown" else None,
+            model_name=(
+                fallback_model_version if fallback_model_version and fallback_model_version != "unknown" else None
+            ),
             run_id=None,
             deployment_state_path=None,
             package_manifest_path=None,

@@ -29,7 +29,9 @@ def resolve_target_columns(target_name: str) -> dict[str, str]:
     }
 
 
-def resolve_dashboard_target(*, target_name: str, city: str, environment: str, project_slug: str = "bikeshare") -> DashboardTargetConfig:
+def resolve_dashboard_target(
+    *, target_name: str, city: str, environment: str, project_slug: str = "bikeshare"
+) -> DashboardTargetConfig:
     columns = resolve_target_columns(target_name)
     resolved_target_name = columns["target_name"]
     display_name = "Bike stockout" if resolved_target_name == "bikes" else "Dock stockout"
@@ -39,7 +41,9 @@ def resolve_dashboard_target(*, target_name: str, city: str, environment: str, p
         label_column=columns["label_column"],
         score_column=columns["score_column"],
         score_bin_column=columns["score_bin_column"],
-        endpoint_name=endpoint_name(target_name=resolved_target_name, environment=environment, project_slug=project_slug),
+        endpoint_name=endpoint_name(
+            target_name=resolved_target_name, environment=environment, project_slug=project_slug
+        ),
         inference_prefix=prediction_prefix(city, resolved_target_name),
         quality_prefix=quality_prefix(city, resolved_target_name),
         section_title=f"{display_name} Risk",
