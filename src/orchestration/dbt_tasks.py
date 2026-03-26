@@ -150,9 +150,7 @@ def run_dbt_command(
     completed = run_command(command)
     duration_seconds = time.perf_counter() - started
     selection = selector or " ".join(select_models or [])
-    print(
-        "DBT_COMMAND_TIMING " f"action={action} " f"duration_seconds={duration_seconds:.3f} " f"selection={selection}"
-    )
+    print(f"DBT_COMMAND_TIMING action={action} duration_seconds={duration_seconds:.3f} selection={selection}")
     return completed, duration_seconds
 
 
