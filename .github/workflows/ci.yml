@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: eu-west-3
-  AWS_ROLE_ARN: arn:aws:iam::387706002632:role/gh-oidc-deployer
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
   MLFLOW_TRACKING_URI: sqlite:///${{ github.workspace }}/model_dir/mlflow.db
 
 jobs:
