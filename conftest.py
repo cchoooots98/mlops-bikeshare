@@ -1,1 +1,1 @@
-collect_ignore = ["airflow/logs"]
+collect_ignore = ["airflow/logs", "docs/plan_detail"]

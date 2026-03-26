@@ -22,6 +22,9 @@ select = ["E", "F", "I"]
 # (remove "E501" later if you want to enforce wrapping)
 ignore = ["E501"]
 
+[lint.per-file-ignores]
+"test/smoke_invoke.py" = ["E402"]
+
 [lint.isort]
 # Optional: if you have a package name (else remove this line)
 known-first-party = ["mlops_bikeshare"]

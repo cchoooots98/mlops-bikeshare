@@ -110,7 +110,9 @@ def _install_mlflow_stub() -> None:
     mlflow.log_dict = log_dict
     mlflow.start_run = start_run
     mlflow.register_model = register_model
-    mlflow.pyfunc = types.SimpleNamespace(PythonModel=_PythonModel, log_model=_pyfunc_log_model, save_model=_pyfunc_save_model)
+    mlflow.pyfunc = types.SimpleNamespace(
+        PythonModel=_PythonModel, log_model=_pyfunc_log_model, save_model=_pyfunc_save_model
+    )
     mlflow.tracking = types.SimpleNamespace(MlflowClient=_MlflowClient)
     mlflow.artifacts = types.SimpleNamespace(download_artifacts=_download_artifacts)
 
