@@ -157,8 +157,6 @@ This section defines the dbt-first warehouse boundary for GBFS, weather, and hol
 
 - `int_station_neighbors`
 - `int_station_status_enriched`
-- `int_station_weather_aligned`
-- `int_station_rollups`
 
 #### dbt Feature Layer
 
@@ -354,7 +352,7 @@ Deprecated / legacy fields (remove in the next feature migration):
 
 ### Diagram
 
-Mermaid source: [diagrams/day3_star_schema.mmd](diagrams/day3_star_schema.mmd)
+Mermaid source: [diagrams/star_schema.mmd](diagrams/star_schema.mmd)
 
 ---
 
@@ -409,20 +407,21 @@ raw weather JSON (S3)
   → stg_weather_current  (Python, public schema)
   → stg_weather_hourly   (Python, public schema)
   → dim_weather          (dbt, analytics schema)
-  → int_station_weather_aligned  (dbt intermediate)
+  → int_station_status_enriched  (dbt intermediate weather as-of join)
   → feat_station_snapshot_5min   (dbt feature)
   → feat_station_snapshot_latest (dbt feature)
 ```
 
 The full dbt intermediate layer:
 - `int_station_neighbors` — K=5 neighbor graph computation
-- `int_station_status_enriched` — station status joined with dimension data
-- `int_station_weather_aligned` — station snapshots aligned to weather observations
-- `int_station_rollups` — rolling window aggregations (15/30/60 min)
+- `int_station_status_enriched` — station facts joined with station/date/time/weather context plus previous-snapshot helpers
 
 Feature tables consumed by Python:
 - `feat_station_snapshot_5min` — one row per station per 5-minute bucket, full feature set
 - `feat_station_snapshot_latest` — most recent snapshot per station, for online serving
+
+Rolling window features (`roll15_*`, `roll30_*`, `roll60_*`) are computed directly inside
+`feat_station_snapshot_5min`, not in a separate intermediate model.
 
 ### Planned Feature-Layer Contract
 

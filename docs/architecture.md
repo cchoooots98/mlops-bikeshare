@@ -45,7 +45,7 @@ flowchart TD
 
     subgraph INGEST["Data Ingestion  (Python 3.11)"]
         GI["gbfs_ingest.py\nevery 5 min"]
-        WI["weather_ingest.py\nevery 1 hour"]
+        WI["weather_ingest.py\nevery 10 min"]
         HI["holidays_ingest.py\nyearly"]
     end
 
@@ -57,11 +57,11 @@ flowchart TD
 
     subgraph DBT["dbt 1.10  ·  analytics schema  (transformation)"]
         direction TB
-        INT["Intermediate\nint_station_status_enriched\nint_station_neighbors (K=5, 0.8 km)\nint_station_rollups"]
+        INT["Intermediate\nint_station_status_enriched\nint_station_neighbors (K=5, 0.8 km)"]
         DIM["Dimensions\ndim_station  dim_date\ndim_time  dim_weather"]
         FCT["Fact\nfct_station_status (5-min grain)"]
-        FEAT_OFF["Feature Store — Offline\nfeat_station_snapshot_5min\n33 features + labels\n(y_stockout_bikes/docks_30)"]
-        FEAT_ON["Feature Store — Online\nfeat_station_snapshot_latest\n33 features, latest per station"]
+        FEAT_OFF["Feature Store — Offline\nfeat_station_snapshot_5min\n30 features + target labels"]
+        FEAT_ON["Feature Store — Online\nfeat_station_snapshot_latest\n30 features, latest per station"]
     end
 
     subgraph TRAIN["Offline Training  (Local workstation)"]
@@ -137,10 +137,8 @@ flowchart LR
     end
 
     subgraph INT2["dbt · analytics\nIntermediate (enriched)"]
-        I1["int_station_status_enriched\ncapacity-aligned bike/dock counts"]
+        I1["int_station_status_enriched\nfact + station/date/time/weather joins\nprevious-snapshot helpers"]
         I2["int_station_neighbors\nK=5 nearest within 0.8 km\ndistance-weighted"]
-        I3["int_station_rollups\n15/30/60-min rolling windows"]
-        I4["int_station_weather_aligned\nweather joined at 5-min grain"]
     end
 
     subgraph DIM2["dbt · analytics\nDimensions & Facts"]
@@ -149,26 +147,27 @@ flowchart LR
     end
 
     subgraph FS["dbt · analytics\nFeature Store"]
-        FS1["feat_station_snapshot_5min\nOffline training\n33 features + binary labels"]
-        FS2["feat_station_snapshot_latest\nOnline serving\n33 features, latest row per station"]
+        FS1["feat_station_snapshot_5min\nOffline training\n30 features + target labels"]
+        FS2["feat_station_snapshot_latest\nOnline serving\n30 features, latest row per station"]
     end
 
     A1 --> S1
     A2 --> S2
     A3 --> S3
 
-    S1 --> I1 & I2
-    I1 --> I3 & I4
+    S1 --> D1 & F1
     S2 --> D1
     S3 --> D1
 
-    I2 & I3 & I4 --> F1
     D1 --> F1
+    F1 --> I1
+    D1 --> I1 & I2
 
-    F1 --> FS1 & FS2
+    I1 & I2 --> FS1
+    FS1 --> FS2
 ```
 
-**33 feature columns per snapshot:**
+**30 feature columns per snapshot:**
 
 | Category | Features |
 |---|---|

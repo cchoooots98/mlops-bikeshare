@@ -19,10 +19,11 @@ The Streamlit dashboard serves both business users and operators. It shows real-
 ### Required Status Cards
 
 The top section must show:
+- pipeline state
 - current target
 - endpoint name
 - model version
-- decision threshold
+- latest prediction timestamp
 
 ### Required Sections
 
@@ -31,7 +32,7 @@ The top section must show:
 3. Station prediction history
 4. Model health
 5. System health
-6. Data freshness
+6. Data status / freshness
 
 ### Target-Aware Requirements
 
@@ -63,28 +64,28 @@ The dashboard is implemented in `app/dashboard/` with the following modules:
 
 ### Entry Point: `app/dashboard.py`
 
-- Page config: "Velib Paris — Station Risk Monitor", wide layout
+- Page config: "Velib Paris Station Risk Monitor", wide layout
 - Reads all configuration from `.streamlit/secrets.toml`
 - Builds connections: PostgreSQL (SQLAlchemy), S3 (boto3), CloudWatch (boto3)
 - Sidebar: target selector (bikes/docks), top-N slider, history limit slider
-- Renders status cards, alert banner, and five tabs
+- Renders status cards, alert banner, and five tabs: `Live Ops`, `Station History`, `Prediction Quality`, `System Health`, `Data Status`
 
 ### `app/dashboard/s3_loader.py`
 
 | Function | Description |
 |---|---|
-| `load_latest_predictions(s3, bucket, target, city)` | Reads the latest S3 Parquet prediction file for the selected target |
-| `load_prediction_history(s3, bucket, target, city, n)` | Reads the last N prediction files per station |
-| `load_quality_recent(s3, bucket, target, city)` | Reads quality metrics from the last 24 hours |
+| `load_latest_predictions(bucket, city, target_name, s3_client)` | Reads the latest S3 Parquet prediction artifact for the selected target |
+| `load_prediction_history(bucket, city, target_name, station_id, n_periods, s3_client)` | Reads the last N prediction artifacts for one selected station |
+| `load_latest_quality_status(bucket, city, target_name, s3_client)` | Reads the latest mature quality artifact and validates target-aware label/score columns |
 
-All functions use target-aware S3 prefixes from `src.config.naming`. Return format: `DataFrame[station_id, ts, score]`.
+All functions use target-aware S3 prefixes from `src.config.naming` and return `ArtifactLoadResult` wrappers instead of raw DataFrames.
 
 ### `app/dashboard/queries.py`
 
 | Function | Description |
 |---|---|
-| `load_station_info(engine, city)` | Queries `analytics.feat_station_snapshot_latest` for station metadata (lat, lon, name, capacity) |
-| `load_freshness(engine)` | Checks the latest `dt` per staging and feature table to determine freshness status |
+| `load_station_info(engine, schema, city)` | Queries `analytics.feat_station_snapshot_latest` plus `dim_station` for station metadata and latest serving context |
+| `load_freshness(engine, schema, city, tables)` | Checks the latest `dt` per monitored feature table and returns a `FreshnessLoadResult` |
 
 SQL identifiers are validated before use. See `app/dashboard/utils.py`.
 
@@ -92,13 +93,13 @@ SQL identifiers are validated before use. See `app/dashboard/utils.py`.
 
 | Function | Description |
 |---|---|
-| `render_status_cards(target, env, model_version, threshold)` | Environment badge + 4 metric cards at the top |
-| `render_alert_banner(df, threshold)` | High/medium/low risk summary banner |
-| `render_prediction_map(df, station_info)` | Folium map with station markers colored by risk score |
-| `render_top_risk_table(df, station_info, n)` | Sorted risk ranking table |
-| `render_history_chart(df, station_id)` | Plotly time-series score chart for a single station |
-| `render_metric_section(cw, endpoint, target, env, city)` | CloudWatch metrics display |
-| `render_freshness_table(engine)` | Data freshness status per source table |
+| `render_status_cards(...)` | Environment badge, pipeline state, target, endpoint, model version, and latest prediction timestamp |
+| `render_alert_banner(...)` | Stale-artifact warning or current high/medium/low risk summary |
+| `render_prediction_map(...)` | Folium map with station markers colored by current risk score |
+| `render_top_risk_table(...)` | Sorted risk ranking table for the selected target |
+| `render_history_chart(...)` | Plotly time-series score chart for the selected station |
+| `render_metric_section(...)` | CloudWatch metric cards plus sparkline charts |
+| `render_data_status_table(...)` | Prediction, quality, and feature freshness status against SLA windows |
 
 Color palette: `#e63946` (red = high risk), `#f4a261` (orange = medium), `#2a9d8f` (teal = fresh/ok).
 
