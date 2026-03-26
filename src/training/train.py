@@ -1,7 +1,7 @@
 import argparse
+import inspect
 import json
 import math
-import inspect
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import xgboost as xgb
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mlflow.models.signature import infer_signature
@@ -24,13 +25,16 @@ from sklearn.metrics import average_precision_score, confusion_matrix, precision
 
 from src.features.postgres_store import (
     PostgresFeatureConfig,
-    build_feature_select_query as build_postgres_feature_select_query,
     create_pg_engine,
     list_unique_dt_postgres,
     load_training_slice,
     validate_identifier,
 )
+from src.features.postgres_store import (
+    build_feature_select_query as build_postgres_feature_select_query,
+)
 from src.features.schema import FEATURE_COLUMNS, LABEL_COLUMNS, REQUIRED_BASE
+from src.mlflow_pyfunc_model import PositiveClassProbabilityModel
 from src.model_package import (
     ARTIFACTS_DIRNAME,
     DEFAULT_PACKAGE_ROOT,
@@ -43,7 +47,6 @@ from src.model_package import (
     write_package_manifest,
 )
 from src.model_target import parse_bool_value, target_spec_from_predict_bikes
-from src.mlflow_pyfunc_model import PositiveClassProbabilityModel
 
 DEFAULT_LOCAL_MLFLOW_TRACKING_URI = "sqlite:///model_dir/mlflow.db"
 
@@ -630,7 +633,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--experiment",
         default=env_or_default("TRAINING_EXPERIMENT", "bikeshare-step4"),
     )
-    parser.add_argument("--package-root", default=None, help="Optional package root. Defaults to model_dir/packages/<target>.")
+    parser.add_argument(
+        "--package-root", default=None, help="Optional package root. Defaults to model_dir/packages/<target>."
+    )
     parser.add_argument(
         "--run-reason",
         default="manual",
@@ -674,7 +679,8 @@ def main(argv: Sequence[str] | None = None) -> dict:
         beta=args.beta,
         experiment=args.experiment,
         run_reason=args.run_reason,
-        package_root=args.package_root or str(default_package_root_for_target(target_spec_from_predict_bikes(predict_bikes).target_name)),
+        package_root=args.package_root
+        or str(default_package_root_for_target(target_spec_from_predict_bikes(predict_bikes).target_name)),
     )
     result = run_training_pipeline(data_config, train_config)
     print(TRAINING_RESULT_PREFIX + json.dumps(result, sort_keys=True))

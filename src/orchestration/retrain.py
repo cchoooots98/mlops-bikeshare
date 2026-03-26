@@ -1,6 +1,5 @@
 import argparse
 import json
-import mlflow
 import os
 import subprocess
 import sys
@@ -9,13 +8,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
+import mlflow
 import pandas as pd
 from sqlalchemy import text
 
-from src.orchestration.dbt_tasks import expand_with_parents, run_dbt_command
 from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine, validate_identifier
 from src.model_package import compute_package_sha256, load_package_manifest, write_package_manifest
 from src.model_target import parse_bool_value, target_spec_from_predict_bikes
+from src.orchestration.dbt_tasks import expand_with_parents, run_dbt_command
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RETRAIN_RESULT_PREFIX = "RETRAIN_RESULT_JSON::"
@@ -295,11 +295,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
 
-    missing = [
-        name
-        for name in ("pg_host", "pg_db", "pg_user", "pg_password")
-        if getattr(args, name) in {None, ""}
-    ]
+    missing = [name for name in ("pg_host", "pg_db", "pg_user", "pg_password") if getattr(args, name) in {None, ""}]
     if missing:
         raise ValueError(f"missing required Postgres settings: {missing}")
     return args

@@ -12,7 +12,6 @@ import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
 
-
 BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "paris")
 API_KEY = os.getenv("OPENWEATHER_API_KEY", "").strip()
@@ -117,9 +116,9 @@ def _ingest_metadata(
     ingested_at: pd.Timestamp | None = None,
 ) -> dict[str, object]:
     ingested_at = ingested_at or pd.Timestamp.now(tz="UTC")
-    snapshot_bucket_at = datetime.fromisoformat(
-        payload["_meta_ingest"]["snapshot_bucket_at_utc"]
-    ).astimezone(timezone.utc)
+    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(
+        timezone.utc
+    )
     source = payload.get("_meta_ingest", {}).get("source", "openweather-onecall-3.0")
     current = payload.get("current", {})
     observed_at = _to_utc(current.get("dt"))
@@ -178,7 +177,9 @@ def persist_weather_raw_to_s3(
     s3_client=None,
 ) -> dict:
     client = s3_client or _default_s3_client()
-    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(timezone.utc)
+    snapshot_bucket_at = datetime.fromisoformat(payload["_meta_ingest"]["snapshot_bucket_at_utc"]).astimezone(
+        timezone.utc
+    )
     dt_prefix = snapshot_bucket_at.strftime("dt=%Y-%m-%d-%H-%M")
     data_key = f"raw/weather/city={city}/{dt_prefix}/data.json.gz"
     manifest_key = f"raw/weather/city={city}/{dt_prefix}/_manifest.json.gz"
@@ -236,7 +237,6 @@ def weather_hourly_dataframe(
     ingested_at: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     metadata = _ingest_metadata(payload, ingested_at=ingested_at)
-    current = payload.get("current", {})
     observed_at = metadata["observed_at"]
     window_end = observed_at + pd.Timedelta(hours=1)
 
@@ -261,7 +261,9 @@ def weather_hourly_dataframe(
                 "humidity_pct": hourly_row.get("humidity"),
                 "wind_speed_ms": hourly_row.get("wind_speed"),
                 "precipitation_mm": _precipitation_mm(hourly_row, default=0.0),
-                "precipitation_probability_pct": float(hourly_row.get("pop")) * 100 if hourly_row.get("pop") is not None else None,
+                "precipitation_probability_pct": (
+                    float(hourly_row.get("pop")) * 100 if hourly_row.get("pop") is not None else None
+                ),
                 "weather_code": summary["weather_code"],
                 "weather_main": summary["weather_main"],
                 "weather_description": summary["weather_description"],
@@ -447,9 +449,13 @@ def ingest_weather_to_staging(
                 ),
                 {"city": city, "snapshot_bucket_at": snapshot_bucket_at},
             )
-        current_df.to_sql("stg_weather_current", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+        current_df.to_sql(
+            "stg_weather_current", con=engine, if_exists="append", index=False, method="multi", chunksize=1000
+        )
         if not hourly_df.empty:
-            hourly_df.to_sql("stg_weather_hourly", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+            hourly_df.to_sql(
+                "stg_weather_hourly", con=engine, if_exists="append", index=False, method="multi", chunksize=1000
+            )
     finally:
         engine.dispose()
 

@@ -3,9 +3,8 @@ from typing import Sequence
 
 import pandas as pd
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine, URL
+from sqlalchemy.engine import URL, Engine
 
-from src.model_target import target_spec_from_predict_bikes
 from src.features.schema import (
     ENTITY_COLUMNS,
     LABEL_COLUMNS,
@@ -14,6 +13,7 @@ from src.features.schema import (
     TRAINING_REQUIRED_COLUMNS,
     validate_feature_df,
 )
+from src.model_target import target_spec_from_predict_bikes
 
 IDENTIFIER_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 
@@ -70,7 +70,9 @@ def _selected_feature_columns(columns: Sequence[str]) -> list[str]:
     return [column for column in columns if column not in excluded]
 
 
-def list_unique_dt_postgres(engine: Engine, config: PostgresFeatureConfig, city: str, start_dt: str, end_dt: str) -> list[str]:
+def list_unique_dt_postgres(
+    engine: Engine, config: PostgresFeatureConfig, city: str, start_dt: str, end_dt: str
+) -> list[str]:
     sql = (
         f'SELECT DISTINCT dt FROM "{validate_identifier(config.pg_schema)}".'
         f'"{validate_identifier(config.training_table)}" '

@@ -190,8 +190,7 @@ def _raise_for_station_inventory_limit(
     if not mask.all():
         bad = int((~mask).sum())
         raise ValueError(
-            "bikes + docks must be within configured station capacity tolerance; "
-            f"found {bad} invalid values"
+            "bikes + docks must be within configured station capacity tolerance; " f"found {bad} invalid values"
         )
 
 
@@ -211,11 +210,7 @@ def _resolve_feature_columns(feature_columns: Sequence[str] | None) -> list[str]
 
 
 def _raise_for_all_nan_features(df: pd.DataFrame, non_nullable_feature_columns: Sequence[str]) -> None:
-    all_nan = [
-        column
-        for column in non_nullable_feature_columns
-        if df[column].isna().all()
-    ]
+    all_nan = [column for column in non_nullable_feature_columns if df[column].isna().all()]
     if all_nan:
         raise ValueError(f"non-nullable feature columns are entirely null: {all_nan}")
 
@@ -228,16 +223,9 @@ def _raise_for_per_column_missing_rate(
     if not non_nullable_feature_columns:
         return
     missing_rates = df[list(non_nullable_feature_columns)].isna().mean()
-    offenders = sorted(
-        f"{column}={rate:.2%}"
-        for column, rate in missing_rates.items()
-        if float(rate) > threshold
-    )
+    offenders = sorted(f"{column}={rate:.2%}" for column, rate in missing_rates.items() if float(rate) > threshold)
     if offenders:
-        raise ValueError(
-            "feature per-column missing rate exceeded threshold "
-            f"{threshold:.2%}: {offenders}"
-        )
+        raise ValueError("feature per-column missing rate exceeded threshold " f"{threshold:.2%}: {offenders}")
 
 
 def validate_feature_df(
@@ -298,7 +286,11 @@ def validate_feature_df(
     )
     _raise_for_binary(
         df,
-        [column for column in ("has_neighbors_within_radius", "is_weekend", "is_holiday") if column in selected_feature_columns],
+        [
+            column
+            for column in ("has_neighbors_within_radius", "is_weekend", "is_holiday")
+            if column in selected_feature_columns
+        ],
         allow_null=False,
     )
     _raise_for_integer_range(
@@ -324,7 +316,11 @@ def validate_feature_df(
     )
     _raise_for_range(
         df,
-        [column for column in ("humidity_pct", "hourly_precipitation_probability_pct") if column in selected_feature_columns],
+        [
+            column
+            for column in ("humidity_pct", "hourly_precipitation_probability_pct")
+            if column in selected_feature_columns
+        ],
         0.0,
         100.0,
         allow_null=True,

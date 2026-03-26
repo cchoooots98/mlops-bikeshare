@@ -1,16 +1,13 @@
 import importlib.util
-import json
 from pathlib import Path
 
 import pandas as pd
 import pytest
-
+from src.config import RuntimeSettings, deployment_state_path, prediction_key
 from src.features.schema import FEATURE_COLUMNS
-from src.config import deployment_state_path, prediction_key
 from src.inference import featurize_online, predictor
 from src.model_package import activate_package, ensure_package_dir, write_package_manifest
 from src.model_target import target_spec_from_predict_bikes
-from src.config import RuntimeSettings
 
 _SMOKE_SPEC = importlib.util.spec_from_file_location(
     "repo_smoke_invoke",
@@ -117,7 +114,9 @@ def test_predictor_builds_sagemaker_payload_from_feature_row():
     }
 
 
-@pytest.mark.parametrize(("predict_bikes", "expected_label"), [(True, "y_stockout_bikes_30"), (False, "y_stockout_docks_30")])
+@pytest.mark.parametrize(
+    ("predict_bikes", "expected_label"), [(True, "y_stockout_bikes_30"), (False, "y_stockout_docks_30")]
+)
 def test_load_prediction_manifest_requires_threshold_and_target(tmp_path, predict_bikes, expected_label):
     _write_package(tmp_path, predict_bikes=predict_bikes)
 
@@ -161,13 +160,25 @@ def test_build_online_features_reads_latest_table_only(monkeypatch, tmp_path):
 
     assert calls["online_table"] == "feat_station_snapshot_latest"
     assert calls["city"] == "paris"
-    assert calls["select_columns"] == ["city", "dt", "station_id", "capacity", "lat", "lon", "bikes", "docks", *selected_columns]
+    assert calls["select_columns"] == [
+        "city",
+        "dt",
+        "station_id",
+        "capacity",
+        "lat",
+        "lon",
+        "bikes",
+        "docks",
+        *selected_columns,
+    ]
     assert list(df.columns) == ["city", "dt", "station_id", *selected_columns]
 
 
 @pytest.mark.parametrize("predict_bikes", [True, False])
 def test_predict_rowwise_uses_package_threshold(monkeypatch, predict_bikes):
-    monkeypatch.setattr(predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: 0.2)
+    monkeypatch.setattr(
+        predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: 0.2
+    )
     features = _online_features_df()
     target_spec = target_spec_from_predict_bikes(predict_bikes)
 
@@ -211,7 +222,9 @@ def test_predict_rowwise_threaded_fails_fast_on_any_invoke_error(monkeypatch):
 
 
 def test_predict_rowwise_threaded_fails_when_all_predictions_invalid(monkeypatch):
-    monkeypatch.setattr(predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: float("nan"))
+    monkeypatch.setattr(
+        predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: float("nan")
+    )
 
     with pytest.raises(RuntimeError, match="produced all predictions invalid"):
         predictor._predict_rowwise_threaded(
@@ -252,7 +265,9 @@ def test_predict_rowwise_threaded_coerces_nullable_weather_nan_values(monkeypatc
 def test_predict_rowwise_threaded_rejects_non_nullable_nan_values(monkeypatch):
     features = _online_features_df()
     features.loc[0, "util_bikes"] = float("nan")
-    monkeypatch.setattr(predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: 0.2)
+    monkeypatch.setattr(
+        predictor, "_invoke_endpoint_one", lambda endpoint, feature_row, inference_id, feature_columns: 0.2
+    )
 
     with pytest.raises(ValueError, match="non-nullable feature columns"):
         predictor._predict_rowwise_threaded(
@@ -289,8 +304,11 @@ def test_prediction_key_is_target_partitioned():
 
 
 def test_deployment_state_path_is_target_specific(tmp_path):
-    assert deployment_state_path(
-        target_name="bikes",
-        environment="production",
-        root=tmp_path / "deployments",
-    ) == tmp_path / "deployments" / "bikes" / "production.json"
+    assert (
+        deployment_state_path(
+            target_name="bikes",
+            environment="production",
+            root=tmp_path / "deployments",
+        )
+        == tmp_path / "deployments" / "bikes" / "production.json"
+    )

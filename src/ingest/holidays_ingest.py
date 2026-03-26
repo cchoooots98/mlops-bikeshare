@@ -12,7 +12,6 @@ import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
 
-
 HOLIDAY_API_TEMPLATE = "https://calendrier.api.gouv.fr/jours-feries/metropole/{year}.json"
 BUCKET = os.getenv("BUCKET")
 

@@ -1,6 +1,5 @@
 import pandas as pd
 import pytest
-
 from src.features.schema import (
     DEFAULT_MISSING_RATE_THRESHOLD,
     DEFAULT_PER_COLUMN_MISSING_RATE_THRESHOLD,

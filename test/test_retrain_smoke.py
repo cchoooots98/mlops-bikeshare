@@ -77,7 +77,8 @@ def test_retrain_smoke_builds_candidate_summary(monkeypatch, tmp_path, predict_b
     monkeypatch.setattr(
         retrain,
         "update_registered_package_metadata",
-        lambda summary, registration, model_name: calls.__setitem__("package", calls["package"] + 1) or {"package_sha256": "sha"},
+        lambda summary, registration, model_name: calls.__setitem__("package", calls["package"] + 1)
+        or {"package_sha256": "sha"},
     )
     monkeypatch.setattr(
         retrain,
@@ -106,7 +107,8 @@ def test_run_retraining_refreshes_before_freshness_and_uses_post_refresh_latest_
     monkeypatch.setattr(
         retrain,
         "get_latest_feature_dt",
-        lambda config: call_order.append("latest_dt") or retrain.datetime(2026, 3, 12, 0, 0, tzinfo=retrain.timezone.utc),
+        lambda config: call_order.append("latest_dt")
+        or retrain.datetime(2026, 3, 12, 0, 0, tzinfo=retrain.timezone.utc),
     )
 
     captured_latest_dt = {}
@@ -183,7 +185,9 @@ def test_run_training_job_uses_env_for_database_credentials(monkeypatch, tmp_pat
 
 
 def test_run_dbt_refresh_targets_configured_feature_table(monkeypatch, tmp_path):
-    config = retrain.RetrainConfig(**{**_base_config(tmp_path, "manual").__dict__, "feature_table": "feat_station_snapshot_custom"})
+    config = retrain.RetrainConfig(
+        **{**_base_config(tmp_path, "manual").__dict__, "feature_table": "feat_station_snapshot_custom"}
+    )
     calls = []
 
     monkeypatch.setattr(

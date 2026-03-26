@@ -15,7 +15,6 @@ from sqlalchemy import create_engine, text
 
 from .validators import validate_station_info, validate_station_status
 
-
 BUCKET = os.getenv("BUCKET")
 CITY = os.getenv("CITY", "paris")
 
@@ -33,7 +32,6 @@ def _default_s3_client():
 def floor_to_5min(ts: datetime) -> datetime:
     ts = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
     return ts.replace(minute=(ts.minute // 5) * 5)
-
 
 
 def _dt_prefix_from_epoch(epoch_sec: int) -> str:
@@ -61,7 +59,9 @@ def _put_json(obj: dict, key: str, bucket: str, s3_client=None):
     gzbuf = io.BytesIO()
     with gzip.GzipFile(fileobj=gzbuf, mode="wb") as gz:
         gz.write(body)
-    client.put_object(Bucket=bucket, Key=key, Body=gzbuf.getvalue(), ContentType="application/json", ContentEncoding="gzip")
+    client.put_object(
+        Bucket=bucket, Key=key, Body=gzbuf.getvalue(), ContentType="application/json", ContentEncoding="gzip"
+    )
 
 
 def _get_json(url: str, timeout_sec: int = 10) -> dict:
@@ -283,8 +283,12 @@ def ensure_staging_tables(conn_uri: str) -> None:
             conn.execute(text(create_status_sql))
             conn.execute(text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS city TEXT;"))
             conn.execute(text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS city TEXT;"))
-            conn.execute(text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;"))
+            conn.execute(
+                text("ALTER TABLE stg_station_information ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;")
+            )
+            conn.execute(
+                text("ALTER TABLE stg_station_status ADD COLUMN IF NOT EXISTS snapshot_bucket_at TIMESTAMPTZ;")
+            )
             conn.execute(text("UPDATE stg_station_information SET city = :city WHERE city IS NULL;"), {"city": CITY})
             conn.execute(text("UPDATE stg_station_status SET city = :city WHERE city IS NULL;"), {"city": CITY})
             conn.execute(
@@ -382,7 +386,9 @@ def ingest_station_information_to_staging(
                 ),
                 {"city": raw_city, "snapshot_bucket_at": snapshot_bucket_at},
             )
-        out.to_sql("stg_station_information", con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+        out.to_sql(
+            "stg_station_information", con=engine, if_exists="append", index=False, method="multi", chunksize=1000
+        )
     finally:
         engine.dispose()
     return {"rows_written": len(out), "raw": raw_result, "snapshot_bucket_at_utc": snapshot_bucket_at.isoformat()}

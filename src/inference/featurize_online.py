@@ -2,9 +2,9 @@ from typing import Sequence
 
 import pandas as pd
 
+from src.config import load_runtime_settings
 from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine, load_latest_serving_features
 from src.features.schema import ENTITY_COLUMNS, FEATURE_COLUMNS, REQUIRED_BASE
-from src.config import load_runtime_settings
 
 
 def build_online_features(

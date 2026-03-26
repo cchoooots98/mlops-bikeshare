@@ -1,6 +1,5 @@
 import pandas as pd
 import pytest
-
 from src.features.postgres_store import (
     PostgresFeatureConfig,
     build_feature_select_query,
@@ -9,8 +8,8 @@ from src.features.postgres_store import (
     load_training_actuals_for_dt,
     load_training_slice,
 )
-from src.model_target import target_spec_from_predict_bikes
 from src.features.schema import ONLINE_REQUIRED_COLUMNS, TRAINING_REQUIRED_COLUMNS
+from src.model_target import target_spec_from_predict_bikes
 
 
 class _FakeConnection:
@@ -128,7 +127,10 @@ def test_create_pg_engine_handles_password_special_characters():
 
     engine = create_pg_engine(config)
 
-    assert engine.url.render_as_string(hide_password=False) == "postgresql+psycopg2://velib:p%40%3A%2Fword@localhost:5432/velib_dw"
+    assert (
+        engine.url.render_as_string(hide_password=False)
+        == "postgresql+psycopg2://velib:p%40%3A%2Fword@localhost:5432/velib_dw"
+    )
 
 
 @pytest.mark.parametrize("predict_bikes", [True, False])

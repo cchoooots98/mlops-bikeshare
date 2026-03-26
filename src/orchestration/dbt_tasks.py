@@ -1,12 +1,13 @@
-import os
-import time
 import json
+import os
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
 from sqlalchemy import create_engine, text
+
 from src.config.runtime import get_project_runtime_dbt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -138,11 +139,7 @@ def run_dbt_command(
         command.extend(["--indirect-selection", indirect_selection])
     if dbt_vars:
         serialized_vars = {
-            key: (
-                value.astimezone(timezone.utc).isoformat()
-                if isinstance(value, datetime)
-                else value
-            )
+            key: (value.astimezone(timezone.utc).isoformat() if isinstance(value, datetime) else value)
             for key, value in dbt_vars.items()
             if value is not None
         }
@@ -154,10 +151,7 @@ def run_dbt_command(
     duration_seconds = time.perf_counter() - started
     selection = selector or " ".join(select_models or [])
     print(
-        "DBT_COMMAND_TIMING "
-        f"action={action} "
-        f"duration_seconds={duration_seconds:.3f} "
-        f"selection={selection}"
+        "DBT_COMMAND_TIMING " f"action={action} " f"duration_seconds={duration_seconds:.3f} " f"selection={selection}"
     )
     return completed, duration_seconds
 
@@ -538,5 +532,3 @@ def run_feature_build(
     }
     print(f"DBT_FEATURE_BUILD_SUMMARY {summary}")
     return summary
-
-
