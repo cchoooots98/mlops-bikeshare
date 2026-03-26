@@ -53,10 +53,7 @@ def max_gap_minutes(points):
     timestamps = sorted(ts for ts, _ in points)
     if len(timestamps) < 2:
         return None
-    gaps = [
-        (current - previous).total_seconds() / 60
-        for previous, current in zip(timestamps, timestamps[1:])
-    ]
+    gaps = [(current - previous).total_seconds() / 60 for previous, current in zip(timestamps, timestamps[1:])]
     return max(gaps) if gaps else None
 
 
@@ -128,9 +125,7 @@ def main():
             f"({HEARTBEAT_COVERAGE_MIN:.0%} of expected {EXPECTED_HEARTBEATS} batches in 24h)"
         )
     if hb_max_gap is None or hb_max_gap > MAX_HEARTBEAT_GAP_MINUTES:
-        failures.append(
-            f"PredictionHeartbeat max gap {hb_max_gap} min > {MAX_HEARTBEAT_GAP_MINUTES} min"
-        )
+        failures.append(f"PredictionHeartbeat max gap {hb_max_gap} min > {MAX_HEARTBEAT_GAP_MINUTES} min")
 
     if psi_core_max >= PSI_CORE_WARN:
         failures.append(f"PSI_core max {psi_core_max} >= {PSI_CORE_WARN} (core feature drift)")

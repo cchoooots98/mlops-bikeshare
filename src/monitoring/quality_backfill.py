@@ -7,10 +7,9 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.config import prediction_key, prediction_prefix, quality_key
+from src.config import load_runtime_settings, prediction_key, prediction_prefix, quality_key
 from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine, load_training_actuals_for_dt
 from src.model_target import PredictionTargetSpec, target_spec_from_name, target_spec_from_predict_bikes
-from src.config import load_runtime_settings
 
 MATURITY_MINUTES = 30
 BACKFILL_MINUTES = 120
@@ -101,7 +100,13 @@ def _load_actuals_for_dt(
     )
     if actuals.empty:
         return pd.DataFrame(
-            columns=["station_id", target_spec.label_column, target_spec.actual_t30_column, "dt_plus30", "min_inventory_within_30m"]
+            columns=[
+                "station_id",
+                target_spec.label_column,
+                target_spec.actual_t30_column,
+                "dt_plus30",
+                "min_inventory_within_30m",
+            ]
         )
     dt_plus30 = (datetime.strptime(pred_dt, "%Y-%m-%d-%H-%M") + timedelta(minutes=30)).strftime("%Y-%m-%d-%H-%M")
     actuals = actuals.dropna(subset=[target_spec.label_column]).copy()

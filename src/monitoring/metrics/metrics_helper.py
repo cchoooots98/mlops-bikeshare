@@ -18,7 +18,6 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
-
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-3")
 CW_NAMESPACE = os.getenv("CW_NS", "Bikeshare/Model")
 DEFAULT_ENDPOINT = os.getenv("SM_ENDPOINT", "bikeshare-bikes-prod")

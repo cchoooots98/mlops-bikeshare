@@ -12,7 +12,6 @@ from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine,
 from src.features.schema import FEATURE_COLUMNS
 from src.monitoring.metrics.metrics_helper import put_metrics_bulk
 
-
 CORE_PSI_FEATURE_COLUMNS = [
     "util_bikes",
     "util_docks",
@@ -197,11 +196,7 @@ def compute_feature_psi_map(
 
 def split_feature_psi_groups(feature_psis: dict[str, float]) -> dict[str, dict[str, float]]:
     return {
-        group_name: {
-            column: feature_psis[column]
-            for column in group_columns
-            if column in feature_psis
-        }
+        group_name: {column: feature_psis[column] for column in group_columns if column in feature_psis}
         for group_name, group_columns in PSI_FEATURE_GROUPS.items()
     }
 
@@ -323,7 +318,9 @@ def publish_psi(
         "window": window,
         "top_features": sorted(feature_psis.items(), key=lambda item: item[1], reverse=True)[:5],
         "top_core_features": sorted(grouped_feature_psis["core"].items(), key=lambda item: item[1], reverse=True)[:5],
-        "top_weather_features": sorted(grouped_feature_psis["weather"].items(), key=lambda item: item[1], reverse=True)[:5],
+        "top_weather_features": sorted(grouped_feature_psis["weather"].items(), key=lambda item: item[1], reverse=True)[
+            :5
+        ],
     }
     if dry_run:
         return result

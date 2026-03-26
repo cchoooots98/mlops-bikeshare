@@ -2,12 +2,10 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
-
 from src.config import quality_key
 from src.model_target import target_spec_from_predict_bikes
 from src.monitoring import quality_backfill
-from src.monitoring.metrics import publish_custom_metrics
-from src.monitoring.metrics import publish_psi
+from src.monitoring.metrics import publish_custom_metrics, publish_psi
 from src.monitoring.metrics.metrics_helper import build_metric_dimensions
 
 
