@@ -139,8 +139,8 @@ def test_terraform_oidc_subject_is_decoupled_from_project_resource_prefix():
     assert "coalesce(var.github_repo_name, var.repo_name)" in module_vars
     assert 'data_bucket_name     = "${var.repo_name}-${local.account_id}-${var.aws_region}"' in module_vars
 
-    assert 'repo:${var.github_owner}/${local.github_repo_subject_name}:ref:refs/heads/main' in oidc_role
-    assert 'repo:${var.github_owner}/${var.repo_name}:ref:refs/heads/main' not in oidc_role
+    assert "repo:${var.github_owner}/${local.github_repo_subject_name}:ref:refs/heads/main" in oidc_role
+    assert "repo:${var.github_owner}/${var.repo_name}:ref:refs/heads/main" not in oidc_role
 
 
 def test_formal_repo_cleanup_removes_legacy_runtime_and_scheduler_surfaces():
