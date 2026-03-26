@@ -43,31 +43,31 @@ The Streamlit dashboard provides real-time visibility into station risk, model q
 
 Station markers colored by stockout probability. Red = critical risk, orange = alert, teal = normal.
 
-![Live Ops Map](reports/fig/screenshots/live_ops_map.png)
+![Live Ops Map](reports/fig/2026-03-24-paris/live_ops_map.png)
 
 ### Prediction Quality
 
 Rolling PR-AUC, F1, precision, and recall from the 30-minute quality backfill loop.
 
-![Prediction Quality](reports/fig/screenshots/prediction_quality.png)
+![Bike Stockout Prediction Quality](reports/fig/2026-03-24-paris/bikes_pred_quality.png)
 
 ### System Health
 
 SageMaker endpoint latency, invocation counts, error rates, and PSI drift metrics from CloudWatch.
 
-![System Health](reports/fig/screenshots/system_health.png)
+![Bike Stockout System Health](reports/fig/2026-03-24-paris/bikes_sys_quality.png)
 
 ### Station History
 
 Click any station to see its prediction score time series with the model-specific alert threshold.
 
-![Station History](reports/fig/screenshots/station_history.png)
+![Bike Stockout Station History](reports/fig/2026-03-24-paris/bikes_station_history.png)
 
 ### Data Pipeline Status
 
 Freshness checks for every data source against operator SLA windows.
 
-![Data Status](reports/fig/screenshots/data_status.png)
+![Bike Stockout Data Status](reports/fig/2026-03-24-paris/bikes_data_pipe.png)
 
 ---
 
