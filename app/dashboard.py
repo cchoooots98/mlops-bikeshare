@@ -1,4 +1,5 @@
 """Velib Paris Station Risk Monitor."""
+
 from __future__ import annotations
 
 import os
@@ -84,16 +85,13 @@ DEFAULT_THRESHOLD = float(_app.get("threshold") or st.secrets.get("decision_thre
 MODEL_VER = _app.get("model_version") or st.secrets.get("model_version", "unknown")
 PG_SCHEMA = st.secrets.get("pg_schema", "analytics")
 PREDICTION_STALE_AFTER_MINUTES = int(
-    _app.get("prediction_stale_after_minutes")
-    or st.secrets.get("prediction_stale_after_minutes", 30)
+    _app.get("prediction_stale_after_minutes") or st.secrets.get("prediction_stale_after_minutes", 30)
 )
 QUALITY_STALE_AFTER_MINUTES = int(
-    _app.get("quality_stale_after_minutes")
-    or st.secrets.get("quality_stale_after_minutes", 45)
+    _app.get("quality_stale_after_minutes") or st.secrets.get("quality_stale_after_minutes", 45)
 )
 FEATURE_STALE_AFTER_MINUTES = int(
-    _app.get("feature_stale_after_minutes")
-    or st.secrets.get("feature_stale_after_minutes", 60)
+    _app.get("feature_stale_after_minutes") or st.secrets.get("feature_stale_after_minutes", 60)
 )
 FRESHNESS_TABLES: list[str] = list(
     st.secrets.get(
@@ -163,10 +161,9 @@ def _determine_pipeline_state(
     freshness = freshness_result.data
     if not freshness.empty and (
         (freshness["loader_status"] != "ok").any()
-        or pd.to_datetime(
-            freshness["latest_dt_str"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True
+        or pd.to_datetime(freshness["latest_dt_str"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True).pipe(
+            lambda series: ((datetime.now(timezone.utc) - series).dt.total_seconds() / 60 >= 60).any()
         )
-        .pipe(lambda series: ((datetime.now(timezone.utc) - series).dt.total_seconds() / 60 >= 60).any())
     ):
         return "Degraded"
     return "Healthy"
@@ -399,13 +396,23 @@ with tab_quality:
     )
     render_metric_section(
         title="Prediction Quality",
-        description="Last 24 hours in UTC. These metrics summarize mature quality evidence and published monitoring signals.",
+        description=(
+            "Last 24 hours in UTC. Threshold Hit Rate is informational only; "
+            "Prediction Heartbeat is the total successful heartbeat count across the visible 24-hour window."
+        ),
         series_map=model_health,
         quality_result=latest_quality,
         metric_specs={
             "PR-AUC-24h": MetricSpec(label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55, decimals=3),
             "F1-24h": MetricSpec(label="F1 (24h)", direction="higher", warning=0.55, critical=0.40, decimals=3),
-            "PredictionHeartbeat": MetricSpec(label="Prediction Heartbeat (24h)", direction="higher", warning=1.0, critical=1.0, decimals=0),
+            "PredictionHeartbeat": MetricSpec(
+                label="Prediction Heartbeat (24h total)",
+                direction="higher",
+                warning=92.0,
+                critical=92.0,
+                decimals=0,
+                summary="window_sum",
+            ),
             "ThresholdHitRate-24h": MetricSpec(label="Threshold Hit Rate (24h)", direction="none", decimals=3),
             "Samples-24h": MetricSpec(label="Samples (24h)", direction="higher", warning=1.0, critical=1.0, decimals=0),
         },
@@ -482,7 +489,10 @@ with tab_system:
     }
     render_metric_section(
         title="System Health",
-        description="Serving SLA view for the last 24 hours in UTC.",
+        description=(
+            "Serving SLA view for the last 24 hours in UTC. Counter-style metrics below are shown as totals "
+            "across the visible 24-hour window."
+        ),
         series_map=system_health,
         metric_specs={
             "ModelLatency": MetricSpec(
@@ -494,35 +504,39 @@ with tab_system:
                 empty_message="No SageMaker latency samples are available for the selected endpoint.",
             ),
             "Invocation5XXErrors": MetricSpec(
-                label="Invocation5XXErrors (24h)",
+                label="Invocation5XXErrors (24h total)",
                 direction="lower",
                 warning=0.0,
                 critical=0.0,
                 decimals=0,
+                summary="window_sum",
                 empty_message="No 5xx error samples are available for the selected endpoint.",
             ),
             "Invocation4XXErrors": MetricSpec(
-                label="Invocation4XXErrors (24h)",
+                label="Invocation4XXErrors (24h total)",
                 direction="lower",
                 warning=0.0,
                 critical=10.0,
                 decimals=0,
+                summary="window_sum",
                 empty_message="No 4xx error samples are available for the selected endpoint.",
             ),
             "Invocations": MetricSpec(
-                label="Invocations (24h)",
+                label="Invocations (24h total)",
                 direction="higher",
                 warning=1.0,
                 critical=1.0,
                 decimals=0,
+                summary="window_sum",
                 empty_message="No invocation count is available for the selected endpoint.",
             ),
             "PredictionHeartbeat": MetricSpec(
-                label="Prediction Heartbeat (24h)",
+                label="Prediction Heartbeat (24h total)",
                 direction="higher",
-                warning=1.0,
-                critical=1.0,
+                warning=92.0,
+                critical=92.0,
                 decimals=0,
+                summary="window_sum",
                 empty_message="Heartbeat samples are missing for the selected target and environment.",
             ),
             "PSI": MetricSpec(

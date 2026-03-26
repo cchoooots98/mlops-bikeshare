@@ -9,10 +9,10 @@ _APP_DIR = os.path.join(_REPO_ROOT, "app")
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
-from dashboard.contracts import ArtifactLoadResult, LoadStatus  # noqa: E402
+from dashboard import views  # noqa: E402
+from dashboard.contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus  # noqa: E402
 from dashboard.presentation import MetricSpec  # noqa: E402
 from dashboard.targeting import DashboardTargetConfig  # noqa: E402
-from dashboard import views  # noqa: E402
 
 
 class _DummyColumn:
@@ -90,6 +90,44 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
     ]
 
 
+def test_render_metric_section_sums_counter_style_metrics_over_visible_window(monkeypatch):
+    captured_metrics = []
+
+    monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)])
+    monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views, "_render_status_chip", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "metric", lambda **kwargs: captured_metrics.append(kwargs))
+    monkeypatch.setattr(views.st, "plotly_chart", lambda *args, **kwargs: None)
+
+    views.render_metric_section(
+        title="System Health",
+        series_map={
+            "Invocations": pd.DataFrame(
+                {
+                    "ts": [
+                        datetime(2026, 3, 25, 10, 0, tzinfo=timezone.utc),
+                        datetime(2026, 3, 25, 10, 5, tzinfo=timezone.utc),
+                        datetime(2026, 3, 25, 10, 10, tzinfo=timezone.utc),
+                    ],
+                    "Invocations": [120.0, 0.0, 80.0],
+                }
+            )
+        },
+        metric_specs={
+            "Invocations": MetricSpec(
+                label="Invocations (24h total)",
+                direction="higher",
+                decimals=0,
+                summary="window_sum",
+            )
+        },
+    )
+
+    assert captured_metrics == [{"label": "Invocations (24h total)", "value": "200"}]
+
+
 def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
     captured = {"subheader": [], "caption": [], "key": None}
 
@@ -122,7 +160,9 @@ def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
     )
 
     assert captured["subheader"] == ["Station History"]
-    assert captured["caption"][0] == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
+    assert (
+        captured["caption"][0] == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
+    )
     assert captured["key"] == "history-chart-bikes-54000604"
 
 
@@ -161,3 +201,45 @@ def test_render_selected_station_summary_renders_full_status_text(monkeypatch):
     assert "Gergovie - Vercingetorix" in captured_markdown[0]
     assert "Low inventory now" in captured_markdown[1]
     assert captured_caption[0] == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."
+
+
+def test_render_data_status_table_formats_timestamps_and_compacts_details(monkeypatch):
+    captured = {"frame": None, "caption": []}
+
+    monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
+    monkeypatch.setattr(views.st, "dataframe", lambda frame, **kwargs: captured.update({"frame": frame.copy()}))
+    monkeypatch.setattr(
+        views,
+        "build_data_status_frame",
+        lambda **kwargs: pd.DataFrame(
+            [
+                {
+                    "Data source": "Prediction artifact",
+                    "Last updated (UTC)": datetime(2026, 3, 25, 23, 15, tzinfo=timezone.utc),
+                    "Delay (min)": 15.0,
+                    "Status": "Healthy",
+                    "Expected cadence / SLA": "Prediction every 15 min; stale after 30 min",
+                    "Operator meaning": "Freshness is within the 30 minute expectation.",
+                    "Details": "inference/target=bikes/city=paris/dt=2026-03-25-23-15/predictions.parquet",
+                }
+            ]
+        ),
+    )
+
+    views.render_data_status_table(
+        prediction_result=ArtifactLoadResult(status=LoadStatus.OK),
+        quality_result=ArtifactLoadResult(status=LoadStatus.OK),
+        freshness_result=FreshnessLoadResult(status=LoadStatus.OK, data=pd.DataFrame()),
+        prediction_sla_minutes=30,
+        quality_sla_minutes=45,
+        feature_sla_minutes=60,
+    )
+
+    assert captured["frame"] is not None
+    first_row = captured["frame"].iloc[0].to_dict()
+    assert first_row["Last updated (UTC)"] == "2026-03-25 23:15 UTC"
+    assert first_row["Delay (min)"] == "15.0 min"
+    assert first_row["Details"] == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
+    assert "S3 and Airflow logs" in captured["caption"][-1]

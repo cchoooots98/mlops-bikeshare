@@ -29,6 +29,7 @@ class MetricSpec:
     warning: float | None = None
     critical: float | None = None
     decimals: int = 3
+    summary: str = "latest"
     empty_message: str = "No metric samples available yet."
 
 
@@ -170,7 +171,8 @@ def summarize_quality_availability(
         return (
             "error",
             "Quality artifact could not be trusted.",
-            quality_result.message or "The latest quality artifact could not be read or did not match the expected schema.",
+            quality_result.message
+            or "The latest quality artifact could not be read or did not match the expected schema.",
         )
     if (
         quality_result.status == LoadStatus.OK
@@ -325,8 +327,7 @@ def build_data_status_frame(
             "Delay (min)": quality_delay,
             "Status": quality_status,
             "Expected cadence / SLA": (
-                "30 min label maturity + 7 min backfill lag; expect within "
-                f"{quality_sla_minutes} min"
+                "30 min label maturity + 7 min backfill lag; expect within " f"{quality_sla_minutes} min"
             ),
             "Operator meaning": quality_meaning,
             "Details": quality_result.message or (quality_result.latest_key or ""),
@@ -341,9 +342,7 @@ def build_data_status_frame(
             errors="coerce",
             utc=True,
         )
-        freshness["Delay (min)"] = (
-            now_utc - freshness["Last updated (UTC)"]
-        ).dt.total_seconds().div(60).round(1)
+        freshness["Delay (min)"] = (now_utc - freshness["Last updated (UTC)"]).dt.total_seconds().div(60).round(1)
 
         def _freshness_row(row: pd.Series) -> tuple[str, str]:
             if row["loader_status"] != "ok":

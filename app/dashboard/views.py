@@ -1,4 +1,5 @@
 """Dashboard rendering functions."""
+
 from __future__ import annotations
 
 import re
@@ -90,6 +91,42 @@ def _slugify_key_part(value: str) -> str:
     return slug or "section"
 
 
+def _resolve_metric_summary(
+    series: pd.DataFrame, metric_name: str, spec: MetricSpec | None
+) -> tuple[float | None, float | None]:
+    if metric_name not in series.columns:
+        return None, None
+
+    values = pd.to_numeric(series[metric_name], errors="coerce").dropna()
+    if values.empty:
+        return None, None
+
+    if spec is not None and spec.summary == "window_sum":
+        return float(values.sum()), None
+
+    current = float(values.iloc[-1])
+    previous = float(values.iloc[-2]) if len(values) > 1 else current
+    return current, current - previous
+
+
+def _format_detail_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+
+    normalized = text.replace("\\", "/")
+    if "/" in normalized:
+        parts = [part for part in normalized.split("/") if part]
+        if len(parts) >= 5:
+            return "/".join([*parts[:3], "...", *parts[-2:]])
+        if len(parts) == 4:
+            return "/".join([*parts[:2], "...", parts[-1]])
+
+    if len(normalized) <= 96:
+        return normalized
+    return f"{normalized[:52]}...{normalized[-28:]}"
+
+
 def render_status_cards(
     *,
     target: DashboardTargetConfig,
@@ -116,7 +153,11 @@ def render_status_cards(
         unsafe_allow_html=True,
     )
 
-    latest_label = latest_prediction_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if latest_prediction_dt else "Unavailable"
+    latest_label = (
+        latest_prediction_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        if latest_prediction_dt
+        else "Unavailable"
+    )
     cols = st.columns(2)
     cols[0].metric("Pipeline state", pipeline_state)
     cols[1].metric("Prediction target", target.display_name)
@@ -145,8 +186,15 @@ def render_status_cards(
 def render_artifact_issue(result: ArtifactLoadResult, *, default_message: str | None = None) -> None:
     if result.status == LoadStatus.OK:
         return
-    message = result.message or _STATUS_MESSAGES.get(result.status, lambda source: default_message or "Data unavailable.")(result.source_name or "Artifact")
-    if result.status in {LoadStatus.ALL_SCORES_NULL, LoadStatus.ACCESS_DENIED, LoadStatus.READ_ERROR, LoadStatus.SCHEMA_ERROR}:
+    message = result.message or _STATUS_MESSAGES.get(
+        result.status, lambda source: default_message or "Data unavailable."
+    )(result.source_name or "Artifact")
+    if result.status in {
+        LoadStatus.ALL_SCORES_NULL,
+        LoadStatus.ACCESS_DENIED,
+        LoadStatus.READ_ERROR,
+        LoadStatus.SCHEMA_ERROR,
+    }:
         st.error(message)
     elif result.status == LoadStatus.NO_OBJECTS:
         st.warning(message)
@@ -264,7 +312,9 @@ def render_selected_station_summary(
 ) -> None:
     st.subheader("Selected Station Summary")
     if selected_station is None:
-        st.info("No station is available yet. Once predictions load, the highest-risk station will be selected automatically.")
+        st.info(
+            "No station is available yet. Once predictions load, the highest-risk station will be selected automatically."
+        )
         return
 
     station_name = str(selected_station.get("station_name") or selected_station.get("station_id"))
@@ -274,7 +324,11 @@ def render_selected_station_summary(
         unsafe_allow_html=True,
     )
     st.caption(f"Station ID: {station_id}. Forecast horizon: next 30 minutes (UTC).")
-    probability = float(selected_station["stockout_probability"]) if pd.notna(selected_station.get("stockout_probability")) else None
+    probability = (
+        float(selected_station["stockout_probability"])
+        if pd.notna(selected_station.get("stockout_probability"))
+        else None
+    )
     summary_cards = [
         ("Current bikes", _coerce_int(selected_station.get("bikes"))),
         ("Current docks", _coerce_int(selected_station.get("docks"))),
@@ -426,7 +480,9 @@ def render_quality_status_panel(
         st.error(f"{title} {body}")
     else:
         st.info(f"{title} {body}")
-    st.caption("Expected lag: 30-minute label maturity + 7-minute backfill start delay, so quality evidence normally trails predictions.")
+    st.caption(
+        "Expected lag: 30-minute label maturity + 7-minute backfill start delay, so quality evidence normally trails predictions."
+    )
 
 
 def render_metric_section(
@@ -456,7 +512,7 @@ def render_metric_section(
 
         for col, (metric_name, series) in zip(cols, row_items):
             spec = specs.get(metric_name)
-            display_name = labels.get(metric_name, metric_name)
+            display_name = spec.label if spec is not None else labels.get(metric_name, metric_name)
             with col:
                 if series.empty or metric_name not in series.columns:
                     _render_status_chip("Unavailable", _CLR_INFO)
@@ -466,18 +522,27 @@ def render_metric_section(
                     )
                     continue
 
-                current = float(series[metric_name].iloc[-1])
-                prev = float(series[metric_name].iloc[-2]) if len(series) > 1 else current
-                delta = current - prev
+                current, delta = _resolve_metric_summary(series, metric_name, spec)
+                if current is None:
+                    _render_status_chip("Unavailable", _CLR_INFO)
+                    st.warning(
+                        f"{display_name}: "
+                        f"{metric_empty_message(metric_name=metric_name, spec=spec, quality_result=quality_result)}"
+                    )
+                    continue
                 status_text, status_color = classify_metric_status(current, spec or MetricSpec(label=display_name))
                 _render_status_chip(status_text, status_color)
                 decimals = spec.decimals if spec is not None else 3
 
-                st.metric(
-                    label=display_name,
-                    value=_format_metric_value(current, decimals),
-                    delta=_format_metric_value(delta, decimals) if delta != 0 else f"{delta:+.{decimals}f}",
-                )
+                metric_kwargs = {
+                    "label": display_name,
+                    "value": _format_metric_value(current, decimals),
+                }
+                if delta is not None:
+                    metric_kwargs["delta"] = (
+                        _format_metric_value(delta, decimals) if delta != 0 else f"{delta:+.{decimals}f}"
+                    )
+                st.metric(**metric_kwargs)
 
                 fig = go.Figure(
                     go.Scatter(
@@ -523,9 +588,17 @@ def render_data_status_table(
     if frame.empty:
         st.warning("No data status rows are available.")
         return
+    display_frame = frame.copy()
+    display_frame["Last updated (UTC)"] = display_frame["Last updated (UTC)"].apply(format_utc_label)
+    display_frame["Delay (min)"] = display_frame["Delay (min)"].apply(
+        lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
+    )
+    display_frame["Details"] = display_frame["Details"].apply(_format_detail_text)
     st.dataframe(
-        frame,
+        display_frame,
         width="stretch",
         hide_index=True,
-        column_config={"Delay (min)": st.column_config.NumberColumn(format="%.1f min")},
+    )
+    st.caption(
+        "Details keeps the target/date portion of each artifact key so you can match the row to S3 and Airflow logs quickly."
     )

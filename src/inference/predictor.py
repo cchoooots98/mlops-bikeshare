@@ -10,13 +10,12 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.config import prediction_key
+from src.config import load_runtime_settings, prediction_key
 from src.features.schema import NULLABLE_NAN_PRESERVED_COLUMNS, NULLABLE_ZERO_FILL_COLUMNS
-from src.monitoring.metrics.metrics_helper import publish_heartbeat
-from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.inference.featurize_online import build_online_features
+from src.model_package import load_package_manifest, resolve_active_package_dir
 from src.model_target import PredictionTargetSpec, target_spec_from_metadata
-from src.config import load_runtime_settings
+from src.monitoring.metrics.metrics_helper import publish_heartbeat
 
 DEFAULT_MAX_WORKERS = 16
 DEFAULT_MAX_ATTEMPTS = 3
@@ -90,9 +89,7 @@ def _validate_feature_row(feature_row: list[float], feature_columns: list[str], 
     if invalid_columns:
         preview = ", ".join(invalid_columns[:5])
         suffix = "..." if len(invalid_columns) > 5 else ""
-        raise ValueError(
-            f"inference_id={inference_id} contains non-finite feature values; columns={preview}{suffix}"
-        )
+        raise ValueError(f"inference_id={inference_id} contains non-finite feature values; columns={preview}{suffix}")
 
 
 def _sanitize_feature_frame(
@@ -127,29 +124,22 @@ def _sanitize_feature_frame(
     if zero_filled:
         preview = ", ".join(zero_filled[:5])
         suffix = "..." if len(zero_filled) > 5 else ""
-        print(
-            "[predictor] coerced non-finite nullable feature values to 0.0 "
-            f"for columns: {preview}{suffix}"
-        )
+        print("[predictor] coerced non-finite nullable feature values to 0.0 " f"for columns: {preview}{suffix}")
 
     if nan_preserved:
         preview = ", ".join(nan_preserved[:5])
         suffix = "..." if len(nan_preserved) > 5 else ""
-        print(
-            "[predictor] coerced non-finite nullable feature values to NaN "
-            f"for columns: {preview}{suffix}"
-        )
+        print("[predictor] coerced non-finite nullable feature values to NaN " f"for columns: {preview}{suffix}")
 
     if hard_failures:
-        raise ValueError(
-            "non-finite values found in non-nullable feature columns: "
-            + "; ".join(hard_failures[:5])
-        )
+        raise ValueError("non-finite values found in non-nullable feature columns: " + "; ".join(hard_failures[:5]))
 
     return feature_frame
 
 
-def _invoke_endpoint_one(endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]) -> float:
+def _invoke_endpoint_one(
+    endpoint: str, feature_row: list[float], inference_id: str, feature_columns: list[str]
+) -> float:
     payload = build_endpoint_payload(feature_row, feature_columns)
     resp = _smr().invoke_endpoint(
         EndpointName=endpoint,
@@ -285,9 +275,7 @@ def _predict_rowwise_threaded(
             f"endpoint={endpoint} failed predictions for {len(failures)}/{len(feats)} rows; examples: {examples}"
         )
 
-    valid_prediction_count = sum(
-        1 for value in yhat if value is not None and math.isfinite(float(value))
-    )
+    valid_prediction_count = sum(1 for value in yhat if value is not None and math.isfinite(float(value)))
     if valid_prediction_count == 0:
         raise RuntimeError(f"endpoint={endpoint} produced all predictions invalid for {len(feats)} rows")
 
@@ -337,6 +325,10 @@ def main():
         city=city,
         target_name=metadata["target_name"],
         environment=settings.serving_environment,
+    )
+    print(
+        f"[predictor] published PredictionHeartbeat target={metadata['target_name']} "
+        f"environment={settings.serving_environment} endpoint={endpoint}"
     )
 
 
