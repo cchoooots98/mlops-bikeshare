@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import boto3
 import mlflow
-
 from src.model_package import PACKAGE_MANIFEST_FILENAME, load_package_manifest
 
 
@@ -45,7 +44,9 @@ def assemble_package_from_run(run_id: str, output_dir: Path) -> Path:
     downloaded_model = Path(mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model"))
     _copy_tree(downloaded_model, model_dir)
 
-    manifest_artifact = Path(mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=PACKAGE_MANIFEST_FILENAME))
+    manifest_artifact = Path(
+        mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=PACKAGE_MANIFEST_FILENAME)
+    )
     package_manifest_path = package_dir / PACKAGE_MANIFEST_FILENAME
     package_manifest_path.write_bytes(manifest_artifact.read_bytes())
 

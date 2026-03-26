@@ -5,7 +5,6 @@ import pytest
 pytest.importorskip("xgboost")
 
 import xgboost as xgb
-
 from src.mlflow_pyfunc_model import PositiveClassProbabilityModel
 
 

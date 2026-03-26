@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-
 PACKAGE_LAYOUT_VERSION = "2"
 DEPLOYMENT_STATE_VERSION = "2"
 PACKAGE_MANIFEST_FILENAME = "package_manifest.json"
@@ -135,10 +134,14 @@ def _resolve_manifest_paths(paths: Mapping[str, Any], *, manifest_path: Path) ->
     package_dir = _resolve_runtime_path(paths["package_dir"], project_root=project_root)
     return {
         "package_dir": str(package_dir),
-        "model_dir": str(_resolve_runtime_path(paths.get("model_dir", package_dir / MODEL_DIRNAME), project_root=project_root)),
+        "model_dir": str(
+            _resolve_runtime_path(paths.get("model_dir", package_dir / MODEL_DIRNAME), project_root=project_root)
+        ),
         "package_manifest_path": str(manifest_path.resolve()),
         "artifacts_dir": str(
-            _resolve_runtime_path(paths.get("artifacts_dir", package_dir / ARTIFACTS_DIRNAME), project_root=project_root)
+            _resolve_runtime_path(
+                paths.get("artifacts_dir", package_dir / ARTIFACTS_DIRNAME), project_root=project_root
+            )
         ),
     }
 

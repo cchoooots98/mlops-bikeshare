@@ -78,4 +78,3 @@ def target_spec_from_metadata(metadata: Mapping[str, object]) -> PredictionTarge
             return target_spec_from_predict_bikes(False)
 
     raise ValueError("prediction target metadata is missing")
-

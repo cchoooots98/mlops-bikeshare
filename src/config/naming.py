@@ -4,7 +4,6 @@ from pathlib import Path
 
 from src.model_target import parse_bool_value, target_spec_from_name, target_spec_from_predict_bikes
 
-
 DEFAULT_PROJECT_SLUG = "bikeshare"
 DEFAULT_DEPLOYMENT_STATE_ROOT = Path("model_dir") / "deployments"
 
@@ -18,7 +17,9 @@ def resolve_target_name(*, predict_bikes: bool | str | None = None, target_name:
 
 
 def resolve_predict_bikes(*, predict_bikes: bool | str | None = None, target_name: str | None = None) -> bool:
-    return target_spec_from_name(resolve_target_name(predict_bikes=predict_bikes, target_name=target_name)).predict_bikes
+    return target_spec_from_name(
+        resolve_target_name(predict_bikes=predict_bikes, target_name=target_name)
+    ).predict_bikes
 
 
 def prediction_key(city: str, dt: str, target_name: str) -> str:

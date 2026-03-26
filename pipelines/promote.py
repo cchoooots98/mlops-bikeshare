@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 import mlflow
-
 from src.model_package import load_deployment_state, write_deployment_state
 
 
@@ -19,7 +18,9 @@ def resolve_version_from_alias(client: mlflow.tracking.MlflowClient, model_name:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Promote a deployed package reference and optionally transition MLflow stage.")
+    parser = argparse.ArgumentParser(
+        description="Promote a deployed package reference and optionally transition MLflow stage."
+    )
     parser.add_argument("--source-deployment-state-path", required=True)
     parser.add_argument("--target-deployment-state-path", required=True)
     parser.add_argument("--target-environment", required=True)
@@ -30,7 +31,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def maybe_transition_registry(model_name: str | None, version: str | None, alias: str | None, to_stage: str | None) -> str | None:
+def maybe_transition_registry(
+    model_name: str | None, version: str | None, alias: str | None, to_stage: str | None
+) -> str | None:
     if not to_stage:
         return version
     if not model_name:

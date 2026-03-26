@@ -20,7 +20,10 @@ def test_router_request_accepts_explicit_target_name():
     assert request.target_name == "docks"
     assert request.predict_bikes is False
     assert request.environment == "staging"
-    assert resolve_endpoint_name(target_name=request.target_name, environment=request.environment) == "bikeshare-docks-staging"
+    assert (
+        resolve_endpoint_name(target_name=request.target_name, environment=request.environment)
+        == "bikeshare-docks-staging"
+    )
 
 
 def test_dashboard_targeting_is_target_aware():
@@ -45,7 +48,6 @@ def test_formal_docs_use_target_specific_deployment_state_and_local_sqlite_mlflo
     readme = Path("README.md").read_text(encoding="utf-8")
     architecture = Path("docs/architecture.md").read_text(encoding="utf-8")
     deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
-    
 
     assert "model_dir/deployments/local.json" not in readme
     assert "model_dir/deployments/local.json" not in architecture
@@ -89,7 +91,7 @@ def test_terraform_platform_module_has_no_placeholder_lambda():
     assert "sagemaker:InvokeEndpoint" in ec2_tf
     assert "sagemaker:DescribeEndpoint" in ec2_tf
     assert "AmazonSageMakerFullAccess" not in ec2_tf
-    assert 'values(var.sagemaker_endpoints)' in ec2_tf
+    assert "values(var.sagemaker_endpoints)" in ec2_tf
 
 
 def test_terraform_uses_s3_native_locking_and_modern_version_floor():
@@ -149,7 +151,9 @@ def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
     deployment_guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
     runbook = Path("docs/operations_runbook.md").read_text(encoding="utf-8")
     monitoring = Path("docs/operations_runbook.md").read_text(encoding="utf-8")
-    operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(encoding="utf-8")
+    operator_manual = Path("docs/plan_detail/current_state_to_enterprise_operator_manual.md").read_text(
+        encoding="utf-8"
+    )
     production_dag_path = Path("airflow/dags/production_serving_dags.py")
     staging_dag_path = Path("airflow/dags/staging_serving_dags.py")
 
@@ -215,7 +219,10 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
 
     assert "QUALITY_LABEL_MATURITY_MINUTES = 30" in factory_source
     assert "QUALITY_START_LAG_MINUTES = 7" in factory_source
-    assert "QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)" in factory_source
+    assert (
+        "QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)"
+        in factory_source
+    )
     assert "METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)" in factory_source
     assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
     assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
@@ -242,9 +249,9 @@ def test_feature_future_window_label_smoke_test_is_runtime_scoped():
 
 
 def test_feature_label_maturity_consistency_test_is_runtime_scoped():
-    test_sql = Path(
-        "dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_label_maturity_consistency.sql"
-    ).read_text(encoding="utf-8")
+    test_sql = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_label_maturity_consistency.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "runtime_window_start_utc_expr(default_lookback_hours=72)" in test_sql
     assert "{{ runtime_utc_expr('test_window_end_utc') }}" in test_sql
@@ -331,9 +338,9 @@ def test_hotpath_tests_are_retiered_out_of_quality_gate():
     enriched_unique = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_unique_grain.sql").read_text(
         encoding="utf-8"
     )
-    weather_coverage = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_weather_context_coverage.sql").read_text(
-        encoding="utf-8"
-    )
+    weather_coverage = Path(
+        "dbt/bikeshare_dbt/tests/int_station_status_enriched_weather_context_coverage.sql"
+    ).read_text(encoding="utf-8")
 
     assert "hf_hotpath_smoke" in hotpath_unique
     assert "quality_gate" not in hotpath_unique

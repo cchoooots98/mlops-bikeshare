@@ -48,14 +48,15 @@ def handler(event, context):
         return _validate_dependencies()
 
     try:
-        import sklearn  # lazy import to ensure present
 
         from src.inference import predictor
 
         predictor.main()
         return {
             "ok": True,
-            "endpoint": os.environ.get("SM_ENDPOINT", endpoint_name(target_name=request.target_name, environment=request.environment)),
+            "endpoint": os.environ.get(
+                "SM_ENDPOINT", endpoint_name(target_name=request.target_name, environment=request.environment)
+            ),
             "prediction_target": request.target_name,
             "message": "predictor finished one cycle",
         }

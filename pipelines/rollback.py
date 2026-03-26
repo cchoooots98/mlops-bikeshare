@@ -8,7 +8,9 @@ from src.model_package import load_deployment_state, write_deployment_state
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Rollback an active deployment-state file to a previous known-good state.")
+    parser = argparse.ArgumentParser(
+        description="Rollback an active deployment-state file to a previous known-good state."
+    )
     parser.add_argument("--target-name", required=True, choices=["bikes", "docks"])
     parser.add_argument("--environment", required=True)
     parser.add_argument("--from-state", required=True, help="Active deployment state path to overwrite.")

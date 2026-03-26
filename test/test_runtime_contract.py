@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from src.config import load_runtime_settings
 from src.model_package import default_package_root_for_target
 from src.training import train

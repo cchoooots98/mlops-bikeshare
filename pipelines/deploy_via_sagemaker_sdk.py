@@ -4,14 +4,11 @@ import json
 import re
 import sys
 import time
-from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlparse
 
 import boto3
-import botocore
 from botocore.exceptions import ClientError
-
 from src.model_package import (
     build_deployment_state,
     load_package_manifest,
@@ -30,7 +27,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-uri", required=True, help="Inference container image URI")
     parser.add_argument("--package-s3-uri", default=None, help="S3 URI to a packaged model tar.gz")
     parser.add_argument("--model-data", default=None, help="Deprecated alias of --package-s3-uri")
-    parser.add_argument("--package-dir", default=None, help="Optional local model package directory for deployment metadata.")
+    parser.add_argument(
+        "--package-dir", default=None, help="Optional local model package directory for deployment metadata."
+    )
     parser.add_argument("--instance-type", required=True, help="Instance type, e.g. ml.m5.large")
     parser.add_argument("--region", required=True, help="AWS region, e.g. eu-west-3")
     parser.add_argument("--environment", default="staging", help="Deployment environment label.")
@@ -149,7 +148,9 @@ def validate_package_s3_uri(package_s3_uri: str) -> None:
         raise ValueError(f"invalid SageMaker package S3 URI: {package_s3_uri}")
 
 
-def validate_preflight(*, image_uri: str, package_s3_uri: str, package_dir: str | None, region: str) -> dict[str, str | None]:
+def validate_preflight(
+    *, image_uri: str, package_s3_uri: str, package_dir: str | None, region: str
+) -> dict[str, str | None]:
     assert_image_region_matches(image_uri, region)
     validate_package_s3_uri(package_s3_uri)
     resolved_package_dir = None

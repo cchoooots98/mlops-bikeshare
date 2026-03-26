@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import tarfile
+from pathlib import Path
 
 from pipelines import deploy_via_sagemaker_sdk, export_and_upload_model, promote, rollback
 from src.model_package import (
@@ -82,9 +82,7 @@ def test_package_manifest_round_trip_and_activation(tmp_path):
 def test_export_package_creates_tar_from_local_package(tmp_path):
     package_dir = _write_package(tmp_path)
 
-    result = export_and_upload_model.main(
-        ["--package-dir", str(package_dir), "--output-dir", str(tmp_path / "dist")]
-    )
+    result = export_and_upload_model.main(["--package-dir", str(package_dir), "--output-dir", str(tmp_path / "dist")])
 
     assert Path(result["tar_path"]).exists()
     assert result["model_name"] == "paris_model"
@@ -124,7 +122,9 @@ def test_deploy_wrapper_writes_environment_deployment_state(monkeypatch, tmp_pat
         def get_waiter(self, name):
             return _FakeWaiter()
 
-    monkeypatch.setattr(deploy_via_sagemaker_sdk.boto3, "client", lambda service_name, region_name=None: _FakeSageMaker())
+    monkeypatch.setattr(
+        deploy_via_sagemaker_sdk.boto3, "client", lambda service_name, region_name=None: _FakeSageMaker()
+    )
 
     result = deploy_via_sagemaker_sdk.main(
         [
@@ -182,7 +182,9 @@ def test_deploy_cleans_up_new_resources_on_failure(monkeypatch, tmp_path):
         def delete_model(self, **kwargs):
             calls.append(("delete_model", kwargs["ModelName"]))
 
-    monkeypatch.setattr(deploy_via_sagemaker_sdk.boto3, "client", lambda service_name, region_name=None: _FakeSageMaker())
+    monkeypatch.setattr(
+        deploy_via_sagemaker_sdk.boto3, "client", lambda service_name, region_name=None: _FakeSageMaker()
+    )
 
     try:
         deploy_via_sagemaker_sdk.main(
@@ -251,7 +253,9 @@ def test_rollback_restores_previous_deployment_state(tmp_path):
         )
     )
 
-    previous_package_dir = ensure_package_dir("paris_model_prev", "run-122", root_dir=tmp_path / "model_dir" / "packages")
+    previous_package_dir = ensure_package_dir(
+        "paris_model_prev", "run-122", root_dir=tmp_path / "model_dir" / "packages"
+    )
     (previous_package_dir / "model" / "MLmodel").write_text("artifact_path: model\n", encoding="utf-8")
     previous_manifest = {
         **load_package_manifest(package_dir),
@@ -342,7 +346,7 @@ def test_load_deployment_state_rebases_v1_linux_absolute_paths(tmp_path):
 
 
 def test_promote_reads_v1_state_and_writes_v2_portable_state(tmp_path):
-    package_dir = _write_package(tmp_path)
+    _write_package(tmp_path)
     source_state_path = tmp_path / "model_dir" / "deployments" / "bikes" / "staging.json"
     source_state_path.parent.mkdir(parents=True, exist_ok=True)
     source_state_path.write_text(

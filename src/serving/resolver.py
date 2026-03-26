@@ -7,7 +7,9 @@ from src.config import deployment_state_path, endpoint_name, resolve_target_name
 from src.model_target import target_spec_from_name
 
 
-def resolve_target(event: Mapping[str, object] | None = None, *, predict_bikes: object | None = None, target_name: str | None = None):
+def resolve_target(
+    event: Mapping[str, object] | None = None, *, predict_bikes: object | None = None, target_name: str | None = None
+):
     payload = event if isinstance(event, Mapping) else {}
     resolved_target_name = resolve_target_name(
         predict_bikes=payload.get("predict_bikes", predict_bikes),

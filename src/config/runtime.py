@@ -10,7 +10,6 @@ from typing import Sequence
 from src.config.naming import DEFAULT_DEPLOYMENT_STATE_ROOT, deployment_state_path, endpoint_name, resolve_target_name
 from src.model_target import parse_bool_value
 
-
 DEFAULT_RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[1] / "env.json"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROJECT_RUNTIME_PYTHON = "/opt/project-venv/bin/python"
@@ -139,7 +138,7 @@ def run_project_module(
     if result_prefix:
         prefixed = next((line for line in reversed(output_lines) if line.startswith(result_prefix)), None)
         if prefixed:
-            candidate = prefixed[len(result_prefix):]
+            candidate = prefixed[len(result_prefix) :]
         else:
             return None
 
@@ -204,7 +203,9 @@ def load_runtime_settings() -> RuntimeSettings:
         aws_region=str(_setting("AWS_REGION", "eu-west-3")),
         city=str(_setting("CITY", "paris")),
         bucket=str(_setting("BUCKET", "")),
-        sm_endpoint=str(_setting("SM_ENDPOINT", endpoint_name(target_name=target_name, environment=serving_environment))),
+        sm_endpoint=str(
+            _setting("SM_ENDPOINT", endpoint_name(target_name=target_name, environment=serving_environment))
+        ),
         serving_environment=serving_environment,
         target_name=target_name,
         pg_host=str(pg_host),
