@@ -183,7 +183,9 @@ def render_status_cards(
     )
 
 
-def render_artifact_issue(result: ArtifactLoadResult, *, default_message: str | None = None) -> None:
+def render_artifact_issue(
+    result: ArtifactLoadResult, *, default_message: str | None = None
+) -> None:
     if result.status == LoadStatus.OK:
         return
     message = result.message or _STATUS_MESSAGES.get(
@@ -226,7 +228,12 @@ def render_alert_banner(
 
     critical_threshold = critical_threshold_for(threshold)
     n_critical = int((predictions["score"] >= critical_threshold).sum())
-    n_alert = int(((predictions["score"] >= threshold) & (predictions["score"] < critical_threshold)).sum())
+    n_alert = int(
+        (
+            (predictions["score"] >= threshold)
+            & (predictions["score"] < critical_threshold)
+        ).sum()
+    )
     n_total = len(predictions)
 
     if n_critical > 0:
@@ -240,7 +247,9 @@ def render_alert_banner(
             f"{n_total - n_alert} stations remain below threshold."
         )
     else:
-        st.success(f"All {n_total} scored stations are below the configured alert threshold.")
+        st.success(
+            f"All {n_total} scored stations are below the configured alert threshold."
+        )
 
 
 def render_prediction_map(
@@ -260,8 +269,12 @@ def render_prediction_map(
 
     for row in station_risk_frame.itertuples():
         tooltip = f"{row.station_id} | {row.station_name}"
-        current_inventory_label = "Current bikes" if target.target_name == "bikes" else "Current docks"
-        current_inventory_value = row.bikes if target.target_name == "bikes" else row.docks
+        current_inventory_label = (
+            "Current bikes" if target.target_name == "bikes" else "Current docks"
+        )
+        current_inventory_value = (
+            row.bikes if target.target_name == "bikes" else row.docks
+        )
         popup_html = (
             "<div style='font-size:0.98rem;line-height:1.3'>"
             f"<div style='font-weight:700;margin-bottom:0.2rem'>{row.station_name}</div>"
@@ -284,7 +297,9 @@ def render_prediction_map(
             popup=folium.Popup(popup_html, max_width=240),
         ).add_to(fmap)
 
-    event = st_folium(fmap, width=None, height=440, returned_objects=["last_object_clicked_tooltip"])
+    event = st_folium(
+        fmap, width=None, height=440, returned_objects=["last_object_clicked_tooltip"]
+    )
     st.markdown(
         (
             f"<span style='color:{_CLR_CRITICAL}'>●</span> Critical "
@@ -298,7 +313,9 @@ def render_prediction_map(
         "Click a station to keep that station selected across tabs."
     )
 
-    clicked = event.get("last_object_clicked_tooltip") if isinstance(event, dict) else None
+    clicked = (
+        event.get("last_object_clicked_tooltip") if isinstance(event, dict) else None
+    )
     if clicked and " | " in clicked:
         station_id, station_name = clicked.split(" | ", 1)
         st.session_state["selected_station_id"] = station_id.strip()
@@ -317,7 +334,9 @@ def render_selected_station_summary(
         )
         return
 
-    station_name = str(selected_station.get("station_name") or selected_station.get("station_id"))
+    station_name = str(
+        selected_station.get("station_name") or selected_station.get("station_id")
+    )
     station_id = str(selected_station.get("station_id"))
     st.markdown(
         f"<div style='font-size:1.35rem;font-weight:700;line-height:1.3;margin-bottom:0.2rem'>{station_name}</div>",
@@ -333,9 +352,18 @@ def render_selected_station_summary(
         ("Current bikes", _coerce_int(selected_station.get("bikes"))),
         ("Current docks", _coerce_int(selected_station.get("docks"))),
         ("Capacity", _coerce_int(selected_station.get("capacity"))),
-        ("Current status", str(selected_station.get("current_status") or "Unavailable")),
-        (f"{target.display_name} risk", str(selected_station.get("risk_level") or "Unavailable")),
-        ("30-minute probability", f"{probability:.3f}" if probability is not None else "n/a"),
+        (
+            "Current status",
+            str(selected_station.get("current_status") or "Unavailable"),
+        ),
+        (
+            f"{target.display_name} risk",
+            str(selected_station.get("risk_level") or "Unavailable"),
+        ),
+        (
+            "30-minute probability",
+            f"{probability:.3f}" if probability is not None else "n/a",
+        ),
     ]
     summary_html = "".join(
         (
@@ -353,7 +381,9 @@ def render_selected_station_summary(
         ),
         unsafe_allow_html=True,
     )
-    st.caption(f"Latest serving snapshot: {format_utc_label(selected_station.get('dt') or selected_station.get('ts'))}")
+    st.caption(
+        f"Latest serving snapshot: {format_utc_label(selected_station.get('dt') or selected_station.get('ts'))}"
+    )
 
 
 def render_top_risk_table(
@@ -363,12 +393,28 @@ def render_top_risk_table(
     target: DashboardTargetConfig,
 ) -> None:
     st.subheader(f"Top {top_n} Stations by 30-Minute Risk")
-    st.caption(f"{target.display_name} view with current inventory and the latest serving snapshot (UTC).")
+    st.caption(
+        f"{target.display_name} view with current inventory and the latest serving snapshot (UTC)."
+    )
     if station_risk_frame.empty:
         st.warning("Risk table is unavailable.")
         return
 
-    ranked = station_risk_frame.head(top_n).copy()
+    ranked = (
+        station_risk_frame.loc[
+            pd.to_numeric(station_risk_frame["capacity"], errors="coerce")
+            .fillna(0)
+            .gt(0)
+        ]
+        .head(top_n)
+        .copy()
+    )
+    if ranked.empty:
+        st.warning(
+            "No stations with positive capacity are available for the ranked table."
+        )
+        return
+
     ranked = ranked.rename(
         columns={
             "station_name": "Station name",
@@ -512,7 +558,9 @@ def render_metric_section(
 
         for col, (metric_name, series) in zip(cols, row_items):
             spec = specs.get(metric_name)
-            display_name = spec.label if spec is not None else labels.get(metric_name, metric_name)
+            display_name = (
+                spec.label if spec is not None else labels.get(metric_name, metric_name)
+            )
             with col:
                 if series.empty or metric_name not in series.columns:
                     _render_status_chip("Unavailable", _CLR_INFO)
@@ -530,7 +578,9 @@ def render_metric_section(
                         f"{metric_empty_message(metric_name=metric_name, spec=spec, quality_result=quality_result)}"
                     )
                     continue
-                status_text, status_color = classify_metric_status(current, spec or MetricSpec(label=display_name))
+                status_text, status_color = classify_metric_status(
+                    current, spec or MetricSpec(label=display_name)
+                )
                 _render_status_chip(status_text, status_color)
                 decimals = spec.decimals if spec is not None else 3
 
@@ -540,7 +590,9 @@ def render_metric_section(
                 }
                 if delta is not None:
                     metric_kwargs["delta"] = (
-                        _format_metric_value(delta, decimals) if delta != 0 else f"{delta:+.{decimals}f}"
+                        _format_metric_value(delta, decimals)
+                        if delta != 0
+                        else f"{delta:+.{decimals}f}"
                     )
                 st.metric(**metric_kwargs)
 
@@ -589,7 +641,9 @@ def render_data_status_table(
         st.warning("No data status rows are available.")
         return
     display_frame = frame.copy()
-    display_frame["Last updated (UTC)"] = display_frame["Last updated (UTC)"].apply(format_utc_label)
+    display_frame["Last updated (UTC)"] = display_frame["Last updated (UTC)"].apply(
+        format_utc_label
+    )
     display_frame["Delay (min)"] = display_frame["Delay (min)"].apply(
         lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
     )

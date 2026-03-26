@@ -10,7 +10,11 @@ if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
 from dashboard import views  # noqa: E402
-from dashboard.contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus  # noqa: E402
+from dashboard.contracts import (  # noqa: E402
+    ArtifactLoadResult,
+    FreshnessLoadResult,
+    LoadStatus,
+)
 from dashboard.presentation import MetricSpec  # noqa: E402
 from dashboard.targeting import DashboardTargetConfig  # noqa: E402
 
@@ -42,7 +46,9 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
-    monkeypatch.setattr(views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)])
+    monkeypatch.setattr(
+        views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)]
+    )
     monkeypatch.setattr(views.st, "metric", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(views, "_render_status_chip", lambda *args, **kwargs: None)
@@ -79,8 +85,12 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
         key_prefix="prediction-quality",
         series_map=series_map,
         metric_specs={
-            "PR-AUC-24h": MetricSpec(label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55),
-            "F1-24h": MetricSpec(label="F1 (24h)", direction="higher", warning=0.55, critical=0.40),
+            "PR-AUC-24h": MetricSpec(
+                label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55
+            ),
+            "F1-24h": MetricSpec(
+                label="F1 (24h)", direction="higher", warning=0.55, critical=0.40
+            ),
         },
     )
 
@@ -90,15 +100,21 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
     ]
 
 
-def test_render_metric_section_sums_counter_style_metrics_over_visible_window(monkeypatch):
+def test_render_metric_section_sums_counter_style_metrics_over_visible_window(
+    monkeypatch,
+):
     captured_metrics = []
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
-    monkeypatch.setattr(views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)])
+    monkeypatch.setattr(
+        views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)]
+    )
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(views, "_render_status_chip", lambda *args, **kwargs: None)
-    monkeypatch.setattr(views.st, "metric", lambda **kwargs: captured_metrics.append(kwargs))
+    monkeypatch.setattr(
+        views.st, "metric", lambda **kwargs: captured_metrics.append(kwargs)
+    )
     monkeypatch.setattr(views.st, "plotly_chart", lambda *args, **kwargs: None)
 
     views.render_metric_section(
@@ -131,8 +147,12 @@ def test_render_metric_section_sums_counter_style_metrics_over_visible_window(mo
 def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
     captured = {"subheader": [], "caption": [], "key": None}
 
-    monkeypatch.setattr(views.st, "subheader", lambda text: captured["subheader"].append(text))
-    monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
+    monkeypatch.setattr(
+        views.st, "subheader", lambda text: captured["subheader"].append(text)
+    )
+    monkeypatch.setattr(
+        views.st, "caption", lambda text: captured["caption"].append(text)
+    )
     monkeypatch.setattr(
         views.st,
         "plotly_chart",
@@ -156,12 +176,16 @@ def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
         history_result=history_result,
         target=_target(),
         threshold=0.60,
-        selected_station={"station_id": "54000604", "station_name": "Ordener - Poissonniers"},
+        selected_station={
+            "station_id": "54000604",
+            "station_name": "Ordener - Poissonniers",
+        },
     )
 
     assert captured["subheader"] == ["Station History"]
     assert (
-        captured["caption"][0] == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
+        captured["caption"][0]
+        == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
     )
     assert captured["key"] == "history-chart-bikes-54000604"
 
@@ -200,7 +224,10 @@ def test_render_selected_station_summary_renders_full_status_text(monkeypatch):
 
     assert "Gergovie - Vercingetorix" in captured_markdown[0]
     assert "Low inventory now" in captured_markdown[1]
-    assert captured_caption[0] == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."
+    assert (
+        captured_caption[0]
+        == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."
+    )
 
 
 def test_render_data_status_table_formats_timestamps_and_compacts_details(monkeypatch):
@@ -208,8 +235,14 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
-    monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
-    monkeypatch.setattr(views.st, "dataframe", lambda frame, **kwargs: captured.update({"frame": frame.copy()}))
+    monkeypatch.setattr(
+        views.st, "caption", lambda text: captured["caption"].append(text)
+    )
+    monkeypatch.setattr(
+        views.st,
+        "dataframe",
+        lambda frame, **kwargs: captured.update({"frame": frame.copy()}),
+    )
     monkeypatch.setattr(
         views,
         "build_data_status_frame",
@@ -217,7 +250,9 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
             [
                 {
                     "Data source": "Prediction artifact",
-                    "Last updated (UTC)": datetime(2026, 3, 25, 23, 15, tzinfo=timezone.utc),
+                    "Last updated (UTC)": datetime(
+                        2026, 3, 25, 23, 15, tzinfo=timezone.utc
+                    ),
                     "Delay (min)": 15.0,
                     "Status": "Healthy",
                     "Expected cadence / SLA": "Prediction every 15 min; stale after 30 min",
@@ -241,5 +276,116 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
     first_row = captured["frame"].iloc[0].to_dict()
     assert first_row["Last updated (UTC)"] == "2026-03-25 23:15 UTC"
     assert first_row["Delay (min)"] == "15.0 min"
-    assert first_row["Details"] == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
+    assert (
+        first_row["Details"]
+        == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
+    )
     assert "S3 and Airflow logs" in captured["caption"][-1]
+
+
+def test_render_top_risk_table_filters_zero_capacity_rows_before_ranking(monkeypatch):
+    captured = {"frame": None}
+
+    monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        views.st,
+        "dataframe",
+        lambda frame, **kwargs: captured.update({"frame": frame.copy()}),
+    )
+
+    views.render_top_risk_table(
+        station_risk_frame=pd.DataFrame(
+            [
+                {
+                    "station_id": "1",
+                    "station_name": "Zero Capacity Highest Risk",
+                    "bikes": 0,
+                    "docks": 0,
+                    "capacity": 0,
+                    "current_status": "Stockout now",
+                    "stockout_probability": 1.0,
+                    "ts": datetime(2026, 3, 26, 21, 10, tzinfo=timezone.utc),
+                },
+                {
+                    "station_id": "2",
+                    "station_name": "Positive Capacity A",
+                    "bikes": 0,
+                    "docks": 30,
+                    "capacity": 30,
+                    "current_status": "Stockout now",
+                    "stockout_probability": 0.98,
+                    "ts": datetime(2026, 3, 26, 21, 10, tzinfo=timezone.utc),
+                },
+                {
+                    "station_id": "3",
+                    "station_name": "Positive Capacity B",
+                    "bikes": 1,
+                    "docks": 24,
+                    "capacity": 25,
+                    "current_status": "Stockout now",
+                    "stockout_probability": 0.97,
+                    "ts": datetime(2026, 3, 26, 21, 10, tzinfo=timezone.utc),
+                },
+            ]
+        ),
+        top_n=2,
+        target=_target(),
+    )
+
+    assert captured["frame"] is not None
+    assert list(captured["frame"]["Station ID"]) == ["2", "3"]
+    assert list(captured["frame"]["Capacity"]) == [30, 25]
+
+
+def test_render_top_risk_table_warns_when_no_positive_capacity_rows_remain(monkeypatch):
+    captured = {"warning": None, "frame_called": False}
+
+    monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
+    monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        views.st,
+        "warning",
+        lambda message: captured.update({"warning": message}),
+    )
+    monkeypatch.setattr(
+        views.st,
+        "dataframe",
+        lambda *args, **kwargs: captured.update({"frame_called": True}),
+    )
+
+    views.render_top_risk_table(
+        station_risk_frame=pd.DataFrame(
+            [
+                {
+                    "station_id": "1",
+                    "station_name": "Zero Capacity A",
+                    "bikes": 0,
+                    "docks": 0,
+                    "capacity": 0,
+                    "current_status": "Stockout now",
+                    "stockout_probability": 1.0,
+                    "ts": datetime(2026, 3, 26, 21, 10, tzinfo=timezone.utc),
+                },
+                {
+                    "station_id": "2",
+                    "station_name": "Zero Capacity B",
+                    "bikes": 0,
+                    "docks": 0,
+                    "capacity": 0,
+                    "current_status": "Stockout now",
+                    "stockout_probability": 0.95,
+                    "ts": datetime(2026, 3, 26, 21, 10, tzinfo=timezone.utc),
+                },
+            ]
+        ),
+        top_n=2,
+        target=_target(),
+    )
+
+    assert (
+        captured["warning"]
+        == "No stations with positive capacity are available for the ranked table."
+    )
+    assert captured["frame_called"] is False
