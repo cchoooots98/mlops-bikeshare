@@ -40,6 +40,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -r app/requirements-app.txt
           pip install ruff==0.13.0 black==25.1.0 pytest pytest-cov bandit pip-audit
 
       - name: Ruff (auto-fix)
@@ -87,7 +88,7 @@ jobs:
       - name: Prove we assumed role
         run: aws sts get-caller-identity
 
-  # --- Terraform validate on PR (local backend) and on main (remote backend) ---
+  # --- Terraform validate: bootstrap on PR/push, live only when main can assume AWS role ---
   terraform-validate:
     runs-on: ubuntu-latest
     steps:
@@ -107,7 +108,17 @@ jobs:
           terraform -chdir=infra/terraform/bootstrap init -backend=false
           terraform -chdir=infra/terraform/bootstrap validate
 
+      - name: Configure AWS credentials for live Terraform validate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-tf-${{ github.run_id }}
+          role-duration-seconds: 3600
+
       - name: Terraform validate (live)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           terraform -chdir=infra/terraform/live init -backend=false
           terraform -chdir=infra/terraform/live validate
