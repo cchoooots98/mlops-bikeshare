@@ -22,144 +22,75 @@
 
 ## Script
 
-### Scene 1 — Opening [0:00 – 0:25]
+### Scene 1 — Opening [0:00 – 0:20]
 
-**Screen**: Live Ops tab with the full Paris station map visible. Status cards at the top showing endpoint, model version, and latest prediction time.
+**Screen**: Live Ops tab with the full Paris station map visible. Status cards at the top.
 
-> *"This is a real-time MLOps platform I built that predicts bikeshare station stockouts 30 minutes into the future — for over 1,400 Paris Velib stations."*
+> *"This is a real-time MLOps platform predicting bikeshare stockouts 30 minutes ahead for 1,400 Paris stations. End-to-end: live GBFS and weather ingestion, dbt feature engineering, XGBoost on SageMaker — all orchestrated by Airflow."*
 
-**Action**: Slowly move the cursor across the top status cards (Pipeline state → Prediction target → Active endpoint → Active model → Latest prediction).
-
-> *"The system runs end-to-end: live data ingestion every 5 minutes from the Velib GBFS feed and OpenWeather API, dbt-powered feature engineering in PostgreSQL, XGBoost models served through SageMaker, and continuous quality monitoring — all orchestrated by Airflow on EC2."*
-
-**Action**: As you say "orchestrated by Airflow", gesture briefly toward the "Healthy" pipeline state badge.
-
-> *"Let me walk you through the live dashboard."*
+**Action**: Point to the PRODUCTION environment badge, then gesture across the status cards (Pipeline state → Prediction target → Active endpoint → Active model → Latest prediction).
 
 ---
 
-### Scene 2 — Live Ops Map [0:25 – 0:55]
-**Action**: Briefly click the sidebar and switch the prediction target to **Dock stockout**, then switch back to **Bike stockout**.
+### Scene 2 — Live Ops Map [0:20 – 0:55]
 
-> *"The platform supports dual targets — bikes and docks each have independent models, endpoints, and quality metrics. I can switch between them in the sidebar."*
+**Action**: Switch prediction target to **Dock stockout**, then back to **Bike stockout**.
 
+> *"The platform supports dual targets — bikes and docks each have independent models and endpoints. I can switch between them in the sidebar."*
 
 **Screen**: The Folium map with colored station markers.
 
-> *"Each dot on this map is a Velib station. The color represents its current stockout risk: red means high probability of running out of bikes in the next 30 minutes, orange is elevated risk, and teal is normal."*
+**Action**: Click on a **red** marker, then a **teal** marker.
 
-**Action**: Click on a **red** station marker to open the popup (shows station name, ID, current bikes or docks depending on the active target, capacity, status, risk level, probability score, and last updated timestamp).
+> *"Each marker shows stockout risk — red is critical, orange is alert, teal is normal. Clicking a station shows its inventory, capacity, and predicted 30-minute probability."*
 
-> *"When I click on a station, I can see its current inventory, capacity, and the model's predicted stockout probability. This station has [read the probability] — it is flagged as critical."*
+**Action**: Point to the alert banner above the tab bar, then scroll down to the top-risk table.
 
-**Action**: Click on a **teal** station for contrast.
-
-> *"Compare that to this station — plenty of bikes, low risk score. The predictions refresh every 15 minutes from the production SageMaker endpoint."*
-
-**Action**: Point to the alert banner that sits above the tab bar (it is always visible at the top of the page, not inside the map tab).
-
-> *"The alert banner above the tabs summarises the current risk picture across all scored stations."*
-
-**Action**: Scroll down inside the Live Ops tab to reveal the Selected Station Summary cards and then the Top-N risk table below them.
-
-> *"Below the map, a station summary card shows the currently selected station's live inventory at a glance. Further down, the top-risk table ranks the stations most likely to experience a stockout right now. An operations team would use this to prioritize where to send rebalancing trucks."*
+> *"The alert banner summarises risk across all stations. Below, the top-risk table tells an operations team exactly where to send rebalancing trucks."*
 
 ---
 
-### Scene 3 — Station Deep Dive [0:55 – 1:25]
+### Scene 3 — Station History [0:55 – 1:20]
 
-**Action**: Click on a station marker (preferably one with some variation in its recent history — not flat at zero). The Station History section should update.
+**Action**: Click on a station marker with visible history variation, then click the **Station History** tab.
 
-> *"If I click on a specific station..."*
-
-**Action**: Click the **Station History** tab at the top.
-
-> *"...I get its prediction history over time. This chart shows the model's 30-minute stockout probability for the last 24 snapshots."*
-
-**Screen**: Station History chart with the time-series line and the dashed orange threshold line.
-
-> *"The dashed orange line is the model-specific alert threshold — selected during training by maximizing F-beta score to balance precision and recall. Anything above this line would trigger an alert."*
-
-**Action**: Point the cursor along the time-series line, following its trajectory.
-
-> *"You can see the score fluctuating with demand patterns — rising during commute hours and settling down at quieter times. This time-series view helps operators understand not just the current risk, but the trend."*
+> *"Selecting a station and switching to Station History shows its 30-minute stockout probability across the last 24 snapshots. The dashed orange line is the model's alert threshold — scores above it trigger an alert."*
 
 ---
 
-### Scene 4 — Prediction Quality [1:25 – 1:55]
+### Scene 4 — Prediction Quality [1:20 – 1:50]
 
-**Action**: Click the **Prediction Quality** tab.
+**Action**: Click the **Prediction Quality** tab. Point to the PR-AUC card, then the Prediction Heartbeat card.
 
-**Screen**: The quality status panel (green banner if quality data is available) and the metric cards below it.
-
-> *"The Prediction Quality tab shows how the model is actually performing against ground truth. The system runs a quality backfill every 15 minutes — once the real outcome is known after the 30-minute horizon, it scores the predictions."*
-
-**Action**: Point to the PR-AUC card, then the F1 card.
-
-> *"PR-AUC is our primary metric — currently at [read the value]. F1 at threshold is [read the value]. Both are within healthy bounds."*
-
-**Action**: Point to the Prediction Heartbeat card.
-
-> *"The Prediction Heartbeat is the total count of successful quality checks in the last 24 hours — confirming the monitoring loop is running continuously."*
-
-**Action**: Point to the Threshold Hit Rate and Samples cards.
-
-> *"Threshold Hit Rate shows what fraction of predictions exceed the alert boundary — about [read the value], which tells us roughly how often the model flags a station. And the Samples count confirms we are scoring all [read value] station-windows per day."*
-
+> *"Prediction Quality shows actual model performance against ground truth. A quality backfill runs every 15 minutes once the 30-minute label window matures. PR-AUC is the primary metric — currently [read value]. Prediction Heartbeat confirms the monitoring loop ran [read value] times in the last 24 hours."*
 
 ---
 
-### Scene 5 — System Health [1:55 – 2:25]
+### Scene 5 — System Health [1:50 – 2:20]
 
-**Action**: Click the **System Health** tab.
+**Action**: Click the **System Health** tab. Point to the ModelLatency card, then to the PSI cards.
 
-**Screen**: The metric grid showing ModelLatency, Invocation errors, Invocations, Prediction Heartbeat, and PSI metrics.
+**Screen**: Metric grid — top row: ModelLatency, Invocation5XXErrors, Invocation4XXErrors; middle row: Invocations, Prediction Heartbeat, PSI Overall; bottom row: PSI Core, PSI Weather.
 
-> *"System Health pulls CloudWatch metrics directly. The top row shows SageMaker endpoint performance."*
-
-**Action**: Point to the ModelLatency card.
-
-> *"Model latency p95 is [read value] milliseconds — well under our 200-millisecond SLA. Zero 5xx errors, zero 4xx errors."*
-
-**Action**: Point to the Invocations card.
-
-> *"The Invocations count confirms the endpoint is receiving traffic from the Airflow serving DAG every 15 minutes."*
-
-**Action**: Point to the PSI cards (PSI Overall, PSI Core, PSI Weather).
-
-> *"The bottom row tracks feature drift using Population Stability Index, split into core features and weather features. PSI Core at [read value] is well below the 0.20 warning threshold. Weather PSI is advisory — it naturally fluctuates with the seasons but does not trigger alerts on its own."*
-
-**Action**: Point to the Prediction Heartbeat card.
-
-> *"Behind the scenes, CloudWatch alarms monitor all of these metrics. If latency spikes, errors appear, or quality degrades, SNS sends an alert before the operator notices."*
+> *"System Health pulls CloudWatch directly. Latency p95 is [read value] ms — within the 200 ms SLA, zero errors. PSI Core at [read value] is below the 0.20 drift threshold; weather PSI is advisory. CloudWatch alarms cover all of this and page via SNS."*
 
 ---
 
-### Scene 6 — Data Pipeline Status [2:25 – 2:50]
+### Scene 6 — Data Status [2:20 – 2:45]
 
-**Action**: Click the **Data Status** tab.
+**Action**: Click the **Data Status** tab. Point to each row in the table.
 
-**Screen**: The compact freshness table showing Source freshness, Prediction artifact, Quality artifact, and Feature freshness.
+**Screen**: Compact freshness table — four rows in order: Prediction artifact, Quality artifact, Source freshness, Feature freshness.
 
-> *"The Data Status tab monitors the full data pipeline end-to-end."*
-
-**Action**: Point to each row in the table.
-
-> *"Each row shows either upstream source freshness or pipeline freshness. Source freshness tracks whether GBFS itself is advancing. Feature, prediction, and quality use schedule-aware lag plus missed-cycle severity, so operators can tell the difference between natural latency and a stage that is genuinely behind schedule."*
-
-**Action**: Point to the Status column.
-
-> *"This closes the observability loop: data freshness feeds model freshness feeds prediction freshness. Any break in the chain — a failed GBFS fetch, a stuck dbt build, a SageMaker timeout — surfaces here immediately."*
+> *"Data Status closes the loop. Each row tracks a pipeline stage — predictions, quality, source, and feature freshness — so any break in the chain surfaces here immediately."*
 
 ---
 
-### Scene 7 — Closing [2:50 – 3:00]
+### Scene 7 — Closing [2:45 – 3:00]
 
-**Action**: Click back to the **Live Ops** tab for a clean closing frame. The full Paris map with colored stations is visible.
+**Action**: Click back to the **Live Ops** tab.
 
-> *"That is the system: live ingestion, automated feature engineering, ML serving with continuous monitoring, and a single dashboard that ties operations, model quality, and data health together."*
-
-> *"The full architecture, model cards, deployment guide, and operations runbook are all in the repository. Thanks for watching."*
+> *"Live ingestion, automated features, ML serving, continuous monitoring — all observable from a single dashboard. Full architecture and runbook are in the repository. Thanks for watching."*
 
 **Action**: Hold on the Live Ops map for 2–3 seconds as a clean closing frame.
 
