@@ -539,7 +539,7 @@ def render_quality_status_panel(
     else:
         st.info(f"{title} {body}")
     st.caption(
-        "Expected lag: 30-minute label maturity + 7-minute backfill start delay, so quality evidence normally trails predictions."
+        "Expected lag: 30-minute label maturity plus the next scheduled quality backfill cycle, so quality evidence normally trails predictions."
     )
 
 

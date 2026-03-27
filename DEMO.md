@@ -100,7 +100,7 @@ Freshness checks for every data source against operator SLA windows.
 
 | Layer | Technology |
 |-------|-----------|
-| Data ingestion | Python 3.11, GBFS API (5-min), OpenWeather API 3.0 (1-hr) |
+| Data ingestion | Python 3.11, GBFS API (5-min), OpenWeather API 3.0 (10-min ingest, +60 min hourly forecast window) |
 | Data warehouse | PostgreSQL 15, dbt 1.10 (star schema, 14 models, SCD2 dimensions) |
 | Feature store | 30 features: temporal, inventory, rolling windows, neighbor graphs, weather |
 | Orchestration | Apache Airflow 2.10.3, CeleryExecutor, Redis, tiered workers |
@@ -120,7 +120,7 @@ Freshness checks for every data source against operator SLA windows.
 ```mermaid
 flowchart LR
     GBFS["GBFS API\n5-min cadence"] --> STG["Staging Tables\n(public schema)"]
-    Weather["OpenWeather\n1-hr cadence"] --> STG
+    Weather["OpenWeather\n10-min cadence"] --> STG
     Holidays["Holidays\nyearly"] --> STG
     STG --> dbt["dbt 1.10\n14 models"] --> FS["Feature Store\n30 features + labels"]
     FS --> Offline["Offline Training\n7-day rolling window"]

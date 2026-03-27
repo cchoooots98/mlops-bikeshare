@@ -126,7 +126,7 @@ flowchart TD
 flowchart LR
     subgraph APIs["External APIs"]
         A1["GBFS\n(5 min)"]
-        A2["OpenWeather\n(1 hr)"]
+        A2["OpenWeather\n(10 min)"]
         A3["Holidays\n(yearly)"]
     end
 
