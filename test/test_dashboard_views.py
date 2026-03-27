@@ -46,9 +46,7 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)]
-    )
+    monkeypatch.setattr(views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)])
     monkeypatch.setattr(views.st, "metric", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(views, "_render_status_chip", lambda *args, **kwargs: None)
@@ -85,12 +83,8 @@ def test_render_metric_section_uses_unique_plotly_keys(monkeypatch):
         key_prefix="prediction-quality",
         series_map=series_map,
         metric_specs={
-            "PR-AUC-24h": MetricSpec(
-                label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55
-            ),
-            "F1-24h": MetricSpec(
-                label="F1 (24h)", direction="higher", warning=0.55, critical=0.40
-            ),
+            "PR-AUC-24h": MetricSpec(label="PR-AUC (24h)", direction="higher", warning=0.70, critical=0.55),
+            "F1-24h": MetricSpec(label="F1 (24h)", direction="higher", warning=0.55, critical=0.40),
         },
     )
 
@@ -107,14 +101,10 @@ def test_render_metric_section_sums_counter_style_metrics_over_visible_window(
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "caption", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)]
-    )
+    monkeypatch.setattr(views.st, "columns", lambda count: [_DummyColumn() for _ in range(count)])
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(views, "_render_status_chip", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        views.st, "metric", lambda **kwargs: captured_metrics.append(kwargs)
-    )
+    monkeypatch.setattr(views.st, "metric", lambda **kwargs: captured_metrics.append(kwargs))
     monkeypatch.setattr(views.st, "plotly_chart", lambda *args, **kwargs: None)
 
     views.render_metric_section(
@@ -147,12 +137,8 @@ def test_render_metric_section_sums_counter_style_metrics_over_visible_window(
 def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
     captured = {"subheader": [], "caption": [], "key": None}
 
-    monkeypatch.setattr(
-        views.st, "subheader", lambda text: captured["subheader"].append(text)
-    )
-    monkeypatch.setattr(
-        views.st, "caption", lambda text: captured["caption"].append(text)
-    )
+    monkeypatch.setattr(views.st, "subheader", lambda text: captured["subheader"].append(text))
+    monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
     monkeypatch.setattr(
         views.st,
         "plotly_chart",
@@ -184,8 +170,7 @@ def test_render_history_chart_uses_unique_key_and_clean_text(monkeypatch):
 
     assert captured["subheader"] == ["Station History"]
     assert (
-        captured["caption"][0]
-        == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
+        captured["caption"][0] == "Station: Ordener - Poissonniers (54000604). Forecast horizon: next 30 minutes (UTC)."
     )
     assert captured["key"] == "history-chart-bikes-54000604"
 
@@ -224,10 +209,7 @@ def test_render_selected_station_summary_renders_full_status_text(monkeypatch):
 
     assert "Gergovie - Vercingetorix" in captured_markdown[0]
     assert "Low inventory now" in captured_markdown[1]
-    assert (
-        captured_caption[0]
-        == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."
-    )
+    assert captured_caption[0] == "Station ID: 54000604. Forecast horizon: next 30 minutes (UTC)."
 
 
 def test_render_data_status_table_formats_timestamps_and_compacts_details(monkeypatch):
@@ -235,9 +217,7 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        views.st, "caption", lambda text: captured["caption"].append(text)
-    )
+    monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
     monkeypatch.setattr(
         views.st,
         "dataframe",
@@ -250,9 +230,7 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
             [
                 {
                     "Data source": "Prediction artifact",
-                    "Last updated (UTC)": datetime(
-                        2026, 3, 25, 23, 15, tzinfo=timezone.utc
-                    ),
+                    "Last updated (UTC)": datetime(2026, 3, 25, 23, 15, tzinfo=timezone.utc),
                     "Delay (min)": 15.0,
                     "Status": "Healthy",
                     "Expected cadence / SLA": "Prediction every 15 min; stale after 30 min",
@@ -276,10 +254,7 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
     first_row = captured["frame"].iloc[0].to_dict()
     assert first_row["Last updated (UTC)"] == "2026-03-25 23:15 UTC"
     assert first_row["Delay (min)"] == "15.0 min"
-    assert (
-        first_row["Details"]
-        == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
-    )
+    assert first_row["Details"] == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
     assert "S3 and Airflow logs" in captured["caption"][-1]
 
 
@@ -384,8 +359,5 @@ def test_render_top_risk_table_warns_when_no_positive_capacity_rows_remain(monke
         target=_target(),
     )
 
-    assert (
-        captured["warning"]
-        == "No stations with positive capacity are available for the ranked table."
-    )
+    assert captured["warning"] == "No stations with positive capacity are available for the ranked table."
     assert captured["frame_called"] is False
