@@ -213,11 +213,17 @@ def test_render_selected_station_summary_renders_full_status_text(monkeypatch):
 
 
 def test_render_data_status_table_formats_timestamps_and_compacts_details(monkeypatch):
-    captured = {"frame": None, "caption": []}
+    captured = {"frame": None, "caption": [], "expanders": []}
 
     monkeypatch.setattr(views.st, "subheader", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(views.st, "caption", lambda text: captured["caption"].append(text))
+    monkeypatch.setattr(views.st, "markdown", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        views.st,
+        "expander",
+        lambda label: captured["expanders"].append(label) or _DummyColumn(),
+    )
     monkeypatch.setattr(
         views.st,
         "dataframe",
@@ -260,12 +266,12 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
 
     assert captured["frame"] is not None
     first_row = captured["frame"].iloc[0].to_dict()
-    assert first_row["Last updated (UTC)"] == "2026-03-25 23:15 UTC"
-    assert first_row["Delay (min)"] == "15.0 min"
-    assert first_row["Expected lag (min)"] == "20.0 min"
-    assert first_row["Excess lag (min)"] == "0.0 min"
-    assert first_row["Details"] == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
-    assert "natural delay" in captured["caption"][-1]
+    assert first_row["Updated (UTC)"] == "2026-03-25 23:15 UTC"
+    assert first_row["Lag"] == "15.0 min"
+    assert first_row["Expected"] == "20.0 min"
+    assert first_row["Excess"] == "0.0 min"
+    assert "row details" in captured["caption"][-1].lower()
+    assert captured["expanders"][0].startswith("Prediction artifact")
 
 
 def test_render_top_risk_table_filters_zero_capacity_rows_before_ranking(monkeypatch):

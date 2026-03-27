@@ -666,11 +666,37 @@ def render_data_status_table(
         lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
     )
     display_frame["Details"] = display_frame["Details"].apply(_format_detail_text)
-    st.dataframe(
-        display_frame,
-        width="stretch",
-        hide_index=True,
+    compact_frame = (
+        display_frame[
+            [
+                "Data source",
+                "Last updated (UTC)",
+                "Delay (min)",
+                "Expected lag (min)",
+                "Excess lag (min)",
+                "Status",
+            ]
+        ]
+        .rename(
+            columns={
+                "Last updated (UTC)": "Updated (UTC)",
+                "Delay (min)": "Lag",
+                "Expected lag (min)": "Expected",
+                "Excess lag (min)": "Excess",
+            }
+        )
     )
+    st.dataframe(compact_frame, width="stretch", hide_index=True)
     st.caption(
         "Expected lag captures the natural delay from the DAG schedule; excess lag shows how far the data source is truly behind."
     )
+    st.caption("Open the row details below for the schedule rule, operator meaning, and artifact path summary.")
+
+    for row in display_frame.to_dict("records"):
+        expander_label = f"{row['Data source']} - {row['Status']} - {row['Last updated (UTC)']}"
+        with st.expander(expander_label):
+            st.markdown(f"**Schedule rule:** {row['Expected cadence / SLA']}")
+            st.markdown(f"**Operator meaning:** {row['Operator meaning']}")
+            if row["Details"] != "-":
+                st.markdown(f"**Artifact / loader detail:** `{row['Details']}`")
+
