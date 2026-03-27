@@ -13,6 +13,8 @@ if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
 from src.orchestration.dbt_tasks import DEFAULT_WEATHER_REFRESH_SELECT, parse_select_models, run_model_build
+from external_task_utils import execution_date_fn_for_schedule
+from schedule_defs import DBT_WEATHER_REFRESH_10MIN_SCHEDULE, WEATHER_10MIN_SCHEDULE
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -57,7 +59,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_weather_refresh_10min",
     start_date=start,
-    schedule="7-59/10 * * * *",
+    schedule=DBT_WEATHER_REFRESH_10MIN_SCHEDULE,
     catchup=False,
     max_active_runs=1,
     default_args=default_args,
@@ -69,7 +71,7 @@ with DAG(
         external_task_id=None,
         allowed_states=["success"],
         failed_states=["failed"],
-        execution_delta=timedelta(minutes=6),
+        execution_date_fn=execution_date_fn_for_schedule(WEATHER_10MIN_SCHEDULE),
         check_existence=True,
         mode="reschedule",
         poke_interval=30,

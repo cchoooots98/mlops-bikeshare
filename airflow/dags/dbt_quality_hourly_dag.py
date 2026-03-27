@@ -92,7 +92,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_quality_hourly",
     start_date=start,
-    schedule="10 * * * *",
+    schedule="13 * * * *",
     catchup=False,
     max_active_runs=1,
     default_args=default_args,

@@ -21,6 +21,8 @@ from src.orchestration.dbt_tasks import (
     run_feature_model_build,
     run_feature_smoke_tests,
 )
+from external_task_utils import execution_date_fn_for_schedule
+from schedule_defs import DBT_FEATURE_BUILD_5MIN_SCHEDULE, DBT_STATION_STATUS_HOTPATH_5MIN_SCHEDULE
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -116,7 +118,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_feature_build_5min",
     start_date=start,
-    schedule="4-59/5 * * * *",
+    schedule=DBT_FEATURE_BUILD_5MIN_SCHEDULE,
     catchup=False,
     max_active_runs=1,
     default_args=default_args,
@@ -128,7 +130,7 @@ with DAG(
         external_task_id=None,
         allowed_states=["success"],
         failed_states=["failed"],
-        execution_delta=timedelta(minutes=2),
+        execution_date_fn=execution_date_fn_for_schedule(DBT_STATION_STATUS_HOTPATH_5MIN_SCHEDULE),
         check_existence=True,
         mode="reschedule",
         poke_interval=30,

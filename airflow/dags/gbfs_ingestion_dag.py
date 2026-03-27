@@ -13,6 +13,7 @@ if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
 from src.config import run_project_module
+from schedule_defs import GBFS_STATION_INFORMATION_DAILY_SCHEDULE, GBFS_STATION_STATUS_5MIN_SCHEDULE
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -122,7 +123,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="gbfs_station_information_daily",
     start_date=start,
-    schedule="2 2 * * *",
+    schedule=GBFS_STATION_INFORMATION_DAILY_SCHEDULE,
     catchup=False,
     default_args=default_args,
     tags=["gbfs", "paris", "daily"],
@@ -142,7 +143,7 @@ with DAG(
 with DAG(
     dag_id="gbfs_station_status_5min",
     start_date=start,
-    schedule="*/5 * * * *",
+    schedule=GBFS_STATION_STATUS_5MIN_SCHEDULE,
     catchup=False,
     default_args=default_args,
     tags=["gbfs", "paris", "5min"],

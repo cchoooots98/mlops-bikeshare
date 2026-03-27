@@ -13,6 +13,7 @@ if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
 from src.config import run_project_module
+from schedule_defs import WEATHER_10MIN_SCHEDULE
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -88,7 +89,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="weather_10min",
     start_date=start,
-    schedule="1-59/10 * * * *",
+    schedule=WEATHER_10MIN_SCHEDULE,
     catchup=False,
     max_active_runs=1,
     default_args=default_args,

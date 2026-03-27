@@ -14,14 +14,16 @@ if AIRFLOW_HOME not in sys.path:
 
 from src.config import run_project_module
 from src.config.naming import deployment_state_path, endpoint_name
+from external_task_utils import execution_date_fn_for_schedule
+from schedule_defs import (
+    SERVING_METRICS_SCHEDULE,
+    SERVING_PREDICTION_SCHEDULE,
+    SERVING_PSI_SCHEDULE,
+    SERVING_QUALITY_SCHEDULE,
+)
 
 
 TARGETS = ("bikes", "docks")
-PREDICTION_CADENCE_MINUTES = 15
-QUALITY_LABEL_MATURITY_MINUTES = 30
-QUALITY_START_LAG_MINUTES = 7
-QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)
-METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)
 TIER1_QUEUE = "tier1"
 TIER2_QUEUE = "tier2"
 SERVING_PREDICTION_POOL = "serving_prediction_pool"
@@ -31,10 +33,6 @@ DEFAULT_ARGS = {
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
-PREDICTION_SCHEDULE = "1-59/15 * * * *"
-QUALITY_SCHEDULE = "8-59/15 * * * *"
-METRICS_SCHEDULE = "43 * * * *"
-PSI_SCHEDULE = "3 * * * *"
 
 
 def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
@@ -181,7 +179,7 @@ def build_serving_dags(
     with DAG(
         dag_id=prediction_dag_id,
         start_date=start,
-        schedule=PREDICTION_SCHEDULE,
+        schedule=SERVING_PREDICTION_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -199,7 +197,7 @@ def build_serving_dags(
     with DAG(
         dag_id=quality_dag_id,
         start_date=start,
-        schedule=QUALITY_SCHEDULE,
+        schedule=SERVING_QUALITY_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -213,7 +211,7 @@ def build_serving_dags(
                 allowed_states=["success"],
                 failed_states=["failed", "upstream_failed"],
                 check_existence=True,
-                execution_delta=QUALITY_TO_PREDICTION_DELTA,
+                execution_date_fn=execution_date_fn_for_schedule(SERVING_PREDICTION_SCHEDULE),
                 mode="reschedule",
                 poke_interval=60,
                 timeout=15 * 60,
@@ -231,7 +229,7 @@ def build_serving_dags(
     with DAG(
         dag_id=metrics_dag_id,
         start_date=start,
-        schedule=METRICS_SCHEDULE,
+        schedule=SERVING_METRICS_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
@@ -245,7 +243,7 @@ def build_serving_dags(
                 allowed_states=["success"],
                 failed_states=["failed", "upstream_failed"],
                 check_existence=True,
-                execution_delta=METRICS_TO_QUALITY_DELTA,
+                execution_date_fn=execution_date_fn_for_schedule(SERVING_QUALITY_SCHEDULE),
                 mode="reschedule",
                 poke_interval=60,
                 timeout=20 * 60,
@@ -263,7 +261,7 @@ def build_serving_dags(
     with DAG(
         dag_id=psi_dag_id,
         start_date=start,
-        schedule=PSI_SCHEDULE,
+        schedule=SERVING_PSI_SCHEDULE,
         catchup=False,
         max_active_runs=1,
         default_args=DEFAULT_ARGS,
