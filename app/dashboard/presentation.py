@@ -362,18 +362,32 @@ def assess_schedule_freshness(
     latest_dt: datetime | None,
     policy: LatencyPolicy,
     now_utc: datetime,
+    upstream_latest_dt: datetime | None = None,
+    upstream_label: str | None = None,
 ) -> LatencyAssessment:
-    expected_dt = expected_latest_dt_for_policy(now_utc=now_utc, policy=policy)
+    scheduled_expected_dt = expected_latest_dt_for_policy(now_utc=now_utc, policy=policy)
+    expected_dt = scheduled_expected_dt
+    if upstream_latest_dt is not None and upstream_latest_dt < expected_dt:
+        expected_dt = upstream_latest_dt
     expected_delay_minutes = round((now_utc - expected_dt).total_seconds() / 60, 1)
+    scheduled_delay_minutes = round((now_utc - scheduled_expected_dt).total_seconds() / 60, 1)
     observed_delay_minutes = _artifact_delay_minutes(latest_dt=latest_dt, now_utc=now_utc)
+    capped_by_upstream = upstream_latest_dt is not None and expected_dt != scheduled_expected_dt
     if latest_dt is None:
+        operator_meaning = "No timestamp is available for schedule-aware freshness checks."
+        if capped_by_upstream and upstream_label is not None:
+            operator_meaning += (
+                f" The schedule would naturally imply {scheduled_delay_minutes:.1f} min of lag, "
+                f"but the effective expectation is capped by latest {upstream_label.lower()} "
+                f"at {format_utc_label(upstream_latest_dt)}."
+            )
         return LatencyAssessment(
             expected_dt=expected_dt,
             observed_delay_minutes=None,
             expected_delay_minutes=expected_delay_minutes,
             excess_delay_minutes=None,
             status="Critical",
-            operator_meaning="No timestamp is available for schedule-aware freshness checks.",
+            operator_meaning=operator_meaning,
         )
 
     excess_delay_minutes = round(max(0.0, (expected_dt - latest_dt).total_seconds() / 60), 1)
@@ -394,10 +408,18 @@ def assess_schedule_freshness(
         status = "Healthy"
         summary = "matches the current schedule"
 
-    operator_meaning = (
-        f"{policy.label} {summary}. Observed lag is {observed_delay_minutes:.1f} min; "
-        f"the schedule naturally implies {expected_delay_minutes:.1f} min at this moment."
-    )
+    if capped_by_upstream and upstream_label is not None:
+        operator_meaning = (
+            f"{policy.label} {summary}. Observed lag is {observed_delay_minutes:.1f} min; "
+            f"the schedule naturally implies {scheduled_delay_minutes:.1f} min, but the effective expectation "
+            f"is capped by latest {upstream_label.lower()} at {format_utc_label(upstream_latest_dt)} "
+            f"for an expected lag of {expected_delay_minutes:.1f} min."
+        )
+    else:
+        operator_meaning = (
+            f"{policy.label} {summary}. Observed lag is {observed_delay_minutes:.1f} min; "
+            f"the schedule naturally implies {expected_delay_minutes:.1f} min at this moment."
+        )
     if excess_delay_minutes > 0:
         operator_meaning += f" Excess lag vs schedule: {excess_delay_minutes:.1f} min."
 
@@ -462,11 +484,40 @@ def build_data_status_frame(
 ) -> pd.DataFrame:
     now_utc = now_utc or datetime.now(timezone.utc)
     rows: list[dict[str, object]] = []
+    freshness = freshness_result.data.copy()
+    latest_source_dt: datetime | None = None
+    latest_feature_dt: datetime | None = None
+
+    if not freshness.empty:
+        freshness["Last updated (UTC)"] = freshness["latest_dt_str"].apply(_parse_dashboard_timestamp)
+        freshness["Delay (min)"] = (now_utc - freshness["Last updated (UTC)"]).dt.total_seconds().div(60).round(1)
+        freshness["Expected lag (min)"] = float("nan")
+        freshness["Excess lag (min)"] = float("nan")
+        freshness["Expected cadence / SLA"] = ""
+        if "freshness_type" not in freshness.columns:
+            freshness["freshness_type"] = "feature"
+        else:
+            freshness["freshness_type"] = freshness["freshness_type"].fillna("feature").astype(str)
+
+        ok_freshness = freshness[freshness["loader_status"] == "ok"]
+        if not ok_freshness.empty:
+            source_candidates = ok_freshness.loc[ok_freshness["freshness_type"] == "source", "Last updated (UTC)"]
+            feature_candidates = ok_freshness.loc[ok_freshness["freshness_type"] == "feature", "Last updated (UTC)"]
+            if not source_candidates.empty:
+                latest_source_value = source_candidates.max()
+                if not pd.isna(latest_source_value):
+                    latest_source_dt = pd.Timestamp(latest_source_value).to_pydatetime()
+            if not feature_candidates.empty:
+                latest_feature_value = feature_candidates.max()
+                if not pd.isna(latest_feature_value):
+                    latest_feature_dt = pd.Timestamp(latest_feature_value).to_pydatetime()
 
     prediction_assessment = assess_schedule_freshness(
         latest_dt=prediction_result.latest_dt,
         policy=PREDICTION_ARTIFACT_POLICY,
         now_utc=now_utc,
+        upstream_latest_dt=latest_feature_dt,
+        upstream_label="Feature freshness",
     )
     if prediction_result.status == LoadStatus.OK:
         prediction_status = prediction_assessment.status
@@ -499,6 +550,8 @@ def build_data_status_frame(
         latest_dt=quality_result.latest_dt,
         policy=QUALITY_ARTIFACT_POLICY,
         now_utc=now_utc,
+        upstream_latest_dt=prediction_result.latest_dt,
+        upstream_label="Prediction artifact",
     )
     if quality_result.status == LoadStatus.OK:
         quality_status = quality_assessment.status
@@ -510,8 +563,8 @@ def build_data_status_frame(
             and prediction_assessment.observed_delay_minutes <= QUALITY_ARTIFACT_POLICY.natural_lag_upper_minutes
         ):
             quality_status, quality_meaning = (
-                "Warning",
-                "Quality output is still within the 30-minute label maturity plus backfill window.",
+                "Healthy",
+                "No quality artifact is expected yet because predictions are still within the 30-minute label maturity plus backfill window.",
             )
         else:
             quality_status, quality_meaning = (
@@ -537,14 +590,7 @@ def build_data_status_frame(
         }
     )
 
-    freshness = freshness_result.data.copy()
     if not freshness.empty:
-        freshness["Last updated (UTC)"] = freshness["latest_dt_str"].apply(_parse_dashboard_timestamp)
-        freshness["Delay (min)"] = (now_utc - freshness["Last updated (UTC)"]).dt.total_seconds().div(60).round(1)
-        freshness["Expected lag (min)"] = float("nan")
-        freshness["Excess lag (min)"] = float("nan")
-        freshness["Expected cadence / SLA"] = ""
-
         def _freshness_row(row: pd.Series) -> tuple[str, str, float, float, str]:
             if row["loader_status"] != "ok":
                 return (
@@ -572,6 +618,8 @@ def build_data_status_frame(
                 latest_dt=row["Last updated (UTC)"],
                 policy=FEATURE_FRESHNESS_POLICY,
                 now_utc=now_utc,
+                upstream_latest_dt=latest_source_dt,
+                upstream_label="Source freshness",
             )
             return (
                 assessment.status,

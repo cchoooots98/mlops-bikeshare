@@ -220,11 +220,19 @@ def test_build_data_status_frame_marks_stale_and_waiting_sources():
         data=pd.DataFrame(
             [
                 {
-                    "source": "feat_station_snapshot_latest",
-                    "latest_dt_str": (now - timedelta(minutes=80)).strftime("%Y-%m-%d-%H-%M"),
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": "2026-03-27-14-55",
                     "loader_status": "ok",
                     "message": "",
-                }
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-27-14-55",
+                    "loader_status": "ok",
+                    "message": "",
+                },
             ]
         ),
     )
@@ -245,10 +253,63 @@ def test_build_data_status_frame_marks_stale_and_waiting_sources():
     assert rows["Prediction artifact"]["Expected lag (min)"] == 20.0
     assert rows["Prediction artifact"]["Excess lag (min)"] == 41.0
     assert "natural lag 43-58 min" in rows["Quality artifact"]["Expected cadence / SLA"]
-    assert rows["feat_station_snapshot_latest"]["Status"] == "Critical"
-    assert rows["feat_station_snapshot_latest"]["Expected lag (min)"] == 5.0
-    assert rows["feat_station_snapshot_latest"]["Excess lag (min)"] == 75.0
-    assert "missed at least" in rows["feat_station_snapshot_latest"]["Operator meaning"]
+    assert rows["Source freshness"]["Status"] == "Healthy"
+    assert rows["Feature freshness"]["Status"] == "Healthy"
+
+
+def test_build_data_status_frame_caps_downstream_stages_to_stale_source():
+    now = datetime(2026, 3, 28, 0, 1, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 23, 50, tzinfo=timezone.utc),
+        latest_key="predictions/dt=2026-03-27-23-50/predictions.parquet",
+        source_name="Prediction artifact",
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.NO_OBJECTS,
+        latest_dt=None,
+        source_name="Quality artifact",
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 27, 23, 50, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-27-23-50",
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Source freshness"]["Status"] == "Warning"
+    assert rows["Feature freshness"]["Status"] == "Healthy"
+    assert rows["Feature freshness"]["Expected lag (min)"] == 11.0
+    assert rows["Feature freshness"]["Excess lag (min)"] == 0.0
+    assert rows["Prediction artifact"]["Status"] == "Healthy"
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 11.0
+    assert rows["Prediction artifact"]["Excess lag (min)"] == 0.0
+    assert "capped by latest source freshness" in rows["Feature freshness"]["Operator meaning"].lower()
+    assert rows["Quality artifact"]["Status"] == "Healthy"
+    assert "No quality artifact is expected yet" in rows["Quality artifact"]["Operator meaning"]
 
 
 def test_build_data_status_frame_treats_natural_quality_delay_as_healthy():
@@ -343,6 +404,58 @@ def test_build_data_status_frame_separates_source_freshness_from_feature_schedul
     assert pd.isna(rows["Source freshness"]["Excess lag (min)"])
     assert "10+ min" in rows["Source freshness"]["Expected cadence / SLA"]
     assert rows["Feature freshness"]["Status"] == "Healthy"
+
+
+def test_build_data_status_frame_caps_quality_expectation_to_latest_prediction_dt():
+    now = datetime(2026, 3, 28, 0, 56, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 23, 50, tzinfo=timezone.utc),
+        latest_key="predictions/dt=2026-03-27-23-50/predictions.parquet",
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 23, 50, tzinfo=timezone.utc),
+        latest_key="quality/dt=2026-03-27-23-50/quality.parquet",
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 27, 23, 50, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-27-23-50",
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Prediction artifact"]["Status"] == "Healthy"
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 66.0
+    assert rows["Prediction artifact"]["Excess lag (min)"] == 0.0
+    assert rows["Quality artifact"]["Status"] == "Healthy"
+    assert rows["Quality artifact"]["Delay (min)"] == 66.0
+    assert rows["Quality artifact"]["Expected lag (min)"] == 66.0
+    assert rows["Quality artifact"]["Excess lag (min)"] == 0.0
+    assert "capped by latest prediction artifact" in rows["Quality artifact"]["Operator meaning"].lower()
 
 
 def test_classify_metric_status_respects_sla_bands():
