@@ -248,7 +248,7 @@ def test_build_data_status_frame_marks_stale_and_waiting_sources():
     assert rows["feat_station_snapshot_latest"]["Status"] == "Critical"
     assert rows["feat_station_snapshot_latest"]["Expected lag (min)"] == 5.0
     assert rows["feat_station_snapshot_latest"]["Excess lag (min)"] == 75.0
-    assert "behind the current schedule" in rows["feat_station_snapshot_latest"]["Operator meaning"]
+    assert "missed at least" in rows["feat_station_snapshot_latest"]["Operator meaning"]
 
 
 def test_build_data_status_frame_treats_natural_quality_delay_as_healthy():
@@ -296,6 +296,53 @@ def test_build_data_status_frame_treats_natural_quality_delay_as_healthy():
     assert rows["Quality artifact"]["Expected lag (min)"] == 50.0
     assert rows["Quality artifact"]["Excess lag (min)"] == 0.0
     assert rows["feat_station_snapshot_latest"]["Status"] == "Healthy"
+
+
+def test_build_data_status_frame_separates_source_freshness_from_feature_schedule():
+    now = datetime(2026, 3, 27, 15, 0, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 14, 40, tzinfo=timezone.utc),
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 14, 10, tzinfo=timezone.utc),
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 27, 14, 47, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-27-14-55",
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Source freshness"]["Status"] == "Warning"
+    assert pd.isna(rows["Source freshness"]["Expected lag (min)"])
+    assert pd.isna(rows["Source freshness"]["Excess lag (min)"])
+    assert "10+ min" in rows["Source freshness"]["Expected cadence / SLA"]
+    assert rows["Feature freshness"]["Status"] == "Healthy"
 
 
 def test_classify_metric_status_respects_sla_bands():

@@ -640,7 +640,7 @@ def render_data_status_table(
     feature_sla_minutes: int,
 ) -> None:
     st.subheader("Data Pipeline Status")
-    st.caption("Schedule-aware freshness that separates natural pipeline lag from true lateness.")
+    st.caption("Source freshness plus schedule-aware pipeline freshness, with missed-cycle severity for delayed stages.")
     frame = build_data_status_frame(
         prediction_result=prediction_result,
         quality_result=quality_result,
@@ -688,7 +688,7 @@ def render_data_status_table(
     )
     st.dataframe(compact_frame, width="stretch", hide_index=True)
     st.caption(
-        "Expected lag captures the natural delay from the DAG schedule; excess lag shows how far the data source is truly behind."
+        "Expected lag captures natural pipeline delay; excess lag shows behind-schedule time for pipeline stages. Source freshness uses raw source age."
     )
     st.caption("Open the row details below for the schedule rule, operator meaning, and artifact path summary.")
 

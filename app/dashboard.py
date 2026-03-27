@@ -18,10 +18,8 @@ from dashboard.cloudwatch import (
 from dashboard.contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus
 from dashboard.metadata import load_dashboard_model_metadata
 from dashboard.presentation import (
-    FEATURE_FRESHNESS_POLICY,
-    PREDICTION_ARTIFACT_POLICY,
     MetricSpec,
-    assess_schedule_freshness,
+    build_data_status_frame,
     build_station_risk_frame,
     resolve_selected_station,
 )
@@ -103,7 +101,7 @@ FEATURE_STALE_AFTER_MINUTES = int(
 FRESHNESS_TABLES: list[str] = list(
     st.secrets.get(
         "freshness_tables",
-        ["feat_station_snapshot_latest"],
+        ["stg_station_status", "feat_station_snapshot_latest"],
     )
 )
 
@@ -147,11 +145,10 @@ def _cw_client():
 def _determine_pipeline_state(
     *,
     prediction_result: ArtifactLoadResult,
+    quality_result: ArtifactLoadResult,
     freshness_result: FreshnessLoadResult,
     stale_after_minutes: int,
 ) -> str:
-    if freshness_result.status != LoadStatus.OK:
-        return "Degraded"
     if prediction_result.status in {
         LoadStatus.ALL_SCORES_NULL,
         LoadStatus.ACCESS_DENIED,
@@ -159,37 +156,18 @@ def _determine_pipeline_state(
         LoadStatus.SCHEMA_ERROR,
     }:
         return "Failed"
-    if prediction_result.status == LoadStatus.NO_OBJECTS:
+    if freshness_result.status != LoadStatus.OK:
         return "Degraded"
-    now_utc = datetime.now(timezone.utc)
-    prediction_assessment = assess_schedule_freshness(
-        latest_dt=prediction_result.latest_dt,
-        policy=PREDICTION_ARTIFACT_POLICY,
-        now_utc=now_utc,
+    status_frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=datetime.now(timezone.utc),
     )
-    if prediction_assessment.status != "Healthy":
+    if status_frame.empty:
         return "Degraded"
-    freshness = freshness_result.data
-    if not freshness.empty:
-        if (freshness["loader_status"] != "ok").any():
-            return "Degraded"
-        feature_dts = pd.to_datetime(
-            freshness["latest_dt_str"],
-            format="%Y-%m-%d-%H-%M",
-            errors="coerce",
-            utc=True,
-        )
-        if feature_dts.isna().any():
-            return "Degraded"
-        if feature_dts.apply(
-            lambda value: assess_schedule_freshness(
-                latest_dt=value.to_pydatetime(),
-                policy=FEATURE_FRESHNESS_POLICY,
-                now_utc=now_utc,
-            ).status
-            != "Healthy"
-        ).any():
-            return "Degraded"
+    if (status_frame["Status"] != "Healthy").any():
+        return "Degraded"
     return "Healthy"
 
 
@@ -212,7 +190,7 @@ def _load_freshness_safely() -> FreshnessLoadResult:
         return FreshnessLoadResult(
             status=LoadStatus.READ_ERROR,
             data=pd.DataFrame(),
-            message=f"Feature freshness is unavailable because PostgreSQL could not be reached: {exc}",
+            message=f"Source/feature freshness is unavailable because PostgreSQL could not be reached: {exc}",
         )
 
 
@@ -280,6 +258,7 @@ with st.spinner("Checking feature freshness..."):
 
 pipeline_state = _determine_pipeline_state(
     prediction_result=latest_predictions,
+    quality_result=latest_quality,
     freshness_result=freshness_result,
     stale_after_minutes=PREDICTION_STALE_AFTER_MINUTES,
 )

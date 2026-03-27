@@ -13,6 +13,19 @@ from sqlalchemy.engine import Engine
 from dashboard.contracts import FreshnessLoadResult, LoadStatus
 from dashboard.utils import validate_pg_identifier
 
+_FRESHNESS_SOURCE_CONFIG: dict[str, dict[str, str]] = {
+    "stg_station_status": {
+        "timestamp_column": "snapshot_bucket_at_utc",
+        "display_name": "Source freshness",
+        "freshness_type": "source",
+    },
+    "feat_station_snapshot_latest": {
+        "timestamp_column": "dt",
+        "display_name": "Feature freshness",
+        "freshness_type": "feature",
+    },
+}
+
 
 def load_station_info(*, engine: Engine, schema: str, city: str) -> pd.DataFrame:
     """Return one row per station with its latest business-ready serving context.
@@ -60,9 +73,18 @@ def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str])
     overall_messages: list[str] = []
     for table in tables:
         table = validate_pg_identifier(table)
+        source_config = _FRESHNESS_SOURCE_CONFIG.get(
+            table,
+            {
+                "timestamp_column": "dt",
+                "display_name": table,
+                "freshness_type": "feature",
+            },
+        )
+        timestamp_column = validate_pg_identifier(source_config["timestamp_column"])
         sql = text(
             f"""
-            SELECT MAX(dt) AS latest_dt_str
+            SELECT MAX({timestamp_column}) AS latest_dt_str
             FROM {schema}.{table}
             WHERE city = :city
         """
@@ -81,7 +103,9 @@ def load_freshness(*, engine: Engine, schema: str, city: str, tables: list[str])
             overall_messages.append(f"{table}: {exc}")
         rows.append(
             {
-                "source": table,
+                "source": source_config["display_name"],
+                "table_name": table,
+                "freshness_type": source_config["freshness_type"],
                 "latest_dt_str": latest,
                 "loader_status": row_status,
                 "message": row_message,

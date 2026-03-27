@@ -139,13 +139,13 @@
 
 **Action**: Click the **Data Status** tab.
 
-**Screen**: The freshness table showing Prediction artifact, Quality artifact, and feat_station_snapshot_latest.
+**Screen**: The compact freshness table showing Source freshness, Prediction artifact, Quality artifact, and Feature freshness.
 
 > *"The Data Status tab monitors the full data pipeline end-to-end."*
 
 **Action**: Point to each row in the table.
 
-> *"Each row shows a data source, its latest business timestamp, the observed lag, the lag the current schedule naturally implies, and the excess lag beyond that schedule. Prediction and quality are no longer judged against a flat wall-clock SLA: the dashboard now accounts for the 6-minute prediction path and the 43-minute quality maturity path before flagging true lateness."*
+> *"Each row shows either upstream source freshness or pipeline freshness. Source freshness tracks whether GBFS itself is advancing. Feature, prediction, and quality use schedule-aware lag plus missed-cycle severity, so operators can tell the difference between natural latency and a stage that is genuinely behind schedule."*
 
 **Action**: Point to the Status column.
 

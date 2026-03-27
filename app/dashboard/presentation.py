@@ -57,8 +57,29 @@ class LatencyAssessment:
     operator_meaning: str
 
 
+@dataclass(frozen=True)
+class RawAgePolicy:
+    label: str
+    cadence_minutes: int
+    warning_age_minutes: int
+    critical_age_minutes: int
+
+
+@dataclass(frozen=True)
+class RawAgeAssessment:
+    observed_delay_minutes: float | None
+    status: str
+    operator_meaning: str
+
+
+SOURCE_FRESHNESS_POLICY = RawAgePolicy(
+    label="Source freshness",
+    cadence_minutes=5,
+    warning_age_minutes=10,
+    critical_age_minutes=20,
+)
 FEATURE_FRESHNESS_POLICY = LatencyPolicy(
-    label="Serving features",
+    label="Feature freshness",
     cadence_minutes=5,
     dt_offset_minutes=0,
     availability_lag_minutes=4,
@@ -70,16 +91,16 @@ PREDICTION_ARTIFACT_POLICY = LatencyPolicy(
     cadence_minutes=15,
     dt_offset_minutes=10,
     availability_lag_minutes=6,
-    warning_excess_minutes=5,
-    critical_excess_minutes=20,
+    warning_excess_minutes=15,
+    critical_excess_minutes=30,
 )
 QUALITY_ARTIFACT_POLICY = LatencyPolicy(
     label="Quality artifact",
     cadence_minutes=15,
     dt_offset_minutes=10,
     availability_lag_minutes=43,
-    warning_excess_minutes=10,
-    critical_excess_minutes=25,
+    warning_excess_minutes=15,
+    critical_excess_minutes=30,
 )
 
 
@@ -300,6 +321,13 @@ def _artifact_delay_minutes(*, latest_dt: datetime | None, now_utc: datetime) ->
     return round((now_utc - latest_dt).total_seconds() / 60, 1)
 
 
+def _parse_dashboard_timestamp(value: object) -> pd.Timestamp:
+    timestamp = pd.to_datetime(value, format="%Y-%m-%d-%H-%M", utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        timestamp = pd.to_datetime(value, utc=True, errors="coerce")
+    return timestamp
+
+
 def _floor_to_schedule(*, value: datetime, cadence_minutes: int, offset_minutes: int) -> datetime:
     origin = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=offset_minutes)
     cadence_seconds = cadence_minutes * 60
@@ -317,11 +345,15 @@ def expected_latest_dt_for_policy(*, now_utc: datetime, policy: LatencyPolicy) -
 
 
 def schedule_expectation_label(policy: LatencyPolicy) -> str:
+    warning_cycles = max(1, (policy.warning_excess_minutes + policy.cadence_minutes - 1) // policy.cadence_minutes)
+    critical_cycles = max(1, (policy.critical_excess_minutes + policy.cadence_minutes - 1) // policy.cadence_minutes)
     return (
         f"{policy.label} every {policy.cadence_minutes} min; natural lag "
         f"{policy.availability_lag_minutes}-{policy.natural_lag_upper_minutes} min; "
-        f"warning if {policy.warning_excess_minutes}+ min behind schedule, "
-        f"critical if {policy.critical_excess_minutes}+ min behind schedule"
+        f"warning after {warning_cycles} missed cycle"
+        f"{'' if warning_cycles == 1 else 's'} ({policy.warning_excess_minutes}+ min behind schedule), "
+        f"critical after {critical_cycles} missed cycle"
+        f"{'' if critical_cycles == 1 else 's'} ({policy.critical_excess_minutes}+ min behind schedule)"
     )
 
 
@@ -345,12 +377,19 @@ def assess_schedule_freshness(
         )
 
     excess_delay_minutes = round(max(0.0, (expected_dt - latest_dt).total_seconds() / 60), 1)
+    missed_cycles = max(1, int(excess_delay_minutes // policy.cadence_minutes)) if excess_delay_minutes > 0 else 0
     if excess_delay_minutes >= policy.critical_excess_minutes:
         status = "Critical"
-        summary = "is materially behind the current schedule"
+        summary = (
+            f"has missed at least {missed_cycles} scheduled cycle"
+            f"{'' if missed_cycles == 1 else 's'}"
+        )
     elif excess_delay_minutes >= policy.warning_excess_minutes:
         status = "Warning"
-        summary = "is slipping behind the current schedule"
+        summary = (
+            f"has missed at least {missed_cycles} scheduled cycle"
+            f"{'' if missed_cycles == 1 else 's'}"
+        )
     else:
         status = "Healthy"
         summary = "matches the current schedule"
@@ -369,6 +408,45 @@ def assess_schedule_freshness(
         excess_delay_minutes=excess_delay_minutes,
         status=status,
         operator_meaning=operator_meaning,
+    )
+
+
+def source_expectation_label(policy: RawAgePolicy) -> str:
+    return (
+        f"{policy.label} should advance every {policy.cadence_minutes} min; "
+        f"warning if no new source bucket arrives for {policy.warning_age_minutes}+ min, "
+        f"critical after {policy.critical_age_minutes}+ min"
+    )
+
+
+def assess_raw_age_freshness(
+    *,
+    latest_dt: datetime | None,
+    policy: RawAgePolicy,
+    now_utc: datetime,
+) -> RawAgeAssessment:
+    observed_delay_minutes = _artifact_delay_minutes(latest_dt=latest_dt, now_utc=now_utc)
+    if observed_delay_minutes is None:
+        return RawAgeAssessment(
+            observed_delay_minutes=None,
+            status="Critical",
+            operator_meaning="No source snapshot timestamp is available.",
+        )
+    if observed_delay_minutes >= policy.critical_age_minutes:
+        status = "Critical"
+        summary = "has been stale for multiple upstream cycles"
+    elif observed_delay_minutes >= policy.warning_age_minutes:
+        status = "Warning"
+        summary = "is older than the upstream freshness target"
+    else:
+        status = "Healthy"
+        summary = "is advancing within the upstream freshness target"
+    return RawAgeAssessment(
+        observed_delay_minutes=observed_delay_minutes,
+        status=status,
+        operator_meaning=(
+            f"{policy.label} {summary}. Latest source bucket age is {observed_delay_minutes:.1f} min."
+        ),
     )
 
 
@@ -461,19 +539,35 @@ def build_data_status_frame(
 
     freshness = freshness_result.data.copy()
     if not freshness.empty:
-        freshness["Last updated (UTC)"] = pd.to_datetime(
-            freshness["latest_dt_str"],
-            format="%Y-%m-%d-%H-%M",
-            errors="coerce",
-            utc=True,
-        )
+        freshness["Last updated (UTC)"] = freshness["latest_dt_str"].apply(_parse_dashboard_timestamp)
         freshness["Delay (min)"] = (now_utc - freshness["Last updated (UTC)"]).dt.total_seconds().div(60).round(1)
         freshness["Expected lag (min)"] = float("nan")
         freshness["Excess lag (min)"] = float("nan")
+        freshness["Expected cadence / SLA"] = ""
 
-        def _freshness_row(row: pd.Series) -> tuple[str, str, float, float]:
+        def _freshness_row(row: pd.Series) -> tuple[str, str, float, float, str]:
             if row["loader_status"] != "ok":
-                return "Critical", row["message"] or "Feature freshness could not be read.", float("nan"), float("nan")
+                return (
+                    "Critical",
+                    row["message"] or "Freshness could not be read.",
+                    float("nan"),
+                    float("nan"),
+                    "",
+                )
+            freshness_type = str(row.get("freshness_type") or "feature")
+            if freshness_type == "source":
+                assessment = assess_raw_age_freshness(
+                    latest_dt=row["Last updated (UTC)"],
+                    policy=SOURCE_FRESHNESS_POLICY,
+                    now_utc=now_utc,
+                )
+                return (
+                    assessment.status,
+                    assessment.operator_meaning,
+                    float("nan"),
+                    float("nan"),
+                    source_expectation_label(SOURCE_FRESHNESS_POLICY),
+                )
             assessment = assess_schedule_freshness(
                 latest_dt=row["Last updated (UTC)"],
                 policy=FEATURE_FRESHNESS_POLICY,
@@ -484,13 +578,15 @@ def build_data_status_frame(
                 assessment.operator_meaning,
                 assessment.expected_delay_minutes,
                 assessment.excess_delay_minutes if assessment.excess_delay_minutes is not None else float("nan"),
+                schedule_expectation_label(FEATURE_FRESHNESS_POLICY),
             )
 
-        freshness[["Status", "Operator meaning", "Expected lag (min)", "Excess lag (min)"]] = freshness.apply(
+        freshness[
+            ["Status", "Operator meaning", "Expected lag (min)", "Excess lag (min)", "Expected cadence / SLA"]
+        ] = freshness.apply(
             lambda row: pd.Series(_freshness_row(row)),
             axis=1,
         )
-        freshness["Expected cadence / SLA"] = schedule_expectation_label(FEATURE_FRESHNESS_POLICY)
         freshness["Details"] = freshness["message"].fillna("")
         freshness = freshness.rename(columns={"source": "Data source"})
         rows.extend(
