@@ -99,7 +99,7 @@ SQL identifiers are validated before use. See `app/dashboard/utils.py`.
 | `render_top_risk_table(...)` | Sorted risk ranking table for the selected target |
 | `render_history_chart(...)` | Plotly time-series score chart for the selected station |
 | `render_metric_section(...)` | CloudWatch metric cards plus sparkline charts |
-| `render_data_status_table(...)` | Prediction, quality, and feature freshness status against SLA windows |
+| `render_data_status_table(...)` | Prediction, quality, and feature freshness status using schedule-aware expected lag plus excess lag |
 
 Color palette: `#e63946` (red = high risk), `#f4a261` (orange = medium), `#2a9d8f` (teal = fresh/ok).
 

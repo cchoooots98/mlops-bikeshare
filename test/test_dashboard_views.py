@@ -232,9 +232,17 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
                     "Data source": "Prediction artifact",
                     "Last updated (UTC)": datetime(2026, 3, 25, 23, 15, tzinfo=timezone.utc),
                     "Delay (min)": 15.0,
+                    "Expected lag (min)": 20.0,
+                    "Excess lag (min)": 0.0,
                     "Status": "Healthy",
-                    "Expected cadence / SLA": "Prediction every 15 min; stale after 30 min",
-                    "Operator meaning": "Freshness is within the 30 minute expectation.",
+                    "Expected cadence / SLA": (
+                        "Prediction artifact every 15 min; natural lag 6-21 min; "
+                        "warning if 5+ min behind schedule, critical if 20+ min behind schedule"
+                    ),
+                    "Operator meaning": (
+                        "Prediction artifact matches the current schedule. Observed lag is 15.0 min; "
+                        "the schedule naturally implies 20.0 min at this moment."
+                    ),
                     "Details": "inference/target=bikes/city=paris/dt=2026-03-25-23-15/predictions.parquet",
                 }
             ]
@@ -254,8 +262,10 @@ def test_render_data_status_table_formats_timestamps_and_compacts_details(monkey
     first_row = captured["frame"].iloc[0].to_dict()
     assert first_row["Last updated (UTC)"] == "2026-03-25 23:15 UTC"
     assert first_row["Delay (min)"] == "15.0 min"
+    assert first_row["Expected lag (min)"] == "20.0 min"
+    assert first_row["Excess lag (min)"] == "0.0 min"
     assert first_row["Details"] == "inference/target=bikes/city=paris/.../dt=2026-03-25-23-15/predictions.parquet"
-    assert "S3 and Airflow logs" in captured["caption"][-1]
+    assert "natural delay" in captured["caption"][-1]
 
 
 def test_render_top_risk_table_filters_zero_capacity_rows_before_ranking(monkeypatch):

@@ -15,6 +15,8 @@ from streamlit_folium import st_folium
 from .contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus
 from .presentation import (
     MetricSpec,
+    PREDICTION_ARTIFACT_POLICY,
+    assess_schedule_freshness,
     build_data_status_frame,
     classify_metric_status,
     critical_threshold_for,
@@ -218,11 +220,21 @@ def render_alert_banner(
     predictions = prediction_result.data
     latest_dt = prediction_result.latest_dt
     if latest_dt is not None:
-        age_minutes = (datetime.now(timezone.utc) - latest_dt).total_seconds() / 60
-        if age_minutes > stale_after_minutes:
+        assessment = assess_schedule_freshness(
+            latest_dt=latest_dt,
+            policy=PREDICTION_ARTIFACT_POLICY,
+            now_utc=datetime.now(timezone.utc),
+        )
+        if assessment.status == "Critical":
+            st.error(
+                f"Latest {target.display_name.lower()} predictions are {assessment.excess_delay_minutes:.1f} minutes "
+                "behind the current serving schedule. Investigate the upstream prediction pipeline before trusting the map."
+            )
+            return
+        if assessment.status == "Warning":
             st.warning(
-                f"Latest {target.display_name.lower()} predictions are stale by {age_minutes:.1f} minutes. "
-                "Investigate the upstream prediction pipeline before trusting the map."
+                f"Latest {target.display_name.lower()} predictions are {assessment.excess_delay_minutes:.1f} minutes "
+                "behind the current serving schedule. Investigate the upstream prediction pipeline before trusting the map."
             )
             return
 
@@ -628,7 +640,7 @@ def render_data_status_table(
     feature_sla_minutes: int,
 ) -> None:
     st.subheader("Data Pipeline Status")
-    st.caption("Freshness and artifact availability against the operator SLA window.")
+    st.caption("Schedule-aware freshness that separates natural pipeline lag from true lateness.")
     frame = build_data_status_frame(
         prediction_result=prediction_result,
         quality_result=quality_result,
@@ -647,6 +659,12 @@ def render_data_status_table(
     display_frame["Delay (min)"] = display_frame["Delay (min)"].apply(
         lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
     )
+    display_frame["Expected lag (min)"] = display_frame["Expected lag (min)"].apply(
+        lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
+    )
+    display_frame["Excess lag (min)"] = display_frame["Excess lag (min)"].apply(
+        lambda value: f"{float(value):.1f} min" if pd.notna(value) else "n/a"
+    )
     display_frame["Details"] = display_frame["Details"].apply(_format_detail_text)
     st.dataframe(
         display_frame,
@@ -654,5 +672,5 @@ def render_data_status_table(
         hide_index=True,
     )
     st.caption(
-        "Details keeps the target/date portion of each artifact key so you can match the row to S3 and Airflow logs quickly."
+        "Expected lag captures the natural delay from the DAG schedule; excess lag shows how far the data source is truly behind."
     )

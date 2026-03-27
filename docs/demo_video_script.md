@@ -145,7 +145,7 @@
 
 **Action**: Point to each row in the table.
 
-> *"Each row shows a data source, its last update time, the delay in minutes, and whether it meets the operator SLA. The prediction artifact refreshes every 15 minutes and is stale after 30. Quality evidence has a built-in 30-minute label maturity window plus a 7-minute backfill lag. The feature table tracks serving feature freshness."*
+> *"Each row shows a data source, its latest business timestamp, the observed lag, the lag the current schedule naturally implies, and the excess lag beyond that schedule. Prediction and quality are no longer judged against a flat wall-clock SLA: the dashboard now accounts for the 6-minute prediction path and the 43-minute quality maturity path before flagging true lateness."*
 
 **Action**: Point to the Status column.
 

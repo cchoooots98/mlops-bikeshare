@@ -17,7 +17,14 @@ from dashboard.cloudwatch import (
 )
 from dashboard.contracts import ArtifactLoadResult, FreshnessLoadResult, LoadStatus
 from dashboard.metadata import load_dashboard_model_metadata
-from dashboard.presentation import MetricSpec, build_station_risk_frame, resolve_selected_station
+from dashboard.presentation import (
+    FEATURE_FRESHNESS_POLICY,
+    PREDICTION_ARTIFACT_POLICY,
+    MetricSpec,
+    assess_schedule_freshness,
+    build_station_risk_frame,
+    resolve_selected_station,
+)
 from dashboard.queries import load_freshness, load_station_info
 from dashboard.s3_loader import (
     load_latest_predictions,
@@ -154,18 +161,35 @@ def _determine_pipeline_state(
         return "Failed"
     if prediction_result.status == LoadStatus.NO_OBJECTS:
         return "Degraded"
-    if prediction_result.latest_dt is not None:
-        age_minutes = (datetime.now(timezone.utc) - prediction_result.latest_dt).total_seconds() / 60
-        if age_minutes > stale_after_minutes:
-            return "Degraded"
-    freshness = freshness_result.data
-    if not freshness.empty and (
-        (freshness["loader_status"] != "ok").any()
-        or pd.to_datetime(freshness["latest_dt_str"], format="%Y-%m-%d-%H-%M", errors="coerce", utc=True).pipe(
-            lambda series: ((datetime.now(timezone.utc) - series).dt.total_seconds() / 60 >= 60).any()
-        )
-    ):
+    now_utc = datetime.now(timezone.utc)
+    prediction_assessment = assess_schedule_freshness(
+        latest_dt=prediction_result.latest_dt,
+        policy=PREDICTION_ARTIFACT_POLICY,
+        now_utc=now_utc,
+    )
+    if prediction_assessment.status != "Healthy":
         return "Degraded"
+    freshness = freshness_result.data
+    if not freshness.empty:
+        if (freshness["loader_status"] != "ok").any():
+            return "Degraded"
+        feature_dts = pd.to_datetime(
+            freshness["latest_dt_str"],
+            format="%Y-%m-%d-%H-%M",
+            errors="coerce",
+            utc=True,
+        )
+        if feature_dts.isna().any():
+            return "Degraded"
+        if feature_dts.apply(
+            lambda value: assess_schedule_freshness(
+                latest_dt=value.to_pydatetime(),
+                policy=FEATURE_FRESHNESS_POLICY,
+                now_utc=now_utc,
+            ).status
+            != "Healthy"
+        ).any():
+            return "Degraded"
     return "Healthy"
 
 

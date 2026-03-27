@@ -203,7 +203,7 @@ def test_summarize_quality_availability_flags_stale_quality_artifact():
 
 
 def test_build_data_status_frame_marks_stale_and_waiting_sources():
-    now = datetime.now(timezone.utc)
+    now = datetime(2026, 3, 27, 15, 0, tzinfo=timezone.utc)
     prediction_result = ArtifactLoadResult(
         status=LoadStatus.OK,
         latest_dt=now - timedelta(minutes=61),
@@ -236,14 +236,66 @@ def test_build_data_status_frame_marks_stale_and_waiting_sources():
         prediction_sla_minutes=30,
         quality_sla_minutes=45,
         feature_sla_minutes=60,
+        now_utc=now,
     )
 
     rows = {row["Data source"]: row for row in frame.to_dict("records")}
     assert rows["Prediction artifact"]["Status"] == "Critical"
     assert rows["Quality artifact"]["Status"] == "Critical"
-    assert "30 min label maturity" in rows["Quality artifact"]["Expected cadence / SLA"]
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 20.0
+    assert rows["Prediction artifact"]["Excess lag (min)"] == 41.0
+    assert "natural lag 43-58 min" in rows["Quality artifact"]["Expected cadence / SLA"]
     assert rows["feat_station_snapshot_latest"]["Status"] == "Critical"
-    assert "Serving features are stale" in rows["feat_station_snapshot_latest"]["Operator meaning"]
+    assert rows["feat_station_snapshot_latest"]["Expected lag (min)"] == 5.0
+    assert rows["feat_station_snapshot_latest"]["Excess lag (min)"] == 75.0
+    assert "behind the current schedule" in rows["feat_station_snapshot_latest"]["Operator meaning"]
+
+
+def test_build_data_status_frame_treats_natural_quality_delay_as_healthy():
+    now = datetime(2026, 3, 27, 15, 0, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 14, 40, tzinfo=timezone.utc),
+        latest_key="predictions/dt=2026-03-27-14-40/predictions.parquet",
+        source_name="Prediction artifact",
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 27, 14, 10, tzinfo=timezone.utc),
+        latest_key="quality/dt=2026-03-27-14-10/quality.parquet",
+        source_name="Quality artifact",
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "feat_station_snapshot_latest",
+                    "latest_dt_str": "2026-03-27-14-55",
+                    "loader_status": "ok",
+                    "message": "",
+                }
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Prediction artifact"]["Status"] == "Healthy"
+    assert rows["Prediction artifact"]["Delay (min)"] == 20.0
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 20.0
+    assert rows["Prediction artifact"]["Excess lag (min)"] == 0.0
+    assert rows["Quality artifact"]["Status"] == "Healthy"
+    assert rows["Quality artifact"]["Delay (min)"] == 50.0
+    assert rows["Quality artifact"]["Expected lag (min)"] == 50.0
+    assert rows["Quality artifact"]["Excess lag (min)"] == 0.0
+    assert rows["feat_station_snapshot_latest"]["Status"] == "Healthy"
 
 
 def test_classify_metric_status_respects_sla_bands():
