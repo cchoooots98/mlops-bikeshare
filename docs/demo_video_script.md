@@ -39,22 +39,30 @@
 ---
 
 ### Scene 2 — Live Ops Map [0:25 – 0:55]
+**Action**: Briefly click the sidebar and switch the prediction target to **Dock stockout**, then switch back to **Bike stockout**.
+
+> *"The platform supports dual targets — bikes and docks each have independent models, endpoints, and quality metrics. I can switch between them in the sidebar."*
+
 
 **Screen**: The Folium map with colored station markers.
 
 > *"Each dot on this map is a Velib station. The color represents its current stockout risk: red means high probability of running out of bikes in the next 30 minutes, orange is elevated risk, and teal is normal."*
 
-**Action**: Hover over a **red** station marker. Wait for the tooltip popup to appear (shows station name, ID, current bikes, capacity, status, risk level, probability score).
+**Action**: Click on a **red** station marker to open the popup (shows station name, ID, current bikes or docks depending on the active target, capacity, status, risk level, probability score, and last updated timestamp).
 
-> *"When I hover over a station, I can see its current inventory, capacity, and the model's predicted stockout probability. This station has [read the probability] — it is flagged as critical."*
+> *"When I click on a station, I can see its current inventory, capacity, and the model's predicted stockout probability. This station has [read the probability] — it is flagged as critical."*
 
-**Action**: Move to hover over a **teal** station for contrast.
+**Action**: Click on a **teal** station for contrast.
 
 > *"Compare that to this station — plenty of bikes, low risk score. The predictions refresh every 15 minutes from the production SageMaker endpoint."*
 
-**Action**: Scroll down slightly to reveal the alert banner and the Top-N risk table.
+**Action**: Point to the alert banner that sits above the tab bar (it is always visible at the top of the page, not inside the map tab).
 
-> *"Below the map, the top-risk table ranks the stations most likely to experience a stockout right now. An operations team would use this to prioritize where to send rebalancing trucks."*
+> *"The alert banner above the tabs summarises the current risk picture across all scored stations."*
+
+**Action**: Scroll down inside the Live Ops tab to reveal the Selected Station Summary cards and then the Top-N risk table below them.
+
+> *"Below the map, a station summary card shows the currently selected station's live inventory at a glance. Further down, the top-risk table ranks the stations most likely to experience a stockout right now. An operations team would use this to prioritize where to send rebalancing trucks."*
 
 ---
 
@@ -66,11 +74,11 @@
 
 **Action**: Click the **Station History** tab at the top.
 
-> *"...I get its prediction history over time. This chart shows the model's confidence score for the last 24 snapshots."*
+> *"...I get its prediction history over time. This chart shows the model's 30-minute stockout probability for the last 24 snapshots."*
 
 **Screen**: Station History chart with the time-series line and the dashed orange threshold line.
 
-> *"The dashed orange line is the model-specific alert threshold — learned during training to optimize recall. Anything above this line would trigger an alert."*
+> *"The dashed orange line is the model-specific alert threshold — selected during training by maximizing F-beta score to balance precision and recall. Anything above this line would trigger an alert."*
 
 **Action**: Point the cursor along the time-series line, following its trajectory.
 
@@ -90,13 +98,14 @@
 
 > *"PR-AUC is our primary metric — currently at [read the value]. F1 at threshold is [read the value]. Both are within healthy bounds."*
 
+**Action**: Point to the Prediction Heartbeat card.
+
+> *"The Prediction Heartbeat is the total count of successful quality checks in the last 24 hours — confirming the monitoring loop is running continuously."*
+
 **Action**: Point to the Threshold Hit Rate and Samples cards.
 
 > *"Threshold Hit Rate shows what fraction of predictions exceed the alert boundary — about [read the value], which tells us roughly how often the model flags a station. And the Samples count confirms we are scoring all [read value] station-windows per day."*
 
-**Action**: Briefly click the sidebar and switch the prediction target to **Dock stockout**, then switch back to **Bike stockout**.
-
-> *"The platform supports dual targets — bikes and docks each have independent models, endpoints, and quality metrics. I can switch between them in the sidebar."*
 
 ---
 
