@@ -10,8 +10,8 @@ import pyarrow.parquet as pq
 from src.config import load_runtime_settings, prediction_key, prediction_prefix, quality_key
 from src.features.postgres_store import PostgresFeatureConfig, create_pg_engine, load_training_actuals_for_dt
 from src.model_target import PredictionTargetSpec, target_spec_from_name, target_spec_from_predict_bikes
+from src.monitoring.quality_contract import QUALITY_LABEL_MATURITY_MINUTES
 
-MATURITY_MINUTES = 30
 BACKFILL_MINUTES = 120
 STEP_MINUTES = 5
 
@@ -52,7 +52,7 @@ def _make_candidate_dts(latest_dt_str: str, now_utc: datetime) -> List[str]:
     steps = BACKFILL_MINUTES // STEP_MINUTES
     for step in range(0, steps + 1):
         dt_value = base - timedelta(minutes=STEP_MINUTES * step)
-        if now_utc >= dt_value + timedelta(minutes=MATURITY_MINUTES):
+        if now_utc >= dt_value + timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES):
             out.append(dt_value.strftime("%Y-%m-%d-%H-%M"))
     return out
 

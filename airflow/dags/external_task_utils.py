@@ -14,23 +14,36 @@ CRON_PRESETS = {
 }
 
 
-def execution_date_fn_for_schedule(upstream_schedule: str):
+def execution_date_fn_for_schedule(upstream_schedule: str, *, minimum_age: timedelta | None = None):
     normalized_schedule = _normalize_schedule(upstream_schedule)
-    return partial(resolve_latest_upstream_logical_date, upstream_schedule=normalized_schedule)
+    return partial(
+        resolve_latest_upstream_logical_date,
+        upstream_schedule=normalized_schedule,
+        minimum_age=minimum_age or timedelta(),
+    )
 
 
-def resolve_latest_upstream_logical_date(current_logical_date, *, upstream_schedule: str, **context):
+def resolve_latest_upstream_logical_date(
+    current_logical_date,
+    *,
+    upstream_schedule: str,
+    minimum_age: timedelta = timedelta(),
+    **context,
+):
     """
-    Resolve the upstream logical date for the latest run whose interval has ended.
+    Resolve the upstream logical date for the latest eligible run whose interval has ended.
 
     We intentionally align on the upstream schedule itself instead of a hand-maintained
     execution_delta so downstream sensors stay correct when cron expressions move.
+    Some downstream jobs also need the upstream run to be old enough for a maturity window;
+    `minimum_age` enforces that without hard-coding cron-specific offsets.
     """
     current_end = context.get("data_interval_end")
     if current_end is None:
         raise ValueError("data_interval_end is required to resolve the upstream logical date")
 
-    latest_upstream_end = _previous_matching_time(upstream_schedule, current_end, inclusive=True)
+    eligible_upstream_end = current_end - minimum_age
+    latest_upstream_end = _previous_matching_time(upstream_schedule, eligible_upstream_end, inclusive=True)
     return _previous_matching_time(upstream_schedule, latest_upstream_end, inclusive=False)
 
 

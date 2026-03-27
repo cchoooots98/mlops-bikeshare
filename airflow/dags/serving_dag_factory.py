@@ -14,6 +14,7 @@ if AIRFLOW_HOME not in sys.path:
 
 from src.config import run_project_module
 from src.config.naming import deployment_state_path, endpoint_name
+from src.monitoring.quality_contract import QUALITY_LABEL_MATURITY_MINUTES
 from external_task_utils import execution_date_fn_for_schedule
 from schedule_defs import (
     SERVING_METRICS_SCHEDULE,
@@ -211,7 +212,10 @@ def build_serving_dags(
                 allowed_states=["success"],
                 failed_states=["failed", "upstream_failed"],
                 check_existence=True,
-                execution_date_fn=execution_date_fn_for_schedule(SERVING_PREDICTION_SCHEDULE),
+                execution_date_fn=execution_date_fn_for_schedule(
+                    SERVING_PREDICTION_SCHEDULE,
+                    minimum_age=timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES),
+                ),
                 mode="reschedule",
                 poke_interval=60,
                 timeout=15 * 60,
