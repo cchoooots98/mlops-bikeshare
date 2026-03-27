@@ -44,31 +44,37 @@ The Streamlit dashboard provides real-time visibility into station risk, model q
 Station markers colored by stockout probability. Red = critical risk, orange = alert, teal = normal.
 
 ![Live Ops Map](reports/fig/2026-03-24-paris/live_ops_map.png)
+### Top-Risk Stations
 
+Operator ranking table for the selected target (`bikes` or `docks`). Stations are ordered by 30-minute stockout probability, then by lower current target inventory, then by higher capacity; stations with `capacity <= 0` are excluded from the final table.
+![Bike Top-Risk Stations](reports\fig\2026-03-24-paris\bikes_top_station.png)
+![Dock Top-Risk Stations](reports\fig\2026-03-24-paris\docks_top_station.png)
 ### Prediction Quality
 
 Rolling PR-AUC, F1, precision, and recall from the 30-minute quality backfill loop.
 
 ![Bike Stockout Prediction Quality](reports/fig/2026-03-24-paris/bikes_pred_quality.png)
+![Dock Stockout Prediction Quality](reports/fig/2026-03-24-paris/docks_pred_quality.png)
 
 ### System Health
 
 SageMaker endpoint latency, invocation counts, error rates, and PSI drift metrics from CloudWatch.
 
 ![Bike Stockout System Health](reports/fig/2026-03-24-paris/bikes_sys_quality.png)
-
+![Dock Stockout System Health](reports/fig/2026-03-24-paris/docks_sys_quality.png)
 ### Station History
 
 Click any station to see its prediction score time series with the model-specific alert threshold.
 
 ![Bike Stockout Station History](reports/fig/2026-03-24-paris/bikes_station_history.png)
+![Dock Stockout Station History](reports/fig/2026-03-24-paris/docks_station_history.png)
 
 ### Data Pipeline Status
 
 Freshness checks for every data source against operator SLA windows.
 
 ![Bike Stockout Data Status](reports/fig/2026-03-24-paris/bikes_data_pipe.png)
-
+![Dock Stockout Data Status](reports/fig/2026-03-24-paris/docks_data_pipe.png)
 ---
 
 ## Key Results
