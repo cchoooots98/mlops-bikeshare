@@ -31,6 +31,7 @@ def build_online_features(
         pg_config,
         target_city,
         select_columns=[*ENTITY_COLUMNS, *REQUIRED_BASE, *selected_feature_columns],
+        max_dt_skew_minutes=settings.serving_feature_max_dt_skew_minutes,
     )
     return features[[*ENTITY_COLUMNS, *selected_feature_columns]].copy()
 

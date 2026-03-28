@@ -32,6 +32,7 @@ class RuntimeSettings:
     pg_schema: str
     training_feature_table: str
     online_feature_table: str
+    serving_feature_max_dt_skew_minutes: int
     model_package_dir: str | None
     deployment_state_root: str
     deployment_state_path: str
@@ -216,6 +217,7 @@ def load_runtime_settings() -> RuntimeSettings:
         pg_schema=str(_setting("PGSCHEMA", "analytics")),
         training_feature_table=str(_setting("FEATURE_TABLE", "feat_station_snapshot_5min")),
         online_feature_table=str(_setting("ONLINE_FEATURE_TABLE", "feat_station_snapshot_latest")),
+        serving_feature_max_dt_skew_minutes=int(_setting("SERVING_FEATURE_MAX_DT_SKEW_MINUTES", "60")),
         model_package_dir=_setting("MODEL_PACKAGE_DIR"),
         deployment_state_root=deployment_root,
         deployment_state_path=str(_setting("DEPLOYMENT_STATE_PATH", resolved_deployment_state_path)),

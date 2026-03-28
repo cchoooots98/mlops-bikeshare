@@ -34,6 +34,7 @@ def _runtime_settings(tmp_path) -> RuntimeSettings:
         pg_schema="analytics",
         training_feature_table="feat_station_snapshot_5min",
         online_feature_table="feat_station_snapshot_latest",
+        serving_feature_max_dt_skew_minutes=60,
         model_package_dir=None,
         deployment_state_root=str(tmp_path / "model_dir" / "deployments"),
         deployment_state_path=str(tmp_path / "model_dir" / "deployments" / "bikes" / "local.json"),
@@ -148,10 +149,11 @@ def test_build_online_features_reads_latest_table_only(monkeypatch, tmp_path):
     monkeypatch.setattr(featurize_online, "load_runtime_settings", lambda: settings)
     monkeypatch.setattr(featurize_online, "create_pg_engine", lambda config: object())
 
-    def fake_load_latest_serving_features(engine, config, city, select_columns):
+    def fake_load_latest_serving_features(engine, config, city, select_columns, max_dt_skew_minutes):
         calls["online_table"] = config.online_table
         calls["city"] = city
         calls["select_columns"] = select_columns
+        calls["max_dt_skew_minutes"] = max_dt_skew_minutes
         return _online_features_df()
 
     monkeypatch.setattr(featurize_online, "load_latest_serving_features", fake_load_latest_serving_features)
@@ -160,6 +162,7 @@ def test_build_online_features_reads_latest_table_only(monkeypatch, tmp_path):
 
     assert calls["online_table"] == "feat_station_snapshot_latest"
     assert calls["city"] == "paris"
+    assert calls["max_dt_skew_minutes"] == 60
     assert calls["select_columns"] == [
         "city",
         "dt",

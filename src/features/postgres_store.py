@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Sequence
 
 import pandas as pd
@@ -11,6 +12,7 @@ from src.features.schema import (
     ONLINE_REQUIRED_COLUMNS,
     REQUIRED_BASE,
     TRAINING_REQUIRED_COLUMNS,
+    WEATHER_FEATURE_COLUMNS,
     validate_feature_df,
 )
 from src.model_target import target_spec_from_predict_bikes
@@ -112,6 +114,7 @@ def load_latest_serving_features(
     config: PostgresFeatureConfig,
     city: str,
     select_columns: Sequence[str] | None = None,
+    max_dt_skew_minutes: int = 60,
 ) -> pd.DataFrame:
     columns = list(select_columns or ONLINE_REQUIRED_COLUMNS)
     sql = build_feature_select_query(
@@ -127,7 +130,41 @@ def load_latest_serving_features(
     label_columns_present = sorted(set(df.columns).intersection(LABEL_COLUMNS))
     if label_columns_present:
         raise ValueError(f"serving feature table must not expose label columns: {label_columns_present}")
+    df = _drop_excessively_stale_serving_rows(df, max_dt_skew_minutes=max_dt_skew_minutes)
+    _log_sparse_serving_weather_context(df)
     return df
+
+
+def _drop_excessively_stale_serving_rows(df: pd.DataFrame, *, max_dt_skew_minutes: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    dt_values = pd.to_datetime(df["dt"], format="%Y-%m-%d-%H-%M", utc=True, errors="raise")
+    latest_dt = dt_values.max()
+    cutoff = latest_dt - timedelta(minutes=max(0, int(max_dt_skew_minutes)))
+    keep_mask = dt_values >= cutoff
+    dropped_count = int((~keep_mask).sum())
+    if dropped_count:
+        print(
+            "[features] dropped stale serving rows "
+            f"count={dropped_count} latest_dt={latest_dt.isoformat()} cutoff={cutoff.isoformat()}"
+        )
+    return df.loc[keep_mask].reset_index(drop=True)
+
+
+def _log_sparse_serving_weather_context(df: pd.DataFrame) -> None:
+    available_weather_columns = [column for column in WEATHER_FEATURE_COLUMNS if column in df.columns]
+    if df.empty or not available_weather_columns:
+        return
+
+    missing_weather_rows = df[available_weather_columns].isna().all(axis=1)
+    missing_ratio = float(missing_weather_rows.mean())
+    missing_count = int(missing_weather_rows.sum())
+    if missing_count:
+        print(
+            "[features] serving weather context sparse "
+            f"missing_rows={missing_count}/{len(df)} missing_ratio={missing_ratio:.2%}"
+        )
 
 
 def load_training_actuals_for_dt(

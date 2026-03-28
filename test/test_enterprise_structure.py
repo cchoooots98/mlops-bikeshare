@@ -568,6 +568,16 @@ def test_shared_calendar_and_latest_models_use_low_churn_materializations():
     assert "unique_key=['city', 'station_id']" in feat_latest
 
 
+def test_feature_latest_incremental_strategy_avoids_full_history_rerank():
+    feat_latest = Path("dbt/bikeshare_dbt/models/features/feat_station_snapshot_latest.sql").read_text(encoding="utf-8")
+
+    assert "from {{ this }}" in feat_latest
+    assert "historical_fallback as (" in feat_latest
+    assert "inner join lateral (" in feat_latest
+    assert "recent_candidates as (" in feat_latest
+    assert "candidates as (" in feat_latest
+
+
 def test_weather_and_feature_models_encode_runtime_performance_guards():
     dim_weather = Path("dbt/bikeshare_dbt/models/marts/dim_weather.sql").read_text(encoding="utf-8")
     feature_5min = Path("dbt/bikeshare_dbt/models/features/feat_station_snapshot_5min.sql").read_text(encoding="utf-8")
