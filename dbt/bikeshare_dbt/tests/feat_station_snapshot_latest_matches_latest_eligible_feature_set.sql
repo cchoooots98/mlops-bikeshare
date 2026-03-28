@@ -1,4 +1,4 @@
-{{ config(tags=['hf_smoke']) }}
+{{ config(tags=['quality_gate']) }}
 
 
 with recent_source_rows as (

@@ -1,4 +1,4 @@
-{{ config(tags=['hf_smoke']) }}
+{{ config(tags=['quality_gate']) }}
 
 with violations as (
     select

@@ -45,6 +45,7 @@ PSI_AGGREGATORS = ("max", "mean", "trimmed_mean", "p75")
 DEFAULT_PSI_AGGREGATOR = "trimmed_mean"
 TRIMMED_MEAN_RATIO = 0.10
 DT_FORMAT = "%Y-%m-%d-%H-%M"
+DEFAULT_PSI_QUERY_CHUNK_SIZE = 5
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,36 @@ def load_feature_series(
     )["feature_value"]
 
 
+def load_feature_window_from_connection(
+    *,
+    connection,
+    config: PostgresFeatureConfig,
+    city: str,
+    start_dt: str,
+    end_dt: str,
+    feature_columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
+    selected_columns = [column for column in (feature_columns or PSI_FEATURE_COLUMNS) if column in FEATURE_COLUMNS]
+    if not selected_columns:
+        raise ValueError("no PSI feature columns selected")
+
+    select_list = ", ".join(f'"{column}" AS "{column}"' for column in selected_columns)
+    sql = text(
+        f"""
+        SELECT {select_list}
+        FROM "{validate_identifier(config.pg_schema)}"."{validate_identifier(config.training_table)}"
+        WHERE city = :city
+          AND dt >= :start_dt
+          AND dt < :end_dt
+        """
+    )
+    return pd.read_sql_query(
+        sql,
+        connection,
+        params={"city": city, "start_dt": start_dt, "end_dt": end_dt},
+    )
+
+
 def assert_feature_freshness(
     *,
     latest_feature_dt: datetime,
@@ -177,30 +208,32 @@ def load_feature_window(
     end_dt: str,
     feature_columns: Iterable[str] | None = None,
 ) -> pd.DataFrame:
-    selected_columns = [column for column in (feature_columns or PSI_FEATURE_COLUMNS) if column in FEATURE_COLUMNS]
-    if not selected_columns:
-        raise ValueError("no PSI feature columns selected")
-
-    select_list = ", ".join(f'"{column}" AS "{column}"' for column in selected_columns)
-    sql = text(
-        f"""
-        SELECT {select_list}
-        FROM "{validate_identifier(config.pg_schema)}"."{validate_identifier(config.training_table)}"
-        WHERE city = :city
-          AND dt >= :start_dt
-          AND dt < :end_dt
-        """
-    )
     engine = create_pg_engine(config)
     try:
         with engine.connect() as connection:
-            return pd.read_sql_query(
-                sql,
-                connection,
-                params={"city": city, "start_dt": start_dt, "end_dt": end_dt},
+            return load_feature_window_from_connection(
+                connection=connection,
+                config=config,
+                city=city,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                feature_columns=feature_columns,
             )
     finally:
         engine.dispose()
+
+
+def iter_feature_column_chunks(
+    feature_columns: Iterable[str] | None = None,
+    *,
+    chunk_size: int = DEFAULT_PSI_QUERY_CHUNK_SIZE,
+) -> Iterable[list[str]]:
+    selected_columns = [column for column in (feature_columns or PSI_FEATURE_COLUMNS) if column in FEATURE_COLUMNS]
+    if not selected_columns:
+        raise ValueError("no PSI feature columns selected")
+    normalized_chunk_size = max(1, int(chunk_size))
+    for index in range(0, len(selected_columns), normalized_chunk_size):
+        yield selected_columns[index : index + normalized_chunk_size]
 
 
 def _psi_component(expected: float, actual: float, *, epsilon: float = 1e-6) -> float:
@@ -261,30 +294,33 @@ def compute_feature_psi_map_from_db(
     recent_start_dt: str,
     recent_end_dt: str,
     feature_columns: Iterable[str] | None = None,
+    query_chunk_size: int = DEFAULT_PSI_QUERY_CHUNK_SIZE,
 ) -> dict[str, float]:
-    selected_columns = [column for column in (feature_columns or PSI_FEATURE_COLUMNS) if column in FEATURE_COLUMNS]
-    if not selected_columns:
-        raise ValueError("no PSI feature columns selected")
-
     feature_psis: dict[str, float] = {}
-    for column in selected_columns:
-        baseline_series = load_feature_series(
+    for column_chunk in iter_feature_column_chunks(feature_columns, chunk_size=query_chunk_size):
+        baseline_df = load_feature_window_from_connection(
             connection=connection,
             config=config,
             city=city,
             start_dt=baseline_start_dt,
             end_dt=baseline_end_dt,
-            feature_column=column,
+            feature_columns=column_chunk,
         )
-        recent_series = load_feature_series(
+        recent_df = load_feature_window_from_connection(
             connection=connection,
             config=config,
             city=city,
             start_dt=recent_start_dt,
             end_dt=recent_end_dt,
-            feature_column=column,
+            feature_columns=column_chunk,
         )
-        feature_psis[column] = _psi_from_numeric_series(baseline_series, recent_series)
+        feature_psis.update(
+            compute_feature_psi_map(
+                baseline_df,
+                recent_df,
+                feature_columns=column_chunk,
+            )
+        )
     return feature_psis
 
 
@@ -332,6 +368,7 @@ def publish_psi(
     baseline_days: int = 7,
     aggregator: str = DEFAULT_PSI_AGGREGATOR,
     max_feature_age_minutes: int = 45,
+    query_chunk_size: int = DEFAULT_PSI_QUERY_CHUNK_SIZE,
     dry_run: bool = False,
 ) -> dict[str, object]:
     result = compute_psi_result(
@@ -341,6 +378,7 @@ def publish_psi(
         baseline_days=baseline_days,
         aggregator=aggregator,
         max_feature_age_minutes=max_feature_age_minutes,
+        query_chunk_size=query_chunk_size,
     )
     if dry_run:
         return result
@@ -362,6 +400,7 @@ def compute_psi_result(
     baseline_days: int = 7,
     aggregator: str = DEFAULT_PSI_AGGREGATOR,
     max_feature_age_minutes: int = 45,
+    query_chunk_size: int = DEFAULT_PSI_QUERY_CHUNK_SIZE,
 ) -> dict[str, object]:
     engine = create_pg_engine(config)
     try:
@@ -428,6 +467,7 @@ def compute_psi_result(
                 baseline_end_dt=window.baseline_end,
                 recent_start_dt=window.recent_start,
                 recent_end_dt=window.recent_end,
+                query_chunk_size=query_chunk_size,
             )
     finally:
         engine.dispose()
@@ -500,6 +540,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("PSI_MAX_FEATURE_AGE_MINUTES", "45")),
     )
+    parser.add_argument(
+        "--query-chunk-size",
+        type=int,
+        default=int(os.environ.get("PSI_QUERY_CHUNK_SIZE", str(DEFAULT_PSI_QUERY_CHUNK_SIZE))),
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -524,6 +569,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         baseline_days=args.baseline_days,
         aggregator=args.aggregator,
         max_feature_age_minutes=args.max_feature_age_minutes,
+        query_chunk_size=args.query_chunk_size,
         dry_run=args.dry_run,
     )
     print(result)

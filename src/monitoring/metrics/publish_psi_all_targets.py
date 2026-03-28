@@ -6,6 +6,7 @@ from src.config.naming import endpoint_name
 from src.features.postgres_store import PostgresFeatureConfig
 from src.monitoring.metrics.publish_psi import (
     DEFAULT_PSI_AGGREGATOR,
+    DEFAULT_PSI_QUERY_CHUNK_SIZE,
     PSI_AGGREGATORS,
     compute_psi_result,
     publish_psi_metrics,
@@ -33,6 +34,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("PSI_MAX_FEATURE_AGE_MINUTES", "45")),
     )
+    parser.add_argument(
+        "--query-chunk-size",
+        type=int,
+        default=int(os.environ.get("PSI_QUERY_CHUNK_SIZE", str(DEFAULT_PSI_QUERY_CHUNK_SIZE))),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--target-name", action="append", dest="target_names")
     return parser.parse_args(argv)
@@ -55,6 +61,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         baseline_days=args.baseline_days,
         aggregator=args.aggregator,
         max_feature_age_minutes=args.max_feature_age_minutes,
+        query_chunk_size=args.query_chunk_size,
     )
     target_names = tuple(args.target_names or DEFAULT_TARGETS)
     publish_targets = [

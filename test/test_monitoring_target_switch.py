@@ -273,6 +273,7 @@ def test_publish_psi_dry_run_returns_compute_result_without_publishing(monkeypat
             "baseline_days": 7,
             "aggregator": "trimmed_mean",
             "max_feature_age_minutes": 45,
+            "query_chunk_size": publish_psi.DEFAULT_PSI_QUERY_CHUNK_SIZE,
         }
     ]
     assert publish_calls == []
@@ -327,7 +328,7 @@ def test_publish_psi_publishes_metrics_for_single_target(monkeypatch):
     ]
 
 
-def test_compute_feature_psi_map_from_db_loads_each_feature_series_separately(monkeypatch):
+def test_compute_feature_psi_map_from_db_loads_feature_windows_in_chunks(monkeypatch):
     config = publish_psi.PostgresFeatureConfig(
         pg_host="dw-postgres",
         pg_port=5432,
@@ -336,13 +337,13 @@ def test_compute_feature_psi_map_from_db_loads_each_feature_series_separately(mo
         pg_password="velib",
     )
 
-    series_calls: list[tuple[str, str, str]] = []
+    window_calls: list[tuple[tuple[str, ...], str, str]] = []
 
-    def fake_load_feature_series(**kwargs):
-        feature_column = kwargs["feature_column"]
+    def fake_load_feature_window_from_connection(**kwargs):
+        chunk = tuple(kwargs["feature_columns"])
         start_dt = kwargs["start_dt"]
         end_dt = kwargs["end_dt"]
-        series_calls.append((feature_column, start_dt, end_dt))
+        window_calls.append((chunk, start_dt, end_dt))
         if start_dt == "baseline-start":
             values = {
                 "util_bikes": [0.10, 0.15, 0.20],
@@ -353,9 +354,13 @@ def test_compute_feature_psi_map_from_db_loads_each_feature_series_separately(mo
                 "util_bikes": [0.30, 0.35, 0.40],
                 "temperature_c": [14.0, 15.0, 16.0],
             }
-        return pd.Series(values[feature_column])
+        return pd.DataFrame({column: values[column] for column in chunk})
 
-    monkeypatch.setattr(publish_psi, "load_feature_series", fake_load_feature_series)
+    monkeypatch.setattr(
+        publish_psi,
+        "load_feature_window_from_connection",
+        fake_load_feature_window_from_connection,
+    )
 
     feature_psis = publish_psi.compute_feature_psi_map_from_db(
         connection=object(),
@@ -366,16 +371,17 @@ def test_compute_feature_psi_map_from_db_loads_each_feature_series_separately(mo
         recent_start_dt="recent-start",
         recent_end_dt="recent-end",
         feature_columns=["util_bikes", "temperature_c"],
+        query_chunk_size=1,
     )
 
     assert set(feature_psis) == {"util_bikes", "temperature_c"}
     assert feature_psis["util_bikes"] > 0
     assert feature_psis["temperature_c"] > 0
-    assert series_calls == [
-        ("util_bikes", "baseline-start", "baseline-end"),
-        ("util_bikes", "recent-start", "recent-end"),
-        ("temperature_c", "baseline-start", "baseline-end"),
-        ("temperature_c", "recent-start", "recent-end"),
+    assert window_calls == [
+        (("util_bikes",), "baseline-start", "baseline-end"),
+        (("util_bikes",), "recent-start", "recent-end"),
+        (("temperature_c",), "baseline-start", "baseline-end"),
+        (("temperature_c",), "recent-start", "recent-end"),
     ]
 
 

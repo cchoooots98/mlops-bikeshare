@@ -481,6 +481,39 @@ def test_hotpath_tests_are_retiered_out_of_quality_gate():
     assert "quality_gate" in weather_coverage
 
 
+def test_hotpath_smoke_and_feature_grain_checks_are_window_bounded():
+    hotpath_unique = Path("dbt/bikeshare_dbt/tests/fct_station_status_unique_grain.sql").read_text(encoding="utf-8")
+    enriched_unique = Path("dbt/bikeshare_dbt/tests/int_station_status_enriched_unique_grain.sql").read_text(
+        encoding="utf-8"
+    )
+    feature_unique = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_5min_unique_grain.sql").read_text(
+        encoding="utf-8"
+    )
+
+    for content in (hotpath_unique, enriched_unique):
+        assert "runtime_window_start_utc_expr" in content
+        assert "runtime_utc_expr('test_window_end_utc')" in content
+
+    assert "runtime_window_start_utc_expr" in feature_unique
+    assert "feature_dt_to_utc('dt')" in feature_unique
+
+
+def test_heavy_feature_latest_assertions_are_retiered_out_of_5min_smoke():
+    covers_recent = Path(
+        "dbt/bikeshare_dbt/tests/feat_station_snapshot_latest_covers_recent_feature_station_set.sql"
+    ).read_text(encoding="utf-8")
+    is_latest = Path("dbt/bikeshare_dbt/tests/feat_station_snapshot_latest_is_latest_per_station.sql").read_text(
+        encoding="utf-8"
+    )
+    matches_latest = Path(
+        "dbt/bikeshare_dbt/tests/feat_station_snapshot_latest_matches_latest_eligible_feature_set.sql"
+    ).read_text(encoding="utf-8")
+
+    for content in (covers_recent, is_latest, matches_latest):
+        assert "quality_gate" in content
+        assert "hf_smoke" not in content
+
+
 def test_hourly_quality_gate_excludes_static_dim_and_daily_source_checks():
     dim_date = Path("dbt/bikeshare_dbt/tests/dim_date_contiguous.sql").read_text(encoding="utf-8")
     dim_time_grid = Path("dbt/bikeshare_dbt/tests/dim_time_complete_5min_grid.sql").read_text(encoding="utf-8")
