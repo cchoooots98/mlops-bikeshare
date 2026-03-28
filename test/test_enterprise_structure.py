@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -303,6 +304,8 @@ def test_airflow_dags_share_runtime_helpers_and_schedule_contracts():
     ):
         content = Path(dag_path).read_text(encoding="utf-8")
         assert "def _dw_conn_uri(" not in content
+        assert re.search(r"(?<!get)_dw_conn_uri\(", content) is None
+        assert "get_dw_conn_uri(" in content
 
     assert 'DBT_QUALITY_HOURLY_SCHEDULE = "13 * * * *"' in schedule_defs
     assert 'DBT_DIAGNOSTIC_DAILY_SCHEDULE = "47 2 * * *"' in schedule_defs

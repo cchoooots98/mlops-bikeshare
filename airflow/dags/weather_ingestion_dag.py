@@ -32,7 +32,7 @@ def create_weather_staging_tables_task():
         "src.ingest.weather_ingest",
         args=[
             "--conn-uri",
-            _dw_conn_uri(),
+            get_dw_conn_uri(),
             "--ensure-only",
         ],
         cwd=AIRFLOW_HOME,
@@ -47,7 +47,7 @@ def ingest_weather_task(**context):
         "src.ingest.weather_ingest",
         args=[
             "--conn-uri",
-            _dw_conn_uri(),
+            get_dw_conn_uri(),
             "--city",
             _get_setting("CITY", "CITY", "paris"),
             "--run-id",

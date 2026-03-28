@@ -38,7 +38,7 @@ def ingest_holidays_year_task(**context):
             "--year",
             str(year),
             "--conn-uri",
-            _dw_conn_uri(),
+            get_dw_conn_uri(),
             "--run-id",
             context["run_id"],
             "--country-code",

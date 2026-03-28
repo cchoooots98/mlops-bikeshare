@@ -36,7 +36,7 @@ def create_staging_tables_task():
         "src.ingest.gbfs_ingest",
         args=[
             "--conn-uri",
-            _dw_conn_uri(),
+            get_dw_conn_uri(),
             "--ensure-only",
         ],
         cwd=AIRFLOW_HOME,
@@ -48,7 +48,7 @@ def ingest_gbfs_feed_task(*, feed: str, **context):
         "src.ingest.gbfs_ingest",
         args=[
             "--conn-uri",
-            _dw_conn_uri(),
+            get_dw_conn_uri(),
             "--gbfs-root-url",
             _get_setting(
                 "GBFS_BASE_URL",
