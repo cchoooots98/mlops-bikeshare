@@ -96,6 +96,59 @@ def load_latest_feature_dt(*, config: PostgresFeatureConfig, city: str) -> datet
     return datetime.strptime(max_dt, DT_FORMAT).replace(tzinfo=timezone.utc)
 
 
+def load_feature_window_row_count(
+    *,
+    connection,
+    config: PostgresFeatureConfig,
+    city: str,
+    start_dt: str,
+    end_dt: str,
+) -> int:
+    sql = text(
+        f"""
+        SELECT count(*) AS row_count
+        FROM "{validate_identifier(config.pg_schema)}"."{validate_identifier(config.training_table)}"
+        WHERE city = :city
+          AND dt >= :start_dt
+          AND dt < :end_dt
+        """
+    )
+    row_count = connection.execute(
+        sql,
+        {"city": city, "start_dt": start_dt, "end_dt": end_dt},
+    ).scalar_one()
+    return int(row_count or 0)
+
+
+def load_feature_series(
+    *,
+    connection,
+    config: PostgresFeatureConfig,
+    city: str,
+    start_dt: str,
+    end_dt: str,
+    feature_column: str,
+) -> pd.Series:
+    if feature_column not in FEATURE_COLUMNS:
+        raise ValueError(f"unsupported PSI feature column: {feature_column}")
+
+    sql = text(
+        f"""
+        SELECT "{validate_identifier(feature_column)}" AS feature_value
+        FROM "{validate_identifier(config.pg_schema)}"."{validate_identifier(config.training_table)}"
+        WHERE city = :city
+          AND dt >= :start_dt
+          AND dt < :end_dt
+          AND "{validate_identifier(feature_column)}" IS NOT NULL
+        """
+    )
+    return pd.read_sql_query(
+        sql,
+        connection,
+        params={"city": city, "start_dt": start_dt, "end_dt": end_dt},
+    )["feature_value"]
+
+
 def assert_feature_freshness(
     *,
     latest_feature_dt: datetime,
@@ -194,6 +247,43 @@ def compute_feature_psi_map(
     }
 
 
+def compute_feature_psi_map_from_db(
+    *,
+    connection,
+    config: PostgresFeatureConfig,
+    city: str,
+    baseline_start_dt: str,
+    baseline_end_dt: str,
+    recent_start_dt: str,
+    recent_end_dt: str,
+    feature_columns: Iterable[str] | None = None,
+) -> dict[str, float]:
+    selected_columns = [column for column in (feature_columns or PSI_FEATURE_COLUMNS) if column in FEATURE_COLUMNS]
+    if not selected_columns:
+        raise ValueError("no PSI feature columns selected")
+
+    feature_psis: dict[str, float] = {}
+    for column in selected_columns:
+        baseline_series = load_feature_series(
+            connection=connection,
+            config=config,
+            city=city,
+            start_dt=baseline_start_dt,
+            end_dt=baseline_end_dt,
+            feature_column=column,
+        )
+        recent_series = load_feature_series(
+            connection=connection,
+            config=config,
+            city=city,
+            start_dt=recent_start_dt,
+            end_dt=recent_end_dt,
+            feature_column=column,
+        )
+        feature_psis[column] = _psi_from_numeric_series(baseline_series, recent_series)
+    return feature_psis
+
+
 def split_feature_psi_groups(feature_psis: dict[str, float]) -> dict[str, dict[str, float]]:
     return {
         group_name: {column: feature_psis[column] for column in group_columns if column in feature_psis}
@@ -240,65 +330,88 @@ def publish_psi(
     max_feature_age_minutes: int = 45,
     dry_run: bool = False,
 ) -> dict[str, object]:
-    latest_feature_dt = load_latest_feature_dt(config=config, city=city)
-    feature_age = assert_feature_freshness(
-        latest_feature_dt=latest_feature_dt,
-        max_feature_age_minutes=max_feature_age_minutes,
-    )
-    window = build_drift_window(
-        now_utc=datetime.now(timezone.utc),
-        lookback_hours=lookback_hours,
-        baseline_days=baseline_days,
-    )
-    baseline_df = load_feature_window(
-        config=config,
-        city=city,
-        start_dt=window.baseline_start,
-        end_dt=window.baseline_end,
-    )
-    recent_df = load_feature_window(
-        config=config,
-        city=city,
-        start_dt=window.recent_start,
-        end_dt=window.recent_end,
-    )
-    if recent_df.empty:
-        raise RuntimeError(
-            "feature freshness check failed: "
-            f"recent feature window is empty for city={city}, window={window.recent_start}..{window.recent_end}"
-        )
+    engine = create_pg_engine(config)
+    try:
+        with engine.connect() as connection:
+            latest_feature_dt = load_latest_feature_dt(config=config, city=city)
+            feature_age = assert_feature_freshness(
+                latest_feature_dt=latest_feature_dt,
+                max_feature_age_minutes=max_feature_age_minutes,
+            )
+            window = build_drift_window(
+                now_utc=datetime.now(timezone.utc),
+                lookback_hours=lookback_hours,
+                baseline_days=baseline_days,
+            )
+            baseline_rows = load_feature_window_row_count(
+                connection=connection,
+                config=config,
+                city=city,
+                start_dt=window.baseline_start,
+                end_dt=window.baseline_end,
+            )
+            recent_rows = load_feature_window_row_count(
+                connection=connection,
+                config=config,
+                city=city,
+                start_dt=window.recent_start,
+                end_dt=window.recent_end,
+            )
+            print(
+                f"[psi] city={city} baseline_rows={baseline_rows} recent_rows={recent_rows} "
+                f"baseline={window.baseline_start}..{window.baseline_end} "
+                f"recent={window.recent_start}..{window.recent_end}"
+            )
+            if recent_rows == 0:
+                raise RuntimeError(
+                    "feature freshness check failed: "
+                    f"recent feature window is empty for city={city}, window={window.recent_start}..{window.recent_end}"
+                )
 
-    if baseline_df.empty or recent_df.empty:
-        result = {
-            "psi": 0.0,
-            "psi_core": 0.0,
-            "psi_weather": 0.0,
-            "psi_aggregator": aggregator,
-            "feature_count": 0,
-            "core_feature_count": 0,
-            "weather_feature_count": 0,
-            "baseline_rows": int(len(baseline_df)),
-            "recent_rows": int(len(recent_df)),
-            "latest_feature_dt_utc": latest_feature_dt.isoformat(),
-            "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
-            "window": window,
-        }
-        if dry_run:
-            return result
-        put_metrics_bulk(
-            [
-                ("PSI", 0.0, "None"),
-                ("PSI_core", 0.0, "None"),
-                ("PSI_weather", 0.0, "None"),
-            ],
-            endpoint=endpoint,
-            city=city,
-            target_name=target_name,
-            environment=environment,
-        )
-        return result
+            if baseline_rows == 0 or recent_rows == 0:
+                result = {
+                    "psi": 0.0,
+                    "psi_core": 0.0,
+                    "psi_weather": 0.0,
+                    "psi_aggregator": aggregator,
+                    "feature_count": 0,
+                    "core_feature_count": 0,
+                    "weather_feature_count": 0,
+                    "baseline_rows": baseline_rows,
+                    "recent_rows": recent_rows,
+                    "latest_feature_dt_utc": latest_feature_dt.isoformat(),
+                    "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
+                    "window": window,
+                }
+                if dry_run:
+                    return result
+                put_metrics_bulk(
+                    [
+                        ("PSI", 0.0, "None"),
+                        ("PSI_core", 0.0, "None"),
+                        ("PSI_weather", 0.0, "None"),
+                    ],
+                    endpoint=endpoint,
+                    city=city,
+                    target_name=target_name,
+                    environment=environment,
+                )
+                return result
 
-    feature_psis = compute_feature_psi_map(baseline_df, recent_df)
+            # Compute one feature at a time so the tier-2 worker does not materialize
+            # multi-day baseline and recent windows for every PSI column at once.
+            feature_psis = compute_feature_psi_map_from_db(
+                connection=connection,
+                config=config,
+                city=city,
+                baseline_start_dt=window.baseline_start,
+                baseline_end_dt=window.baseline_end,
+                recent_start_dt=window.recent_start,
+                recent_end_dt=window.recent_end,
+            )
+    finally:
+        engine.dispose()
+
     grouped_feature_psis = split_feature_psi_groups(feature_psis)
     psi_value = aggregate_psi(feature_psis, aggregator=aggregator)
     psi_core = aggregate_psi(grouped_feature_psis["core"], aggregator=aggregator)
@@ -311,8 +424,8 @@ def publish_psi(
         "feature_count": len(feature_psis),
         "core_feature_count": len(grouped_feature_psis["core"]),
         "weather_feature_count": len(grouped_feature_psis["weather"]),
-        "baseline_rows": int(len(baseline_df)),
-        "recent_rows": int(len(recent_df)),
+        "baseline_rows": baseline_rows,
+        "recent_rows": recent_rows,
         "latest_feature_dt_utc": latest_feature_dt.isoformat(),
         "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
         "window": window,
