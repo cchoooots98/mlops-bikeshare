@@ -1,5 +1,9 @@
 # MLOps Bikeshare
 
+I built a dual-target MLOps platform that predicts 30-minute bikeshare stockouts for 1,400+ Paris stations, running always-on data engineering on EC2 and AWS production serving with Airflow, dbt, PostgreSQL, SageMaker, Lambda, CloudWatch, SNS, and a Streamlit operations dashboard.
+
+[Hiring Manager Overview](HIRING_MANAGER.md) | [Demo Walkthrough](DEMO.md) | [Architecture Deep Dive](docs/architecture.md)
+
 This repository implements a dual-target, dbt-first bikeshare platform for Paris:
 - local development and offline training on a reproducible Python 3.11 environment
 - always-on data engineering on EC2 with Docker Compose
