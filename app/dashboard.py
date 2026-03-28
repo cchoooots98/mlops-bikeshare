@@ -110,6 +110,10 @@ PG_PORT = int(os.environ.get("STREAMLIT_PG_PORT") or st.secrets.get("pg_port", 1
 PG_DB = st.secrets.get("pg_database", "velib_dw")
 PG_USER = st.secrets.get("pg_user", "velib")
 PG_PASS = st.secrets.get("pg_password", "velib")
+POSTGRES_CACHE_TTL_SECONDS = int(_app.get("dashboard_postgres_cache_ttl_seconds", 20))
+ARTIFACT_CACHE_TTL_SECONDS = int(_app.get("dashboard_artifact_cache_ttl_seconds", 20))
+METRIC_CACHE_TTL_SECONDS = int(_app.get("dashboard_metric_cache_ttl_seconds", 30))
+HISTORY_CACHE_TTL_SECONDS = int(_app.get("dashboard_history_cache_ttl_seconds", 30))
 
 
 @st.cache_resource(show_spinner=False)
@@ -140,6 +144,83 @@ def _s3_client():
 @st.cache_resource(show_spinner=False)
 def _cw_client():
     return create_cloudwatch_client(region_name=AWS_REGION, profile_name=AWS_PROFILE)
+
+
+@st.cache_data(show_spinner=False, ttl=POSTGRES_CACHE_TTL_SECONDS)
+def _load_station_info_cached(_engine, *, schema: str, city: str) -> pd.DataFrame:
+    return load_station_info(engine=_engine, schema=schema, city=city)
+
+
+@st.cache_data(show_spinner=False, ttl=POSTGRES_CACHE_TTL_SECONDS)
+def _load_freshness_cached(_engine, *, schema: str, city: str, tables: tuple[str, ...]) -> FreshnessLoadResult:
+    return load_freshness(
+        engine=_engine,
+        schema=schema,
+        city=city,
+        tables=list(tables),
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=ARTIFACT_CACHE_TTL_SECONDS)
+def _load_latest_predictions_cached(_s3_client, *, bucket: str, city: str, target_name: str) -> ArtifactLoadResult:
+    return load_latest_predictions(
+        bucket=bucket,
+        city=city,
+        target_name=target_name,
+        s3_client=_s3_client,
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=ARTIFACT_CACHE_TTL_SECONDS)
+def _load_latest_quality_status_cached(_s3_client, *, bucket: str, city: str, target_name: str) -> ArtifactLoadResult:
+    return load_latest_quality_status(
+        bucket=bucket,
+        city=city,
+        target_name=target_name,
+        s3_client=_s3_client,
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=HISTORY_CACHE_TTL_SECONDS)
+def _load_prediction_history_cached(
+    _s3_client,
+    *,
+    bucket: str,
+    city: str,
+    target_name: str,
+    station_id: str,
+    n_periods: int,
+) -> ArtifactLoadResult:
+    return load_prediction_history(
+        bucket=bucket,
+        city=city,
+        target_name=target_name,
+        station_id=station_id,
+        n_periods=n_periods,
+        s3_client=_s3_client,
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=METRIC_CACHE_TTL_SECONDS)
+def _fetch_metric_series_cached(
+    _cw,
+    *,
+    namespace: str,
+    metric_name: str,
+    dimensions: tuple[tuple[str, str], ...],
+    minutes: int = 24 * 60,
+    period: int = 300,
+    stat: str = "Average",
+) -> pd.DataFrame:
+    return fetch_metric_series(
+        _cw,
+        namespace=namespace,
+        metric_name=metric_name,
+        dimensions=dict(dimensions),
+        minutes=minutes,
+        period=period,
+        stat=stat,
+    )
 
 
 def _determine_pipeline_state(
@@ -173,18 +254,18 @@ def _determine_pipeline_state(
 
 def _load_station_info_safely() -> tuple[pd.DataFrame, str]:
     try:
-        return load_station_info(engine=_pg_engine(), schema=PG_SCHEMA, city=CITY), ""
+        return _load_station_info_cached(_pg_engine(), schema=PG_SCHEMA, city=CITY), ""
     except Exception as exc:
         return pd.DataFrame(), f"Station metadata is unavailable because PostgreSQL could not be reached: {exc}"
 
 
 def _load_freshness_safely() -> FreshnessLoadResult:
     try:
-        return load_freshness(
-            engine=_pg_engine(),
+        return _load_freshness_cached(
+            _pg_engine(),
             schema=PG_SCHEMA,
             city=CITY,
-            tables=FRESHNESS_TABLES,
+            tables=tuple(FRESHNESS_TABLES),
         )
     except Exception as exc:
         return FreshnessLoadResult(
@@ -238,19 +319,19 @@ with st.spinner("Loading station metadata..."):
     station_info, station_info_error = _load_station_info_safely()
 
 with st.spinner("Loading latest prediction artifact..."):
-    latest_predictions = load_latest_predictions(
+    latest_predictions = _load_latest_predictions_cached(
+        _s3_client(),
         bucket=BUCKET,
         city=CITY,
         target_name=target_name,
-        s3_client=_s3_client(),
     )
 
 with st.spinner("Loading latest quality artifact..."):
-    latest_quality = load_latest_quality_status(
+    latest_quality = _load_latest_quality_status_cached(
+        _s3_client(),
         bucket=BUCKET,
         city=CITY,
         target_name=target_name,
-        s3_client=_s3_client(),
     )
 
 with st.spinner("Checking feature freshness..."):
@@ -331,13 +412,13 @@ with tab_history:
     history_station = str(selected_station["station_id"]) if selected_station is not None else None
     if history_station:
         with st.spinner(f"Loading history for station {history_station}..."):
-            history_result = load_prediction_history(
+            history_result = _load_prediction_history_cached(
+                _s3_client(),
                 bucket=BUCKET,
                 city=CITY,
                 target_name=target_name,
                 station_id=history_station,
                 n_periods=history_limit,
-                s3_client=_s3_client(),
             )
     else:
         history_result = ArtifactLoadResult(
@@ -359,37 +440,38 @@ with tab_quality:
         city=CITY,
         target_name=target.target_name,
     )
+    metric_dimensions = tuple(dims.items())
     model_health = {
-        "PR-AUC-24h": fetch_metric_series(
+        "PR-AUC-24h": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PR-AUC-24h",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
-        "F1-24h": fetch_metric_series(
+        "F1-24h": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="F1-24h",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
-        "PredictionHeartbeat": fetch_metric_series(
+        "PredictionHeartbeat": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PredictionHeartbeat",
-            dimensions=dims,
+            dimensions=metric_dimensions,
             stat="Sum",
         ),
-        "ThresholdHitRate-24h": fetch_metric_series(
+        "ThresholdHitRate-24h": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="ThresholdHitRate-24h",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
-        "Samples-24h": fetch_metric_series(
+        "Samples-24h": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="Samples-24h",
-            dimensions=dims,
+            dimensions=metric_dimensions,
             stat="Sum",
         ),
     }
@@ -429,65 +511,67 @@ with tab_system:
         city=CITY,
         target_name=target.target_name,
     )
+    metric_dimensions = tuple(dims.items())
     sm_dims = {
         "EndpointName": target.endpoint_name,
         "VariantName": "AllTraffic",
     }
+    sm_metric_dimensions = tuple(sm_dims.items())
     system_health = {
         "ModelLatency": _model_latency_ms(
-            fetch_metric_series(
+            _fetch_metric_series_cached(
                 _cw_client(),
                 namespace="AWS/SageMaker",
                 metric_name="ModelLatency",
-                dimensions=sm_dims,
+                dimensions=sm_metric_dimensions,
                 stat="p95",
             )
         ),
-        "Invocation5XXErrors": fetch_metric_series(
+        "Invocation5XXErrors": _fetch_metric_series_cached(
             _cw_client(),
             namespace="AWS/SageMaker",
             metric_name="Invocation5XXErrors",
-            dimensions=sm_dims,
+            dimensions=sm_metric_dimensions,
             stat="Sum",
         ),
-        "Invocation4XXErrors": fetch_metric_series(
+        "Invocation4XXErrors": _fetch_metric_series_cached(
             _cw_client(),
             namespace="AWS/SageMaker",
             metric_name="Invocation4XXErrors",
-            dimensions=sm_dims,
+            dimensions=sm_metric_dimensions,
             stat="Sum",
         ),
-        "Invocations": fetch_metric_series(
+        "Invocations": _fetch_metric_series_cached(
             _cw_client(),
             namespace="AWS/SageMaker",
             metric_name="Invocations",
-            dimensions=sm_dims,
+            dimensions=sm_metric_dimensions,
             stat="Sum",
         ),
-        "PredictionHeartbeat": fetch_metric_series(
+        "PredictionHeartbeat": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PredictionHeartbeat",
-            dimensions=dims,
+            dimensions=metric_dimensions,
             stat="Sum",
         ),
-        "PSI": fetch_metric_series(
+        "PSI": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PSI",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
-        "PSI_core": fetch_metric_series(
+        "PSI_core": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PSI_core",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
-        "PSI_weather": fetch_metric_series(
+        "PSI_weather": _fetch_metric_series_cached(
             _cw_client(),
             namespace=CW_NAMESPACE,
             metric_name="PSI_weather",
-            dimensions=dims,
+            dimensions=metric_dimensions,
         ),
     }
     render_metric_section(
