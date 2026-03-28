@@ -448,14 +448,14 @@ Keep the production DAG set paused at this point:
 - `serving_psi_publish_hourly`
 
 Timing contract for the staging/serving DAG chain:
-- `staging_prediction_15min` / `serving_prediction_15min` run on `1,16,31,46 * * * *`
-- `staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `8,23,38,53 * * * *`
-- quality waits for the prediction DAG run from 37 minutes earlier:
-  - 30 minutes for label maturity
-  - 7 extra minutes for the post-maturity backfill slot
-- hourly metrics wait for the quality DAG run from 5 minutes earlier
-- `staging_metrics_publish_hourly` / `serving_metrics_publish_hourly` run on `43 * * * *`
-- `staging_psi_publish_hourly` / `serving_psi_publish_hourly` run on `3 * * * *`
+- `staging_prediction_15min` / `serving_prediction_15min` run on `2,17,32,47 * * * *`
+- `staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `3,18,33,48 * * * *`
+- quality waits for the latest prediction DAG run whose upstream interval ended at least 30 minutes earlier:
+  - the maturity rule is 30 minutes
+  - the Airflow sensor resolves the upstream logical date from the prediction cron in `Europe/Paris`, then converts it back to UTC for the task instance lookup
+- `staging_metrics_publish_hourly` / `serving_metrics_publish_hourly` run on `42 * * * *`
+- hourly metrics wait for the latest quality DAG run whose interval has already ended
+- `staging_psi_publish_hourly` / `serving_psi_publish_hourly` run on `12 * * * *`
 - hourly PSI no longer waits for hourly metrics
 - hourly PSI publishes independently and fails fast if the feature store is stale or the recent feature window is empty
 - the drift publisher emits `PSI` (aggregate trimmed mean), `PSI_core`, and `PSI_weather`; the gate hard-fails only on `PSI_core`

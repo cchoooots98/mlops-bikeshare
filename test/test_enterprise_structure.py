@@ -273,6 +273,23 @@ def test_serving_dag_sensors_align_with_30_min_label_maturity():
     assert '"PSI_AGGREGATOR", "PSI_AGGREGATOR", "trimmed_mean"' in factory_source
 
 
+def test_deployment_guide_serving_timing_contract_matches_schedule_defs():
+    guide = Path("docs/deployment_guide.md").read_text(encoding="utf-8")
+    schedules = Path("airflow/dags/schedule_defs.py").read_text(encoding="utf-8")
+
+    assert 'SERVING_PREDICTION_SCHEDULE = "2-59/15 * * * *"' in schedules
+    assert 'SERVING_QUALITY_SCHEDULE = "3-59/15 * * * *"' in schedules
+    assert 'SERVING_METRICS_SCHEDULE = "42 * * * *"' in schedules
+    assert 'SERVING_PSI_SCHEDULE = "12 * * * *"' in schedules
+
+    assert "`staging_prediction_15min` / `serving_prediction_15min` run on `2,17,32,47 * * * *`" in guide
+    assert "`staging_quality_backfill_15min` / `serving_quality_backfill_15min` run on `3,18,33,48 * * * *`" in guide
+    assert "`staging_metrics_publish_hourly` / `serving_metrics_publish_hourly` run on `42 * * * *`" in guide
+    assert "`staging_psi_publish_hourly` / `serving_psi_publish_hourly` run on `12 * * * *`" in guide
+    assert "37 minutes earlier" not in guide
+    assert "5 minutes earlier" not in guide
+
+
 def test_airflow_dags_share_runtime_helpers_and_schedule_contracts():
     runtime_utils = Path("airflow/dags/runtime_utils.py").read_text(encoding="utf-8")
     schedule_defs = Path("airflow/dags/schedule_defs.py").read_text(encoding="utf-8")
