@@ -75,8 +75,8 @@ class RawAgeAssessment:
 SOURCE_FRESHNESS_POLICY = RawAgePolicy(
     label="Source freshness",
     cadence_minutes=5,
-    warning_age_minutes=10,
-    critical_age_minutes=20,
+    warning_age_minutes=60,
+    critical_age_minutes=120,
 )
 # Source freshness reflects the latest GBFS bucket already landed in Postgres.
 # Feature freshness should allow one full downstream build handoff:
@@ -96,7 +96,12 @@ PREDICTION_ARTIFACT_POLICY = LatencyPolicy(
     label="Prediction artifact",
     cadence_minutes=15,
     dt_offset_minutes=10,
-    availability_lag_minutes=6,
+    # Prediction artifacts are written from the latest completed serving
+    # feature snapshot available when the 15-minute prediction DAG starts.
+    # Even with healthy DAG runs, the newest completed prediction shard often
+    # trails wall clock by roughly one prediction cadence plus upstream
+    # feature lag because the current prediction cycle may still be running.
+    availability_lag_minutes=18,
     warning_excess_minutes=15,
     critical_excess_minutes=30,
 )
@@ -105,8 +110,12 @@ QUALITY_ARTIFACT_POLICY = LatencyPolicy(
     cadence_minutes=15,
     dt_offset_minutes=10,
     availability_lag_minutes=43,
-    warning_excess_minutes=15,
-    critical_excess_minutes=30,
+    # Quality shards lag predictions by label maturity plus the next backfill
+    # cycle. A single additional 15-minute cycle can still be healthy when the
+    # current backfill run is in flight, so warnings start only after that
+    # extra cycle has clearly been missed.
+    warning_excess_minutes=20,
+    critical_excess_minutes=35,
 )
 
 

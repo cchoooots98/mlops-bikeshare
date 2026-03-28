@@ -300,12 +300,12 @@ def test_build_data_status_frame_caps_downstream_stages_to_stale_source():
     )
 
     rows = {row["Data source"]: row for row in frame.to_dict("records")}
-    assert rows["Source freshness"]["Status"] == "Warning"
+    assert rows["Source freshness"]["Status"] == "Healthy"
     assert rows["Feature freshness"]["Status"] == "Healthy"
     assert rows["Feature freshness"]["Expected lag (min)"] == 11.0
     assert rows["Feature freshness"]["Excess lag (min)"] == 0.0
     assert rows["Prediction artifact"]["Status"] == "Healthy"
-    assert rows["Prediction artifact"]["Expected lag (min)"] == 11.0
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 21.0
     assert rows["Prediction artifact"]["Excess lag (min)"] == 0.0
     assert "schedule naturally implies 11.0 min" in rows["Feature freshness"]["Operator meaning"].lower()
     assert rows["Quality artifact"]["Status"] == "Healthy"
@@ -399,10 +399,10 @@ def test_build_data_status_frame_separates_source_freshness_from_feature_schedul
     )
 
     rows = {row["Data source"]: row for row in frame.to_dict("records")}
-    assert rows["Source freshness"]["Status"] == "Warning"
+    assert rows["Source freshness"]["Status"] == "Healthy"
     assert pd.isna(rows["Source freshness"]["Expected lag (min)"])
     assert pd.isna(rows["Source freshness"]["Excess lag (min)"])
-    assert "10+ min" in rows["Source freshness"]["Expected cadence / SLA"]
+    assert "60+ min" in rows["Source freshness"]["Expected cadence / SLA"]
     assert rows["Feature freshness"]["Status"] == "Healthy"
 
 
@@ -451,6 +451,53 @@ def test_build_data_status_frame_allows_inflight_feature_build_window_without_wa
     assert rows["Feature freshness"]["Expected lag (min)"] == 14.9
     assert rows["Feature freshness"]["Excess lag (min)"] == 0.0
     assert "natural lag 10-15 min" in rows["Feature freshness"]["Expected cadence / SLA"]
+
+
+def test_build_data_status_frame_allows_inflight_prediction_window_without_warning():
+    now = datetime(2026, 3, 28, 14, 33, 21, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 28, 14, 10, tzinfo=timezone.utc),
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.NO_OBJECTS,
+        latest_dt=None,
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 28, 14, 25, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-28-14-25",
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Feature freshness"]["Status"] == "Healthy"
+    assert rows["Prediction artifact"]["Status"] == "Healthy"
+    assert rows["Prediction artifact"]["Expected lag (min)"] == 23.4
+    assert rows["Prediction artifact"]["Excess lag (min)"] == 0.0
+    assert "natural lag 18-33 min" in rows["Prediction artifact"]["Expected cadence / SLA"]
 
 
 def test_build_data_status_frame_caps_quality_expectation_to_latest_prediction_dt():
@@ -503,6 +550,89 @@ def test_build_data_status_frame_caps_quality_expectation_to_latest_prediction_d
     assert rows["Quality artifact"]["Expected lag (min)"] == 66.0
     assert rows["Quality artifact"]["Excess lag (min)"] == 0.0
     assert "capped by latest prediction artifact" in rows["Quality artifact"]["Operator meaning"].lower()
+
+
+def test_build_data_status_frame_source_freshness_only_warns_after_one_hour():
+    now = datetime(2026, 3, 28, 15, 0, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 28, 14, 40, tzinfo=timezone.utc),
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 28, 14, 10, tzinfo=timezone.utc),
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 28, 13, 59, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Source freshness"]["Status"] == "Warning"
+    assert "60+ min" in rows["Source freshness"]["Expected cadence / SLA"]
+
+
+def test_build_data_status_frame_allows_inflight_quality_backfill_window_without_warning():
+    now = datetime(2026, 3, 28, 15, 14, tzinfo=timezone.utc)
+    prediction_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 28, 14, 55, tzinfo=timezone.utc),
+    )
+    quality_result = ArtifactLoadResult(
+        status=LoadStatus.OK,
+        latest_dt=datetime(2026, 3, 28, 14, 10, tzinfo=timezone.utc),
+    )
+    freshness_result = FreshnessLoadResult(
+        status=LoadStatus.OK,
+        data=pd.DataFrame(
+            [
+                {
+                    "source": "Source freshness",
+                    "freshness_type": "source",
+                    "latest_dt_str": datetime(2026, 3, 28, 14, 55, tzinfo=timezone.utc),
+                    "loader_status": "ok",
+                    "message": "",
+                },
+                {
+                    "source": "Feature freshness",
+                    "freshness_type": "feature",
+                    "latest_dt_str": "2026-03-28-14-55",
+                    "loader_status": "ok",
+                    "message": "",
+                },
+            ]
+        ),
+    )
+
+    frame = build_data_status_frame(
+        prediction_result=prediction_result,
+        quality_result=quality_result,
+        freshness_result=freshness_result,
+        now_utc=now,
+    )
+
+    rows = {row["Data source"]: row for row in frame.to_dict("records")}
+    assert rows["Quality artifact"]["Status"] == "Healthy"
+    assert rows["Quality artifact"]["Expected lag (min)"] == 49.0
+    assert rows["Quality artifact"]["Excess lag (min)"] == 15.0
+    assert "warning after 2 missed cycles (20+ min behind schedule)" in rows["Quality artifact"]["Expected cadence / SLA"]
 
 
 def test_classify_metric_status_respects_sla_bands():
