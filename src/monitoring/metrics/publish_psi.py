@@ -78,6 +78,15 @@ def build_drift_window(
 
 
 def load_latest_feature_dt(*, config: PostgresFeatureConfig, city: str) -> datetime:
+    engine = create_pg_engine(config)
+    try:
+        with engine.connect() as connection:
+            return load_latest_feature_dt_from_connection(connection=connection, config=config, city=city)
+    finally:
+        engine.dispose()
+
+
+def load_latest_feature_dt_from_connection(*, connection, config: PostgresFeatureConfig, city: str) -> datetime:
     sql = text(
         f"""
         SELECT max(dt) AS max_dt
@@ -85,12 +94,7 @@ def load_latest_feature_dt(*, config: PostgresFeatureConfig, city: str) -> datet
         WHERE city = :city
         """
     )
-    engine = create_pg_engine(config)
-    try:
-        with engine.connect() as connection:
-            max_dt = pd.read_sql_query(sql, connection, params={"city": city}).iloc[0]["max_dt"]
-    finally:
-        engine.dispose()
+    max_dt = pd.read_sql_query(sql, connection, params={"city": city}).iloc[0]["max_dt"]
     if not max_dt:
         raise RuntimeError(f"feature freshness check failed: no features found for city={city}")
     return datetime.strptime(max_dt, DT_FORMAT).replace(tzinfo=timezone.utc)
@@ -330,10 +334,39 @@ def publish_psi(
     max_feature_age_minutes: int = 45,
     dry_run: bool = False,
 ) -> dict[str, object]:
+    result = compute_psi_result(
+        config=config,
+        city=city,
+        lookback_hours=lookback_hours,
+        baseline_days=baseline_days,
+        aggregator=aggregator,
+        max_feature_age_minutes=max_feature_age_minutes,
+    )
+    if dry_run:
+        return result
+    publish_psi_metrics(
+        result,
+        endpoint=endpoint,
+        city=city,
+        target_name=target_name,
+        environment=environment,
+    )
+    return result
+
+
+def compute_psi_result(
+    *,
+    config: PostgresFeatureConfig,
+    city: str,
+    lookback_hours: int = 24,
+    baseline_days: int = 7,
+    aggregator: str = DEFAULT_PSI_AGGREGATOR,
+    max_feature_age_minutes: int = 45,
+) -> dict[str, object]:
     engine = create_pg_engine(config)
     try:
         with engine.connect() as connection:
-            latest_feature_dt = load_latest_feature_dt(config=config, city=city)
+            latest_feature_dt = load_latest_feature_dt_from_connection(connection=connection, config=config, city=city)
             feature_age = assert_feature_freshness(
                 latest_feature_dt=latest_feature_dt,
                 max_feature_age_minutes=max_feature_age_minutes,
@@ -383,19 +416,6 @@ def publish_psi(
                     "feature_age_minutes": round(feature_age.total_seconds() / 60.0, 3),
                     "window": window,
                 }
-                if dry_run:
-                    return result
-                put_metrics_bulk(
-                    [
-                        ("PSI", 0.0, "None"),
-                        ("PSI_core", 0.0, "None"),
-                        ("PSI_weather", 0.0, "None"),
-                    ],
-                    endpoint=endpoint,
-                    city=city,
-                    target_name=target_name,
-                    environment=environment,
-                )
                 return result
 
             # Compute one feature at a time so the tier-2 worker does not materialize
@@ -435,21 +455,28 @@ def publish_psi(
             :5
         ],
     }
-    if dry_run:
-        return result
+    return result
 
+
+def publish_psi_metrics(
+    result: dict[str, object],
+    *,
+    endpoint: str,
+    city: str,
+    target_name: str,
+    environment: str,
+) -> None:
     put_metrics_bulk(
         [
-            ("PSI", psi_value, "None"),
-            ("PSI_core", psi_core, "None"),
-            ("PSI_weather", psi_weather, "None"),
+            ("PSI", float(result["psi"]), "None"),
+            ("PSI_core", float(result["psi_core"]), "None"),
+            ("PSI_weather", float(result["psi_weather"]), "None"),
         ],
         endpoint=endpoint,
         city=city,
         target_name=target_name,
         environment=environment,
     )
-    return result
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

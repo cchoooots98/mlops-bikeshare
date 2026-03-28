@@ -4,7 +4,6 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
@@ -12,6 +11,9 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from dbt_thread_utils import get_dbt_threads
+from queue_defs import CORE_5M_QUEUE
+from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import (
     DEFAULT_FEATURE_BUILD_SELECT,
     DEFAULT_FEATURE_TEST_SELECTOR,
@@ -25,16 +27,12 @@ from external_task_utils import execution_date_fn_for_schedule
 from schedule_defs import DBT_FEATURE_BUILD_5MIN_SCHEDULE, DBT_STATION_STATUS_HOTPATH_5MIN_SCHEDULE
 
 
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
 def _get_pool_name() -> str:
     return _get_setting("DBT_FEATURE_POOL", "DBT_FEATURE_POOL", "dbt_feature_pool")
 
 
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
+    return _get_setting("AIRFLOW_QUEUE_CORE_5M", "AIRFLOW_QUEUE_CORE_5M", CORE_5M_QUEUE)
 
 
 def _build_feature_model_vars(context: dict) -> dict[str, object]:
@@ -55,6 +53,10 @@ def _build_feature_test_vars(context: dict) -> dict[str, object]:
     }
 
 
+def _get_feature_threads() -> int:
+    return get_dbt_threads(_get_setting, "DBT_FEATURE_THREADS")
+
+
 def run_dbt_feature_build_task(**context):
     model_select = parse_select_models(
         _get_setting(
@@ -64,7 +66,7 @@ def run_dbt_feature_build_task(**context):
         ),
         default_models=DEFAULT_FEATURE_BUILD_SELECT,
     )
-    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "2"))
+    threads = _get_feature_threads()
     summary = run_feature_model_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
@@ -95,7 +97,7 @@ def run_dbt_feature_smoke_tests_task(**context):
         ),
         default_selector=DEFAULT_FEATURE_TEST_SELECTOR,
     )
-    threads = int(_get_setting("DBT_THREADS", "DBT_THREADS", "2"))
+    threads = _get_feature_threads()
     summary = run_feature_smoke_tests(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),

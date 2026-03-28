@@ -3,8 +3,6 @@ import sys
 from datetime import timedelta
 
 from airflow import DAG
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
@@ -12,6 +10,14 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from queue_defs import (
+    OBS_MAIN_QUEUE,
+    OBS_PSI_QUEUE,
+    SERVING_PSI_POOL,
+    SERVING_QUALITY_METRICS_POOL,
+    SERVING_RT_QUEUE,
+)
+from runtime_utils import get_airflow_setting as _get_setting, get_dw_connection
 from src.config import run_project_module
 from src.config.naming import deployment_state_path, endpoint_name
 from src.monitoring.quality_contract import QUALITY_LABEL_MATURITY_MINUTES
@@ -25,40 +31,42 @@ from schedule_defs import (
 
 
 TARGETS = ("bikes", "docks")
-TIER1_QUEUE = "tier1"
-TIER2_QUEUE = "tier2"
 SERVING_PREDICTION_POOL = "serving_prediction_pool"
-SERVING_OBSERVABILITY_POOL = "serving_observability_pool"
 DEFAULT_ARGS = {
     "owner": "airflow",
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
-
-
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
 def _dw_connection():
-    conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
-    return BaseHook.get_connection(conn_id)
+    return get_dw_connection()
 
 
-def _tier1_queue() -> str:
-    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", TIER1_QUEUE)
+def _serving_rt_queue() -> str:
+    return _get_setting("AIRFLOW_QUEUE_SERVING_RT", "AIRFLOW_QUEUE_SERVING_RT", SERVING_RT_QUEUE)
 
 
-def _tier2_queue() -> str:
-    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", TIER2_QUEUE)
+def _obs_main_queue() -> str:
+    return _get_setting("AIRFLOW_QUEUE_OBS_MAIN", "AIRFLOW_QUEUE_OBS_MAIN", OBS_MAIN_QUEUE)
+
+
+def _obs_psi_queue() -> str:
+    return _get_setting("AIRFLOW_QUEUE_OBS_PSI", "AIRFLOW_QUEUE_OBS_PSI", OBS_PSI_QUEUE)
 
 
 def _serving_prediction_pool() -> str:
     return _get_setting("SERVING_PREDICTION_POOL", "SERVING_PREDICTION_POOL", SERVING_PREDICTION_POOL)
 
 
-def _serving_observability_pool() -> str:
-    return _get_setting("SERVING_OBSERVABILITY_POOL", "SERVING_OBSERVABILITY_POOL", SERVING_OBSERVABILITY_POOL)
+def _serving_quality_metrics_pool() -> str:
+    return _get_setting(
+        "SERVING_QUALITY_METRICS_POOL",
+        "SERVING_QUALITY_METRICS_POOL",
+        SERVING_QUALITY_METRICS_POOL,
+    )
+
+
+def _serving_psi_pool() -> str:
+    return _get_setting("SERVING_PSI_POOL", "SERVING_PSI_POOL", SERVING_PSI_POOL)
 
 
 def _base_runtime_env(*, target_name: str, environment: str) -> dict[str, str]:
@@ -133,17 +141,13 @@ def run_metrics_publish_task(*, target_name: str, environment: str) -> None:
     )
 
 
-def run_psi_publish_task(*, target_name: str, environment: str) -> None:
-    env = _base_runtime_env(target_name=target_name, environment=environment)
+def run_psi_publish_task(*, environment: str) -> None:
+    env = _base_runtime_env(target_name=TARGETS[0], environment=environment)
     _run_module(
-        "src.monitoring.metrics.publish_psi",
+        "src.monitoring.metrics.publish_psi_all_targets",
         args=[
             "--city",
             env["CITY"],
-            "--endpoint",
-            env["SM_ENDPOINT"],
-            "--target-name",
-            target_name,
             "--environment",
             environment,
             "--pg-host",
@@ -191,7 +195,7 @@ def build_serving_dags(
                 task_id=f"predict_{target}",
                 python_callable=run_prediction_task,
                 op_kwargs={"target_name": target, "environment": environment},
-                queue=_tier1_queue(),
+                queue=_serving_rt_queue(),
                 pool=_serving_prediction_pool(),
             )
 
@@ -219,14 +223,14 @@ def build_serving_dags(
                 mode="reschedule",
                 poke_interval=60,
                 timeout=15 * 60,
-                queue=_tier2_queue(),
+                queue=_obs_main_queue(),
             )
             task = PythonOperator(
                 task_id=f"backfill_quality_{target}",
                 python_callable=run_quality_backfill_task,
                 op_kwargs={"target_name": target, "environment": environment},
-                queue=_tier2_queue(),
-                pool=_serving_observability_pool(),
+                queue=_obs_main_queue(),
+                pool=_serving_quality_metrics_pool(),
             )
             wait_for_prediction >> task
 
@@ -251,14 +255,14 @@ def build_serving_dags(
                 mode="reschedule",
                 poke_interval=60,
                 timeout=20 * 60,
-                queue=_tier2_queue(),
+                queue=_obs_main_queue(),
             )
             task = PythonOperator(
                 task_id=f"publish_metrics_{target}",
                 python_callable=run_metrics_publish_task,
                 op_kwargs={"target_name": target, "environment": environment},
-                queue=_tier2_queue(),
-                pool=_serving_observability_pool(),
+                queue=_obs_main_queue(),
+                pool=_serving_quality_metrics_pool(),
             )
             wait_for_quality >> task
 
@@ -271,13 +275,12 @@ def build_serving_dags(
         default_args=DEFAULT_ARGS,
         tags=psi_tags,
     ) as psi_dag:
-        for target in TARGETS:
-            PythonOperator(
-                task_id=f"publish_psi_{target}",
-                python_callable=run_psi_publish_task,
-                op_kwargs={"target_name": target, "environment": environment},
-                queue=_tier2_queue(),
-                pool=_serving_observability_pool(),
-            )
+        PythonOperator(
+            task_id="publish_psi_all_targets",
+            python_callable=run_psi_publish_task,
+            op_kwargs={"environment": environment},
+            queue=_obs_psi_queue(),
+            pool=_serving_psi_pool(),
+        )
 
     return prediction_dag, quality_dag, metrics_dag, psi_dag

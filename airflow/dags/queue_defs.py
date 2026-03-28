@@ -1,0 +1,11 @@
+CORE_5M_QUEUE = "core_5m"
+WEATHER_10M_QUEUE = "weather_10m"
+SERVING_RT_QUEUE = "serving_rt"
+OBS_MAIN_QUEUE = "obs_main"
+OBS_PSI_QUEUE = "obs_psi"
+DAILY_SIDECAR_QUEUE = "daily_sidecar"
+
+DBT_WEATHER_POOL = "dbt_weather_pool"
+DBT_SIDECAR_POOL = "dbt_sidecar_pool"
+SERVING_QUALITY_METRICS_POOL = "serving_quality_metrics_pool"
+SERVING_PSI_POOL = "serving_psi_pool"

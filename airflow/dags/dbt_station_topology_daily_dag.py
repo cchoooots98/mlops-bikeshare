@@ -4,7 +4,6 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
@@ -12,21 +11,24 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from dbt_thread_utils import get_dbt_threads
+from queue_defs import DAILY_SIDECAR_QUEUE, DBT_SIDECAR_POOL
+from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import DEFAULT_STATION_TOPOLOGY_SELECT, parse_select_models, run_model_build
 from external_task_utils import execution_date_fn_for_schedule
 from schedule_defs import DBT_STATION_TOPOLOGY_DAILY_SCHEDULE, GBFS_STATION_INFORMATION_DAILY_SCHEDULE
 
 
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
 def _get_pool_name() -> str:
-    return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")
+    return _get_setting("DBT_SIDECAR_POOL", "DBT_SIDECAR_POOL", DBT_SIDECAR_POOL)
 
 
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
+    return _get_setting("AIRFLOW_QUEUE_DAILY_SIDECAR", "AIRFLOW_QUEUE_DAILY_SIDECAR", DAILY_SIDECAR_QUEUE)
+
+
+def _get_sidecar_threads() -> int:
+    return get_dbt_threads(_get_setting, "DBT_SIDECAR_THREADS")
 
 
 def run_dbt_station_topology_task():
@@ -43,7 +45,7 @@ def run_dbt_station_topology_task():
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
         selector=None,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
+        threads=_get_sidecar_threads(),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_station_topology {summary}")
 

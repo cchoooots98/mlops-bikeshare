@@ -4,35 +4,20 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 
 AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from queue_defs import WEATHER_10M_QUEUE
+from runtime_utils import get_airflow_setting as _get_setting, get_dw_conn_uri
 from src.config import run_project_module
 from schedule_defs import WEATHER_10MIN_SCHEDULE
 
 
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
-
-
-def _dw_conn_uri() -> str:
-    conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
-    conn = BaseHook.get_connection(conn_id)
-    uri = conn.get_uri()
-    if uri.startswith("postgres://"):
-        return uri.replace("postgres://", "postgresql+psycopg2://", 1)
-    if uri.startswith("postgresql://"):
-        return uri.replace("postgresql://", "postgresql+psycopg2://", 1)
-    return uri
+    return _get_setting("AIRFLOW_QUEUE_WEATHER_10M", "AIRFLOW_QUEUE_WEATHER_10M", WEATHER_10M_QUEUE)
 
 
 def _raw_bucket() -> str:

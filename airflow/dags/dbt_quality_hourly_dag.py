@@ -4,13 +4,15 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 
 AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from dbt_thread_utils import get_dbt_threads
+from queue_defs import DAILY_SIDECAR_QUEUE, DBT_SIDECAR_POOL
+from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import (
     DEFAULT_QUALITY_TEST_SELECTOR,
     DEFAULT_SOURCE_FRESHNESS_SELECT,
@@ -19,18 +21,19 @@ from src.orchestration.dbt_tasks import (
     run_dbt_source_freshness,
     run_quality_tests,
 )
-
-
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
+from schedule_defs import DBT_QUALITY_HOURLY_SCHEDULE
 
 
 def _get_pool_name() -> str:
-    return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")
+    return _get_setting("DBT_SIDECAR_POOL", "DBT_SIDECAR_POOL", DBT_SIDECAR_POOL)
 
 
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")
+    return _get_setting("AIRFLOW_QUEUE_DAILY_SIDECAR", "AIRFLOW_QUEUE_DAILY_SIDECAR", DAILY_SIDECAR_QUEUE)
+
+
+def _get_sidecar_threads() -> int:
+    return get_dbt_threads(_get_setting, "DBT_SIDECAR_THREADS")
 
 
 def _build_quality_test_vars(context: dict) -> dict[str, object]:
@@ -50,7 +53,7 @@ def run_dbt_source_freshness_task():
             _get_setting("DBT_SOURCE_FRESHNESS_SELECT", "DBT_SOURCE_FRESHNESS_SELECT", ""),
             default_models=DEFAULT_SOURCE_FRESHNESS_SELECT,
         ),
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
+        threads=_get_sidecar_threads(),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_source_freshness {summary}")
 
@@ -75,7 +78,7 @@ def run_dbt_quality_tests_task(**context):
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=test_select,
         selector=None if test_select else test_selector,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
+        threads=_get_sidecar_threads(),
         dbt_vars=_build_quality_test_vars(context),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_quality_tests {summary}")
@@ -92,7 +95,7 @@ start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
 with DAG(
     dag_id="dbt_quality_hourly",
     start_date=start,
-    schedule="13 * * * *",
+    schedule=DBT_QUALITY_HOURLY_SCHEDULE,
     catchup=False,
     max_active_runs=1,
     default_args=default_args,

@@ -1,12 +1,31 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
 from src.config import quality_key
 from src.model_target import target_spec_from_predict_bikes
 from src.monitoring import quality_backfill
-from src.monitoring.metrics import publish_custom_metrics, publish_psi
+from src.monitoring.metrics import publish_custom_metrics, publish_psi, publish_psi_all_targets
 from src.monitoring.metrics.metrics_helper import build_metric_dimensions
+
+
+class _FakeConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeEngine:
+    def __init__(self):
+        self.disposed = False
+
+    def connect(self):
+        return _FakeConnection()
+
+    def dispose(self):
+        self.disposed = True
 
 
 def test_quality_backfill_builds_docks_rows():
@@ -163,7 +182,7 @@ def test_publish_psi_feature_freshness_rejects_stale_latest_dt():
         )
 
 
-def test_publish_psi_raises_when_recent_feature_window_is_empty(monkeypatch):
+def test_publish_psi_propagates_compute_errors_without_publishing(monkeypatch):
     config = publish_psi.PostgresFeatureConfig(
         pg_host="dw-postgres",
         pg_port=5432,
@@ -171,27 +190,17 @@ def test_publish_psi_raises_when_recent_feature_window_is_empty(monkeypatch):
         pg_user="velib",
         pg_password="velib",
     )
-
+    publish_calls = []
     monkeypatch.setattr(
         publish_psi,
-        "load_latest_feature_dt",
-        lambda **_: datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+        "compute_psi_result",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("recent feature window is empty")),
     )
     monkeypatch.setattr(
         publish_psi,
-        "assert_feature_freshness",
-        lambda **_: datetime.now(timezone.utc) - datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+        "publish_psi_metrics",
+        lambda *args, **kwargs: publish_calls.append((args, kwargs)),
     )
-
-    call_count = {"value": 0}
-
-    def fake_load_feature_window(**kwargs):
-        call_count["value"] += 1
-        if call_count["value"] == 1:
-            return pd.DataFrame({"util_bikes": [0.1], "temperature_c": [10.0]})
-        return pd.DataFrame()
-
-    monkeypatch.setattr(publish_psi, "load_feature_window", fake_load_feature_window)
 
     with pytest.raises(RuntimeError, match="recent feature window is empty"):
         publish_psi.publish_psi(
@@ -203,8 +212,10 @@ def test_publish_psi_raises_when_recent_feature_window_is_empty(monkeypatch):
             dry_run=True,
         )
 
+    assert publish_calls == []
 
-def test_publish_psi_dry_run_returns_core_and_weather_metrics(monkeypatch):
+
+def test_publish_psi_dry_run_returns_compute_result_without_publishing(monkeypatch):
     config = publish_psi.PostgresFeatureConfig(
         pg_host="dw-postgres",
         pg_port=5432,
@@ -212,40 +223,29 @@ def test_publish_psi_dry_run_returns_core_and_weather_metrics(monkeypatch):
         pg_user="velib",
         pg_password="velib",
     )
-
+    compute_calls = []
+    publish_calls = []
     monkeypatch.setattr(
         publish_psi,
-        "load_latest_feature_dt",
-        lambda **_: datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+        "compute_psi_result",
+        lambda **kwargs: compute_calls.append(kwargs)
+        or {
+            "psi": 0.22,
+            "psi_core": 0.31,
+            "psi_weather": 0.18,
+            "psi_aggregator": "trimmed_mean",
+            "feature_count": 3,
+            "core_feature_count": 1,
+            "weather_feature_count": 2,
+            "top_core_features": [("util_bikes", 0.31)],
+            "top_weather_features": [("temperature_c", 0.18), ("wind_speed_ms", 0.12)],
+        },
     )
     monkeypatch.setattr(
         publish_psi,
-        "assert_feature_freshness",
-        lambda **_: datetime.now(timezone.utc) - datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+        "publish_psi_metrics",
+        lambda *args, **kwargs: publish_calls.append((args, kwargs)),
     )
-
-    baseline = pd.DataFrame(
-        {
-            "util_bikes": [0.10, 0.15, 0.20, 0.22],
-            "temperature_c": [10.0, 11.0, 12.0, 12.5],
-            "wind_speed_ms": [3.0, 3.5, 4.0, 4.5],
-        }
-    )
-    recent = pd.DataFrame(
-        {
-            "util_bikes": [0.35, 0.40, 0.45, 0.50],
-            "temperature_c": [14.0, 15.0, 16.0, 17.0],
-            "wind_speed_ms": [1.5, 1.8, 2.0, 2.2],
-        }
-    )
-
-    call_count = {"value": 0}
-
-    def fake_load_feature_window(**kwargs):
-        call_count["value"] += 1
-        return baseline if call_count["value"] == 1 else recent
-
-    monkeypatch.setattr(publish_psi, "load_feature_window", fake_load_feature_window)
 
     result = publish_psi.publish_psi(
         config=config,
@@ -265,3 +265,319 @@ def test_publish_psi_dry_run_returns_core_and_weather_metrics(monkeypatch):
     assert result["weather_feature_count"] == 2
     assert result["top_core_features"][0][0] == "util_bikes"
     assert result["top_weather_features"][0][0] in {"temperature_c", "wind_speed_ms"}
+    assert compute_calls == [
+        {
+            "config": config,
+            "city": "paris",
+            "lookback_hours": 24,
+            "baseline_days": 7,
+            "aggregator": "trimmed_mean",
+            "max_feature_age_minutes": 45,
+        }
+    ]
+    assert publish_calls == []
+
+
+def test_publish_psi_publishes_metrics_for_single_target(monkeypatch):
+    config = publish_psi.PostgresFeatureConfig(
+        pg_host="dw-postgres",
+        pg_port=5432,
+        pg_db="velib_dw",
+        pg_user="velib",
+        pg_password="velib",
+    )
+    compute_result = {
+        "psi": 0.27,
+        "psi_core": 0.19,
+        "psi_weather": 0.11,
+        "psi_aggregator": "trimmed_mean",
+        "feature_count": 2,
+        "core_feature_count": 1,
+        "weather_feature_count": 1,
+    }
+    publish_calls = []
+
+    monkeypatch.setattr(publish_psi, "compute_psi_result", lambda **_: compute_result)
+    monkeypatch.setattr(
+        publish_psi,
+        "publish_psi_metrics",
+        lambda *args, **kwargs: publish_calls.append((args, kwargs)),
+    )
+
+    result = publish_psi.publish_psi(
+        config=config,
+        city="paris",
+        endpoint="bikeshare-bikes-prod",
+        target_name="bikes",
+        environment="production",
+        dry_run=False,
+    )
+
+    assert result == compute_result
+    assert publish_calls == [
+        (
+            (compute_result,),
+            {
+                "endpoint": "bikeshare-bikes-prod",
+                "city": "paris",
+                "target_name": "bikes",
+                "environment": "production",
+            },
+        )
+    ]
+
+
+def test_compute_feature_psi_map_from_db_loads_each_feature_series_separately(monkeypatch):
+    config = publish_psi.PostgresFeatureConfig(
+        pg_host="dw-postgres",
+        pg_port=5432,
+        pg_db="velib_dw",
+        pg_user="velib",
+        pg_password="velib",
+    )
+
+    series_calls: list[tuple[str, str, str]] = []
+
+    def fake_load_feature_series(**kwargs):
+        feature_column = kwargs["feature_column"]
+        start_dt = kwargs["start_dt"]
+        end_dt = kwargs["end_dt"]
+        series_calls.append((feature_column, start_dt, end_dt))
+        if start_dt == "baseline-start":
+            values = {
+                "util_bikes": [0.10, 0.15, 0.20],
+                "temperature_c": [10.0, 11.0, 12.0],
+            }
+        else:
+            values = {
+                "util_bikes": [0.30, 0.35, 0.40],
+                "temperature_c": [14.0, 15.0, 16.0],
+            }
+        return pd.Series(values[feature_column])
+
+    monkeypatch.setattr(publish_psi, "load_feature_series", fake_load_feature_series)
+
+    feature_psis = publish_psi.compute_feature_psi_map_from_db(
+        connection=object(),
+        config=config,
+        city="paris",
+        baseline_start_dt="baseline-start",
+        baseline_end_dt="baseline-end",
+        recent_start_dt="recent-start",
+        recent_end_dt="recent-end",
+        feature_columns=["util_bikes", "temperature_c"],
+    )
+
+    assert set(feature_psis) == {"util_bikes", "temperature_c"}
+    assert feature_psis["util_bikes"] > 0
+    assert feature_psis["temperature_c"] > 0
+    assert series_calls == [
+        ("util_bikes", "baseline-start", "baseline-end"),
+        ("util_bikes", "recent-start", "recent-end"),
+        ("temperature_c", "baseline-start", "baseline-end"),
+        ("temperature_c", "recent-start", "recent-end"),
+    ]
+
+
+def test_compute_psi_result_raises_when_recent_feature_window_is_empty(monkeypatch):
+    config = publish_psi.PostgresFeatureConfig(
+        pg_host="dw-postgres",
+        pg_port=5432,
+        pg_db="velib_dw",
+        pg_user="velib",
+        pg_password="velib",
+    )
+    fake_engine = _FakeEngine()
+
+    monkeypatch.setattr(publish_psi, "create_pg_engine", lambda _: fake_engine)
+    monkeypatch.setattr(
+        publish_psi,
+        "load_latest_feature_dt_from_connection",
+        lambda **_: datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "assert_feature_freshness",
+        lambda **_: timedelta(minutes=6),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "build_drift_window",
+        lambda **_: publish_psi.DriftWindow(
+            baseline_start="2026-03-10-00-00",
+            baseline_end="2026-03-17-00-00",
+            recent_start="2026-03-17-00-00",
+            recent_end="2026-03-18-00-00",
+        ),
+    )
+
+    row_counts = iter((12, 0))
+    monkeypatch.setattr(
+        publish_psi,
+        "load_feature_window_row_count",
+        lambda **_: next(row_counts),
+    )
+
+    with pytest.raises(RuntimeError, match="recent feature window is empty"):
+        publish_psi.compute_psi_result(config=config, city="paris")
+
+    assert fake_engine.disposed is True
+
+
+def test_compute_psi_result_aggregates_feature_map_from_db(monkeypatch):
+    config = publish_psi.PostgresFeatureConfig(
+        pg_host="dw-postgres",
+        pg_port=5432,
+        pg_db="velib_dw",
+        pg_user="velib",
+        pg_password="velib",
+    )
+    fake_engine = _FakeEngine()
+
+    monkeypatch.setattr(publish_psi, "create_pg_engine", lambda _: fake_engine)
+    monkeypatch.setattr(
+        publish_psi,
+        "load_latest_feature_dt_from_connection",
+        lambda **_: datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "assert_feature_freshness",
+        lambda **_: timedelta(minutes=4),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "build_drift_window",
+        lambda **_: publish_psi.DriftWindow(
+            baseline_start="2026-03-10-00-00",
+            baseline_end="2026-03-17-00-00",
+            recent_start="2026-03-17-00-00",
+            recent_end="2026-03-18-00-00",
+        ),
+    )
+
+    row_counts = iter((48, 16))
+    monkeypatch.setattr(
+        publish_psi,
+        "load_feature_window_row_count",
+        lambda **_: next(row_counts),
+    )
+    monkeypatch.setattr(
+        publish_psi,
+        "compute_feature_psi_map_from_db",
+        lambda **_: {
+            "util_bikes": 0.45,
+            "temperature_c": 0.15,
+        },
+    )
+
+    result = publish_psi.compute_psi_result(
+        config=config,
+        city="paris",
+        aggregator="trimmed_mean",
+    )
+
+    assert result["psi"] > 0
+    assert result["psi_core"] == 0.45
+    assert result["psi_weather"] == 0.15
+    assert result["baseline_rows"] == 48
+    assert result["recent_rows"] == 16
+    assert result["feature_count"] == 2
+    assert result["core_feature_count"] == 1
+    assert result["weather_feature_count"] == 1
+    assert result["top_features"][0][0] == "util_bikes"
+    assert fake_engine.disposed is True
+
+
+def test_publish_psi_all_targets_dry_run_returns_targets_without_publishing(monkeypatch):
+    monkeypatch.setattr(
+        publish_psi_all_targets,
+        "compute_psi_result",
+        lambda **_: {
+            "psi": 0.21,
+            "psi_core": 0.18,
+            "psi_weather": 0.09,
+            "psi_aggregator": "trimmed_mean",
+            "feature_count": 2,
+            "core_feature_count": 1,
+            "weather_feature_count": 1,
+        },
+    )
+    publish_calls = []
+    monkeypatch.setattr(
+        publish_psi_all_targets,
+        "publish_psi_metrics",
+        lambda *args, **kwargs: publish_calls.append((args, kwargs)),
+    )
+
+    payload = publish_psi_all_targets.main(
+        [
+            "--city",
+            "paris",
+            "--environment",
+            "staging",
+            "--pg-host",
+            "dw-postgres",
+            "--pg-db",
+            "velib_dw",
+            "--pg-user",
+            "velib",
+            "--pg-password",
+            "velib",
+            "--dry-run",
+        ]
+    )
+
+    assert [target["target_name"] for target in payload["targets"]] == ["bikes", "docks"]
+    assert [target["endpoint"] for target in payload["targets"]] == [
+        "bikeshare-bikes-staging",
+        "bikeshare-docks-staging",
+    ]
+    assert publish_calls == []
+
+
+def test_publish_psi_all_targets_publishes_once_per_target(monkeypatch):
+    monkeypatch.setattr(
+        publish_psi_all_targets,
+        "compute_psi_result",
+        lambda **_: {
+            "psi": 0.31,
+            "psi_core": 0.24,
+            "psi_weather": 0.12,
+            "psi_aggregator": "trimmed_mean",
+            "feature_count": 2,
+            "core_feature_count": 1,
+            "weather_feature_count": 1,
+        },
+    )
+    publish_calls = []
+
+    def fake_publish(result, **kwargs):
+        publish_calls.append((result, kwargs))
+
+    monkeypatch.setattr(publish_psi_all_targets, "publish_psi_metrics", fake_publish)
+
+    payload = publish_psi_all_targets.main(
+        [
+            "--city",
+            "paris",
+            "--environment",
+            "production",
+            "--pg-host",
+            "dw-postgres",
+            "--pg-db",
+            "velib_dw",
+            "--pg-user",
+            "velib",
+            "--pg-password",
+            "velib",
+        ]
+    )
+
+    assert len(publish_calls) == 2
+    assert [call[1]["target_name"] for call in publish_calls] == ["bikes", "docks"]
+    assert [call[1]["endpoint"] for call in publish_calls] == [
+        "bikeshare-bikes-prod",
+        "bikeshare-docks-prod",
+    ]
+    assert payload["environment"] == "production"

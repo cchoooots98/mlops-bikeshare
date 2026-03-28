@@ -23,7 +23,7 @@ docker compose build airflow-init
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
 docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
+docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-core airflow-worker-weather airflow-worker-serving airflow-worker-obs airflow-worker-psi airflow-worker-sidecar
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list

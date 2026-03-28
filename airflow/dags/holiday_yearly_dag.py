@@ -4,30 +4,16 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 
 AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from queue_defs import DAILY_SIDECAR_QUEUE
+from runtime_utils import get_airflow_setting as _get_setting, get_dw_conn_uri
 from src.config import run_project_module
-
-
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
-def _dw_conn_uri() -> str:
-    conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
-    conn = BaseHook.get_connection(conn_id)
-    uri = conn.get_uri()
-    if uri.startswith("postgres://"):
-        return uri.replace("postgres://", "postgresql+psycopg2://", 1)
-    if uri.startswith("postgresql://"):
-        return uri.replace("postgresql://", "postgresql+psycopg2://", 1)
-    return uri
+from schedule_defs import HOLIDAY_YEARLY_SCHEDULE
 
 
 def _raw_bucket() -> str:
@@ -35,6 +21,10 @@ def _raw_bucket() -> str:
     if not bucket:
         raise ValueError("BUCKET is required for holiday dual-write ingestion")
     return bucket
+
+
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_QUEUE_DAILY_SIDECAR", "AIRFLOW_QUEUE_DAILY_SIDECAR", DAILY_SIDECAR_QUEUE)
 
 
 def ingest_holidays_year_task(**context):
@@ -73,7 +63,7 @@ start = pendulum.datetime(2026, 1, 1, tz="Europe/Paris")
 with DAG(
     dag_id="holiday_yearly",
     start_date=start,
-    schedule="11 2 1 1 *",
+    schedule=HOLIDAY_YEARLY_SCHEDULE,
     catchup=False,
     default_args=default_args,
     tags=["holidays", "yearly", "dual-write"],
@@ -81,4 +71,5 @@ with DAG(
     ingest = PythonOperator(
         task_id="ingest_holidays_to_staging",
         python_callable=ingest_holidays_year_task,
+        queue=_get_queue_name(),
     )

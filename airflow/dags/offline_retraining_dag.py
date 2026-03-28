@@ -4,23 +4,20 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 
 AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from queue_defs import DAILY_SIDECAR_QUEUE
+from runtime_utils import get_airflow_setting as _get_setting, get_dw_connection
 from src.config import run_project_module
-
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
+from schedule_defs import OFFLINE_MODEL_RETRAINING_DAILY_SCHEDULE
 
 
-def _dw_connection():
-    conn_id = _get_setting("DW_CONN_ID", "DW_CONN_ID", "velib_dw")
-    return BaseHook.get_connection(conn_id)
+def _get_queue_name() -> str:
+    return _get_setting("AIRFLOW_QUEUE_DAILY_SIDECAR", "AIRFLOW_QUEUE_DAILY_SIDECAR", DAILY_SIDECAR_QUEUE)
 
 
 def _dag_conf(context: dict) -> dict:
@@ -30,7 +27,7 @@ def _dag_conf(context: dict) -> dict:
 
 def run_retraining_task(**context):
     conf = _dag_conf(context)
-    dw_conn = _dw_connection()
+    dw_conn = get_dw_connection()
     args = [
         "--reason",
         str(conf.get("reason", "schedule")),
@@ -84,9 +81,13 @@ start = pendulum.datetime(2026, 3, 11, tz="Europe/Paris")
 with DAG(
     dag_id="offline_model_retraining_daily",
     start_date=start,
-    schedule="30 3 * * *",
+    schedule=OFFLINE_MODEL_RETRAINING_DAILY_SCHEDULE,
     catchup=False,
     default_args=default_args,
     tags=["training", "offline", "candidate"],
 ) as dag:
-    PythonOperator(task_id="run_offline_retraining", python_callable=run_retraining_task)
+    PythonOperator(
+        task_id="run_offline_retraining",
+        python_callable=run_retraining_task,
+        queue=_get_queue_name(),
+    )

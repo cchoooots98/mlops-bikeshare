@@ -68,8 +68,12 @@ services:
       GBFS_BASE_URL: "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/gbfs.json"
       GBFS_CITY: "paris"
       DW_CONN_ID: "velib_dw"
-      AIRFLOW_TIER1_QUEUE: "tier1"
-      AIRFLOW_TIER2_QUEUE: "tier2"
+      AIRFLOW_QUEUE_CORE_5M: "core_5m"
+      AIRFLOW_QUEUE_WEATHER_10M: "weather_10m"
+      AIRFLOW_QUEUE_SERVING_RT: "serving_rt"
+      AIRFLOW_QUEUE_OBS_MAIN: "obs_main"
+      AIRFLOW_QUEUE_OBS_PSI: "obs_psi"
+      AIRFLOW_QUEUE_DAILY_SIDECAR: "daily_sidecar"
       DBT_PROJECT_DIR: "dbt/bikeshare_dbt"
       DBT_PROFILES_DIR: "dbt"
       DBT_HOST: "dw-postgres"
@@ -79,12 +83,17 @@ services:
       DBT_DATABASE: "velib_dw"
       DBT_SCHEMA: "analytics"
       DBT_THREADS: "1"
-      DBT_AIRFLOW_POOL: "dbt_quality_pool"
+      DBT_HOTPATH_THREADS: "2"
+      DBT_FEATURE_THREADS: "2"
+      DBT_WEATHER_THREADS: "2"
+      DBT_SIDECAR_THREADS: "1"
       DBT_HOTPATH_POOL: "dbt_hotpath_pool"
       DBT_FEATURE_POOL: "dbt_feature_pool"
-      DBT_QUALITY_POOL: "dbt_quality_pool"
+      DBT_WEATHER_POOL: "dbt_weather_pool"
+      DBT_SIDECAR_POOL: "dbt_sidecar_pool"
       SERVING_PREDICTION_POOL: "serving_prediction_pool"
-      SERVING_OBSERVABILITY_POOL: "serving_observability_pool"
+      SERVING_QUALITY_METRICS_POOL: "serving_quality_metrics_pool"
+      SERVING_PSI_POOL: "serving_psi_pool"
       DBT_FEATURE_BUILD_SELECTOR: "hf_feature_build_models"
       DBT_STATION_STATUS_HOTPATH_TEST_SELECTOR: "hf_station_status_smoke_tests"
       DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_feature_smoke_tests"
@@ -125,9 +134,11 @@ services:
       (airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true) &&
       (airflow pools set dbt_hotpath_pool 1 'Tier-1 dbt hotpath' || true) &&
       (airflow pools set dbt_feature_pool 1 'Tier-1 dbt feature build' || true) &&
-      (airflow pools set dbt_quality_pool 1 'Tier-2 dbt quality and refresh' || true) &&
+      (airflow pools set dbt_weather_pool 1 'Weather refresh lane' || true) &&
+      (airflow pools set dbt_sidecar_pool 1 'Daily and hourly sidecar dbt lane' || true) &&
       (airflow pools set serving_prediction_pool 2 'Tier-1 serving prediction runtime' || true) &&
-      (airflow pools set serving_observability_pool 1 'Tier-2 serving observability' || true)"
+      (airflow pools set serving_quality_metrics_pool 2 'Quality and metrics lane' || true) &&
+      (airflow pools set serving_psi_pool 1 'PSI lane' || true)"
 
   airflow-webserver:
     image: mlops-bikeshare-airflow:2.10.3-local
@@ -163,7 +174,7 @@ services:
     volumes: *airflow-volumes
     command: scheduler
 
-  airflow-worker-tier1:
+  airflow-worker-core:
     image: mlops-bikeshare-airflow:2.10.3-local
     restart: unless-stopped
     depends_on:
@@ -177,11 +188,11 @@ services:
     volumes: *airflow-volumes
     command: >
       bash -c "exec airflow celery worker
-      --queues tier1
+      --queues core_5m
       --concurrency 2
-      --celery-hostname worker-tier1@%h"
+      --celery-hostname worker-core@%h"
 
-  airflow-worker-tier2:
+  airflow-worker-weather:
     image: mlops-bikeshare-airflow:2.10.3-local
     restart: unless-stopped
     depends_on:
@@ -195,9 +206,81 @@ services:
     volumes: *airflow-volumes
     command: >
       bash -c "exec airflow celery worker
-      --queues tier2,default
+      --queues weather_10m
       --concurrency 1
-      --celery-hostname worker-tier2@%h"
+      --celery-hostname worker-weather@%h"
+
+  airflow-worker-serving:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: >
+      bash -c "exec airflow celery worker
+      --queues serving_rt
+      --concurrency 2
+      --celery-hostname worker-serving@%h"
+
+  airflow-worker-obs:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: >
+      bash -c "exec airflow celery worker
+      --queues obs_main
+      --concurrency 2
+      --celery-hostname worker-obs@%h"
+
+  airflow-worker-psi:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: >
+      bash -c "exec airflow celery worker
+      --queues obs_psi
+      --concurrency 1
+      --celery-hostname worker-psi@%h"
+
+  airflow-worker-sidecar:
+    image: mlops-bikeshare-airflow:2.10.3-local
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: >
+      bash -c "exec airflow celery worker
+      --queues daily_sidecar
+      --concurrency 2
+      --celery-hostname worker-sidecar@%h"
   
   mlflow-postgres:
     image: postgres:15

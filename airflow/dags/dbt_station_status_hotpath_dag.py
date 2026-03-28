@@ -4,7 +4,6 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
@@ -12,6 +11,9 @@ AIRFLOW_HOME = os.getenv("AIRFLOW_HOME", "/opt/airflow")
 if AIRFLOW_HOME not in sys.path:
     sys.path.append(AIRFLOW_HOME)
 
+from dbt_thread_utils import get_dbt_threads
+from queue_defs import CORE_5M_QUEUE
+from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import (
     DEFAULT_HOTPATH_BUILD_SELECT,
     DEFAULT_HOTPATH_TEST_SELECTOR,
@@ -26,20 +28,20 @@ from external_task_utils import execution_date_fn_for_schedule
 from schedule_defs import DBT_STATION_STATUS_HOTPATH_5MIN_SCHEDULE, GBFS_STATION_STATUS_5MIN_SCHEDULE
 
 
-def _get_setting(var_key: str, env_key: str, default_value: str) -> str:
-    return Variable.get(var_key, default_var=os.getenv(env_key, default_value))
-
-
 def _get_pool_name() -> str:
     return _get_setting("DBT_HOTPATH_POOL", "DBT_HOTPATH_POOL", "dbt_hotpath_pool")
 
 
 def _get_queue_name() -> str:
-    return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")
+    return _get_setting("AIRFLOW_QUEUE_CORE_5M", "AIRFLOW_QUEUE_CORE_5M", CORE_5M_QUEUE)
 
 
 def _get_city() -> str:
     return _get_setting("CITY", "CITY", "paris")
+
+
+def _get_hotpath_threads() -> int:
+    return get_dbt_threads(_get_setting, "DBT_HOTPATH_THREADS")
 
 
 def _build_hotpath_model_vars(context: dict) -> dict[str, object]:
@@ -109,7 +111,7 @@ def run_dbt_station_status_hotpath_task(**context):
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
         selector=None,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
+        threads=_get_hotpath_threads(),
         dbt_vars=_build_hotpath_model_vars(context),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_station_status_hotpath {summary}")
@@ -135,7 +137,7 @@ def run_dbt_station_status_hotpath_tests_task(**context):
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=test_select,
         selector=None if test_select else test_selector,
-        threads=int(_get_setting("DBT_THREADS", "DBT_THREADS", "2")),
+        threads=_get_hotpath_threads(),
         dbt_vars=_build_hotpath_test_vars(context),
         summary_label="DBT_HOTPATH_TEST_SUMMARY",
         indirect_selection="cautious",

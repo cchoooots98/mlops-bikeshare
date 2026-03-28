@@ -172,9 +172,13 @@ curl -I http://localhost:8080
 - the formal EC2 runtime is now single-host Airflow with `CeleryExecutor`
 - Redis runs locally in Compose as the Celery broker
 - worker separation is explicit:
-  - `airflow-worker-tier1` for the prediction-critical path
-  - `airflow-worker-tier2` for quality, metrics, PSI, and heavier dbt observation work
-- Tier-1 and Tier-2 may run concurrently, but they do not share the same critical queue or pool
+  - `airflow-worker-core` for the `core_5m` GBFS -> hotpath -> feature lane
+  - `airflow-worker-weather` for the `weather_10m` ingestion + refresh lane
+  - `airflow-worker-serving` for the `serving_rt` prediction lane
+  - `airflow-worker-obs` for the `obs_main` quality + metrics lane
+  - `airflow-worker-psi` for the `obs_psi` drift lane
+  - `airflow-worker-sidecar` for the `daily_sidecar` daily and hourly supporting lane
+- the lanes may run concurrently, but they do not share the same critical queue or worker slot
 
 ### Path portability rule
 - package manifest and deployment-state JSON now store portable repo-relative paths such as:
@@ -195,7 +199,7 @@ docker compose build airflow-init
 docker compose up -d airflow-postgres dw-postgres mlflow-postgres mlflow
 docker compose up -d redis
 docker compose up airflow-init
-docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-tier1 airflow-worker-tier2
+docker compose up -d --no-deps --force-recreate airflow-webserver airflow-scheduler airflow-worker-core airflow-worker-weather airflow-worker-serving airflow-worker-obs airflow-worker-psi airflow-worker-sidecar
 docker compose ps
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow dags list
@@ -253,8 +257,12 @@ ssh -i <your-key.pem> -L 8080:localhost:8080 ubuntu@<ec2-public-dns>
 - Compose services are healthy
 - Airflow responds with `HTTP/1.1 200 OK` or a redirect response
 - the tiered worker set is running:
-  - `airflow-worker-tier1`
-  - `airflow-worker-tier2`
+  - `airflow-worker-core`
+  - `airflow-worker-weather`
+  - `airflow-worker-serving`
+  - `airflow-worker-obs`
+  - `airflow-worker-psi`
+  - `airflow-worker-sidecar`
 - Airflow can parse both DAG sets:
   - `staging_prediction_15min`
   - `staging_quality_backfill_15min`

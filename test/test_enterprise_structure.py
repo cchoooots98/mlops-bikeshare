@@ -150,24 +150,22 @@ def test_terraform_oidc_subject_is_decoupled_from_project_resource_prefix():
     assert "repo:${var.github_owner}/${var.repo_name}:ref:refs/heads/main" not in oidc_role
 
 
-def test_formal_repo_cleanup_removes_legacy_runtime_and_scheduler_surfaces():
-    removed_paths = [
-        ".github/workflows/predictor.yml",
-        ".github/workflows/quality.yml",
-        ".github/workflows/publish_metrics.yml",
-        ".github/workflows/groundtruth-cron.yml",
-        ".github/workflows/cd_staging.yml",
-        ".github/workflows/promote_prod.yml",
-        "src/features/update_partitions.py",
-        "src/monitoring/build_baseline_from_capture.py",
-        "src/monitoring/metrics/lambda_publish_psi.py",
-        "docs/demo_checklist.md",
-    ]
-    for path in removed_paths:
-        assert not Path(path).exists(), f"legacy path should be removed: {path}"
+def test_formal_repo_runtime_surfaces_are_minimal_and_current():
+    workflow_names = {path.name for path in Path(".github/workflows").glob("*.yml")}
+    assert workflow_names == {"ci.yml"}
+
+    metric_modules = {path.name for path in Path("src/monitoring/metrics").glob("*.py")}
+    assert metric_modules == {
+        "__init__.py",
+        "metrics_helper.py",
+        "publish_custom_metrics.py",
+        "publish_psi.py",
+        "publish_psi_all_targets.py",
+    }
 
     schedules_dir = Path("src/monitoring/schedules")
-    assert not schedules_dir.exists() or not any(schedules_dir.glob("*.py"))
+    if schedules_dir.exists():
+        assert {path.name for path in schedules_dir.iterdir()} <= {"__pycache__"}
 
 
 def test_formal_docs_and_dags_reflect_single_ec2_airflow_runtime_path():
@@ -220,13 +218,22 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
     assert "AIRFLOW__CORE__EXECUTOR: CeleryExecutor" in base_compose
     assert "AIRFLOW__WEBSERVER__SECRET_KEY" in base_compose
     assert "redis:" in base_compose
-    assert "airflow-worker-tier1:" in base_compose
-    assert "airflow-worker-tier2:" in base_compose
     assert "exec airflow celery worker" in base_compose
-    assert "--queues tier1" in base_compose
-    assert "--queues tier2,default" in base_compose
-    assert "airflow-worker-tier1:" in local_compose
-    assert "airflow-worker-tier2:" in local_compose
+    for worker_name, queue_name in (
+        ("airflow-worker-core:", "core_5m"),
+        ("airflow-worker-weather:", "weather_10m"),
+        ("airflow-worker-serving:", "serving_rt"),
+        ("airflow-worker-obs:", "obs_main"),
+        ("airflow-worker-psi:", "obs_psi"),
+        ("airflow-worker-sidecar:", "daily_sidecar"),
+    ):
+        assert worker_name in base_compose
+        assert worker_name in local_compose
+        assert f"--queues {queue_name}" in base_compose
+    assert "airflow-worker-tier1:" not in base_compose
+    assert "airflow-worker-tier2:" not in base_compose
+    assert "airflow-worker-tier1:" not in local_compose
+    assert "airflow-worker-tier2:" not in local_compose
     assert "./model_dir:/opt/airflow/model_dir" in base_compose
     assert "./model_dir:/app/model_dir:ro" in base_compose
     assert "AWS_PROFILE: Shirley-fr" not in base_compose
@@ -243,23 +250,80 @@ def test_compose_split_keeps_ec2_base_clean_and_local_override_explicit():
 def test_serving_dag_sensors_align_with_30_min_label_maturity():
     factory_source = Path("airflow/dags/serving_dag_factory.py").read_text(encoding="utf-8")
 
-    assert "QUALITY_LABEL_MATURITY_MINUTES = 30" in factory_source
-    assert "QUALITY_START_LAG_MINUTES = 7" in factory_source
-    assert (
-        "QUALITY_TO_PREDICTION_DELTA = timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES + QUALITY_START_LAG_MINUTES)"
-        in factory_source
-    )
-    assert "METRICS_TO_QUALITY_DELTA = timedelta(minutes=5)" in factory_source
-    assert "execution_delta=QUALITY_TO_PREDICTION_DELTA" in factory_source
-    assert "execution_delta=METRICS_TO_QUALITY_DELTA" in factory_source
+    assert "from src.monitoring.quality_contract import QUALITY_LABEL_MATURITY_MINUTES" in factory_source
+    assert "execution_date_fn_for_schedule(" in factory_source
+    assert "minimum_age=timedelta(minutes=QUALITY_LABEL_MATURITY_MINUTES)" in factory_source
+    assert "execution_date_fn=execution_date_fn_for_schedule(SERVING_QUALITY_SCHEDULE)" in factory_source
     assert 'external_task_id=f"predict_{target}"' in factory_source
     assert 'external_task_id=f"backfill_quality_{target}"' in factory_source
     assert "wait_for_metrics_dag" not in factory_source
-    assert "queue=_tier1_queue()" in factory_source
-    assert "queue=_tier2_queue()" in factory_source
+    assert "queue=_serving_rt_queue()" in factory_source
+    assert "queue=_obs_main_queue()" in factory_source
+    assert "queue=_obs_psi_queue()" in factory_source
     assert "pool=_serving_prediction_pool()" in factory_source
-    assert "pool=_serving_observability_pool()" in factory_source
+    assert "pool=_serving_quality_metrics_pool()" in factory_source
+    assert "pool=_serving_psi_pool()" in factory_source
+    assert 'task_id="publish_psi_all_targets"' in factory_source
+    assert '"src.monitoring.metrics.publish_psi_all_targets"' in factory_source
+    assert "QUALITY_TO_PREDICTION_DELTA" not in factory_source
+    assert "METRICS_TO_QUALITY_DELTA" not in factory_source
+    assert "execution_delta=" not in factory_source
+    assert "_serving_observability_pool" not in factory_source
     assert '"PSI_AGGREGATOR", "PSI_AGGREGATOR", "trimmed_mean"' in factory_source
+
+
+def test_airflow_dags_share_runtime_helpers_and_schedule_contracts():
+    runtime_utils = Path("airflow/dags/runtime_utils.py").read_text(encoding="utf-8")
+    schedule_defs = Path("airflow/dags/schedule_defs.py").read_text(encoding="utf-8")
+
+    assert "def get_airflow_setting" in runtime_utils
+    assert "def get_dw_connection" in runtime_utils
+    assert "def get_dw_conn_uri" in runtime_utils
+
+    for dag_path in (
+        "airflow/dags/gbfs_ingestion_dag.py",
+        "airflow/dags/weather_ingestion_dag.py",
+        "airflow/dags/dbt_station_status_hotpath_dag.py",
+        "airflow/dags/dbt_feature_build_dag.py",
+        "airflow/dags/dbt_weather_refresh_dag.py",
+        "airflow/dags/dbt_quality_hourly_dag.py",
+        "airflow/dags/dbt_diagnostic_daily_dag.py",
+        "airflow/dags/dbt_station_topology_daily_dag.py",
+        "airflow/dags/holiday_yearly_dag.py",
+        "airflow/dags/offline_retraining_dag.py",
+        "airflow/dags/serving_dag_factory.py",
+    ):
+        content = Path(dag_path).read_text(encoding="utf-8")
+        assert "def _get_setting(" not in content
+
+    for dag_path in (
+        "airflow/dags/gbfs_ingestion_dag.py",
+        "airflow/dags/weather_ingestion_dag.py",
+        "airflow/dags/holiday_yearly_dag.py",
+    ):
+        content = Path(dag_path).read_text(encoding="utf-8")
+        assert "def _dw_conn_uri(" not in content
+
+    assert 'DBT_QUALITY_HOURLY_SCHEDULE = "13 * * * *"' in schedule_defs
+    assert 'DBT_DIAGNOSTIC_DAILY_SCHEDULE = "47 2 * * *"' in schedule_defs
+    assert 'HOLIDAY_YEARLY_SCHEDULE = "11 2 1 1 *"' in schedule_defs
+    assert 'OFFLINE_MODEL_RETRAINING_DAILY_SCHEDULE = "30 3 * * *"' in schedule_defs
+
+    assert "schedule=DBT_QUALITY_HOURLY_SCHEDULE" in Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(
+        encoding="utf-8"
+    )
+    assert "schedule=DBT_DIAGNOSTIC_DAILY_SCHEDULE" in Path("airflow/dags/dbt_diagnostic_daily_dag.py").read_text(
+        encoding="utf-8"
+    )
+    assert "schedule=HOLIDAY_YEARLY_SCHEDULE" in Path("airflow/dags/holiday_yearly_dag.py").read_text(encoding="utf-8")
+    assert "schedule=OFFLINE_MODEL_RETRAINING_DAILY_SCHEDULE" in Path(
+        "airflow/dags/offline_retraining_dag.py"
+    ).read_text(encoding="utf-8")
+
+    gbfs = Path("airflow/dags/gbfs_ingestion_dag.py").read_text(encoding="utf-8")
+    assert "def ingest_gbfs_feed_task" in gbfs
+    assert "def ingest_station_information_task" not in gbfs
+    assert "def ingest_station_status_task" not in gbfs
 
 
 def test_feature_future_window_label_smoke_test_is_runtime_scoped():
@@ -310,14 +374,23 @@ def test_tiered_dbt_dags_use_explicit_queue_and_pool_assignments():
     feature = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
     quality = Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(encoding="utf-8")
     weather = Path("airflow/dags/weather_ingestion_dag.py").read_text(encoding="utf-8")
+    weather_refresh = Path("airflow/dags/dbt_weather_refresh_dag.py").read_text(encoding="utf-8")
 
     assert 'return _get_setting("DBT_HOTPATH_POOL", "DBT_HOTPATH_POOL", "dbt_hotpath_pool")' in hotpath
-    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in hotpath
+    assert 'return _get_setting("AIRFLOW_QUEUE_CORE_5M", "AIRFLOW_QUEUE_CORE_5M", CORE_5M_QUEUE)' in hotpath
     assert 'return _get_setting("DBT_FEATURE_POOL", "DBT_FEATURE_POOL", "dbt_feature_pool")' in feature
-    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in feature
-    assert 'return _get_setting("DBT_QUALITY_POOL", "DBT_QUALITY_POOL", "dbt_quality_pool")' in quality
-    assert 'return _get_setting("AIRFLOW_TIER2_QUEUE", "AIRFLOW_TIER2_QUEUE", "tier2")' in quality
-    assert 'return _get_setting("AIRFLOW_TIER1_QUEUE", "AIRFLOW_TIER1_QUEUE", "tier1")' in weather
+    assert 'return _get_setting("AIRFLOW_QUEUE_CORE_5M", "AIRFLOW_QUEUE_CORE_5M", CORE_5M_QUEUE)' in feature
+    assert 'return _get_setting("DBT_SIDECAR_POOL", "DBT_SIDECAR_POOL", DBT_SIDECAR_POOL)' in quality
+    assert (
+        'return _get_setting("AIRFLOW_QUEUE_DAILY_SIDECAR", "AIRFLOW_QUEUE_DAILY_SIDECAR", DAILY_SIDECAR_QUEUE)'
+        in quality
+    )
+    assert 'return _get_setting("AIRFLOW_QUEUE_WEATHER_10M", "AIRFLOW_QUEUE_WEATHER_10M", WEATHER_10M_QUEUE)' in weather
+    assert 'return _get_setting("DBT_WEATHER_POOL", "DBT_WEATHER_POOL", DBT_WEATHER_POOL)' in weather_refresh
+    assert (
+        'return _get_setting("AIRFLOW_QUEUE_WEATHER_10M", "AIRFLOW_QUEUE_WEATHER_10M", WEATHER_10M_QUEUE)'
+        in weather_refresh
+    )
     assert "max_active_runs=1" in weather
 
 
@@ -327,6 +400,7 @@ def test_dbt_runtime_selectors_and_thread_defaults_are_hotpath_safe():
     hotpath = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
     quality = Path("airflow/dags/dbt_quality_hourly_dag.py").read_text(encoding="utf-8")
     diagnostic = Path("airflow/dags/dbt_diagnostic_daily_dag.py").read_text(encoding="utf-8")
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     for selector_name in (
         "hf_feature_smoke_tests",
@@ -342,21 +416,33 @@ def test_dbt_runtime_selectors_and_thread_defaults_are_hotpath_safe():
     assert "DBT_QUALITY_TEST_SELECTOR" in quality
     assert "DBT_DEEP_QUALITY_TEST_SELECTOR" in diagnostic
 
-    assert '"DBT_THREADS", "DBT_THREADS", "2"' in feature
-    assert '"DBT_THREADS", "DBT_THREADS", "2"' in hotpath
-    assert '"DBT_THREADS", "DBT_THREADS", "2"' in quality
-    assert '"DBT_THREADS", "DBT_THREADS", "2"' in diagnostic
+    assert 'get_dbt_threads(_get_setting, "DBT_FEATURE_THREADS")' in feature
+    assert 'get_dbt_threads(_get_setting, "DBT_HOTPATH_THREADS")' in hotpath
+    assert 'get_dbt_threads(_get_setting, "DBT_SIDECAR_THREADS")' in quality
+    assert 'get_dbt_threads(_get_setting, "DBT_SIDECAR_THREADS")' in diagnostic
+    assert 'DBT_THREADS: "1"' in compose
+    assert 'DBT_HOTPATH_THREADS: "2"' in compose
+    assert 'DBT_FEATURE_THREADS: "2"' in compose
+    assert 'DBT_WEATHER_THREADS: "2"' in compose
+    assert 'DBT_SIDECAR_THREADS: "1"' in compose
 
 
-def test_legacy_selector_aliases_are_removed():
+def test_dbt_selector_surface_matches_canonical_contract():
     selectors = Path("dbt/bikeshare_dbt/selectors.yml").read_text(encoding="utf-8")
+    selector_names = [
+        line.strip().split(": ", 1)[1] for line in selectors.splitlines() if line.strip().startswith("- name: ")
+    ]
 
-    for selector_name in (
-        "hf_smoke_tests",
-        "quality_gate_tests",
-        "deep_quality_tests",
-    ):
-        assert f"- name: {selector_name}" not in selectors
+    assert selector_names == [
+        "hf_feature_build_models",
+        "hf_station_status_hotpath_models",
+        "weather_refresh_models",
+        "station_topology_daily_models",
+        "hf_feature_smoke_tests",
+        "hf_station_status_smoke_tests",
+        "hourly_quality_gate_tests",
+        "daily_deep_quality_tests",
+    ]
 
 
 def test_hotpath_tests_are_retiered_out_of_quality_gate():

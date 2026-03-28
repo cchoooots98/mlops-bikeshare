@@ -235,12 +235,12 @@ docker compose ps
 
 # 查看日志
 docker compose logs airflow-webserver --tail 100
-docker compose logs airflow-worker-tier1 --tail 50
+docker compose logs airflow-worker-core --tail 50
 
 # 重启 Airflow 服务
 docker compose up -d --build --force-recreate \
   airflow-webserver airflow-scheduler \
-  airflow-worker-tier1 airflow-worker-tier2
+  airflow-worker-core airflow-worker-weather airflow-worker-serving airflow-worker-obs airflow-worker-psi airflow-worker-sidecar
 
 # 检查 DAG 导入错误
 docker compose exec airflow-webserver airflow dags list-import-errors

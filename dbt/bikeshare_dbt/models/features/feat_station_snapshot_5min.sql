@@ -30,7 +30,8 @@ select 1
     pre_hook=[recent_window_overwrite_sql],
     post_hook=[
         "create unique index if not exists idx_feat_station_snapshot_5min_pk on {{ this }} (city, station_id, dt)",
-        "create index if not exists idx_feat_station_snapshot_5min_station_dt on {{ this }} (city, station_id, dt desc)"
+        "create index if not exists idx_feat_station_snapshot_5min_station_dt on {{ this }} (city, station_id, dt desc)",
+        "create index if not exists idx_feat_station_snapshot_5min_city_dt on {{ this }} (city, dt desc)"
     ]
 ) }}
 
