@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 from functools import lru_cache, partial
+from zoneinfo import ZoneInfo
+
+DEFAULT_SCHEDULE_TIMEZONE = "Europe/Paris"
 
 MAX_CRON_LOOKBACK_MINUTES = 366 * 24 * 60
 CRON_PRESETS = {
@@ -14,12 +17,18 @@ CRON_PRESETS = {
 }
 
 
-def execution_date_fn_for_schedule(upstream_schedule: str, *, minimum_age: timedelta | None = None):
+def execution_date_fn_for_schedule(
+    upstream_schedule: str,
+    *,
+    minimum_age: timedelta | None = None,
+    schedule_timezone: str = DEFAULT_SCHEDULE_TIMEZONE,
+):
     normalized_schedule = _normalize_schedule(upstream_schedule)
     return partial(
         resolve_latest_upstream_logical_date,
         upstream_schedule=normalized_schedule,
         minimum_age=minimum_age or timedelta(),
+        schedule_timezone=schedule_timezone,
     )
 
 
@@ -28,6 +37,7 @@ def resolve_latest_upstream_logical_date(
     *,
     upstream_schedule: str,
     minimum_age: timedelta = timedelta(),
+    schedule_timezone: str = DEFAULT_SCHEDULE_TIMEZONE,
     **context,
 ):
     """
@@ -42,9 +52,11 @@ def resolve_latest_upstream_logical_date(
     if current_end is None:
         raise ValueError("data_interval_end is required to resolve the upstream logical date")
 
-    eligible_upstream_end = current_end - minimum_age
+    schedule_tz = ZoneInfo(schedule_timezone)
+    eligible_upstream_end = (current_end - minimum_age).astimezone(schedule_tz)
     latest_upstream_end = _previous_matching_time(upstream_schedule, eligible_upstream_end, inclusive=True)
-    return _previous_matching_time(upstream_schedule, latest_upstream_end, inclusive=False)
+    upstream_logical_date = _previous_matching_time(upstream_schedule, latest_upstream_end, inclusive=False)
+    return upstream_logical_date.astimezone(current_logical_date.tzinfo or schedule_tz)
 
 
 def _normalize_schedule(schedule: str) -> str:
