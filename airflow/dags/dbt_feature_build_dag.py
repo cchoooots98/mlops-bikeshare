@@ -15,6 +15,7 @@ from dbt_thread_utils import get_dbt_threads
 from queue_defs import CORE_5M_QUEUE
 from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import (
+    DEFAULT_FEATURE_BUILD_SELECTOR,
     DEFAULT_FEATURE_BUILD_SELECT,
     DEFAULT_FEATURE_TEST_SELECTOR,
     parse_bool,
@@ -58,20 +59,26 @@ def _get_feature_threads() -> int:
 
 
 def run_dbt_feature_build_task(**context):
-    model_select = parse_select_models(
+    raw_build_select = _get_setting(
+        "DBT_FEATURE_BUILD_SELECT",
+        "DBT_FEATURE_BUILD_SELECT",
+        "",
+    )
+    model_select = parse_select_models(raw_build_select, default_models=[]) if raw_build_select.strip() else None
+    build_selector = parse_selector(
         _get_setting(
-            "DBT_FEATURE_BUILD_SELECT",
-            "DBT_FEATURE_BUILD_SELECT",
-            " ".join(DEFAULT_FEATURE_BUILD_SELECT),
+            "DBT_FEATURE_BUILD_SELECTOR",
+            "DBT_FEATURE_BUILD_SELECTOR",
+            DEFAULT_FEATURE_BUILD_SELECTOR,
         ),
-        default_models=DEFAULT_FEATURE_BUILD_SELECT,
+        default_selector=DEFAULT_FEATURE_BUILD_SELECTOR,
     )
     threads = _get_feature_threads()
     summary = run_feature_model_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
-        selector=None,
+        selector=None if model_select else build_selector,
         threads=threads,
         dbt_vars=_build_feature_model_vars(context),
     )
@@ -112,7 +119,7 @@ def run_dbt_feature_smoke_tests_task(**context):
 default_args = {
     "owner": "airflow",
     "retries": 1,
-    "retry_delay": timedelta(minutes=2),
+    "retry_delay": timedelta(seconds=30),
 }
 
 start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")

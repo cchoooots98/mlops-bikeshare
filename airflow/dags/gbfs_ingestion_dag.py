@@ -70,10 +70,16 @@ def ingest_gbfs_feed_task(*, feed: str, **context):
     )
 
 
-default_args = {
+daily_default_args = {
     "owner": "airflow",
     "retries": 2,
     "retry_delay": timedelta(minutes=2),
+}
+
+five_min_default_args = {
+    "owner": "airflow",
+    "retries": 2,
+    "retry_delay": timedelta(seconds=30),
 }
 
 start = pendulum.datetime(2026, 3, 1, tz="Europe/Paris")
@@ -83,7 +89,7 @@ with DAG(
     start_date=start,
     schedule=GBFS_STATION_INFORMATION_DAILY_SCHEDULE,
     catchup=False,
-    default_args=default_args,
+    default_args=daily_default_args,
     tags=["gbfs", "paris", "daily"],
 ):
     info_create = PythonOperator(
@@ -104,7 +110,7 @@ with DAG(
     start_date=start,
     schedule=GBFS_STATION_STATUS_5MIN_SCHEDULE,
     catchup=False,
-    default_args=default_args,
+    default_args=five_min_default_args,
     tags=["gbfs", "paris", "5min"],
 ):
     status_create = PythonOperator(

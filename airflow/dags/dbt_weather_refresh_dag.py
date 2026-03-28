@@ -14,7 +14,13 @@ if AIRFLOW_HOME not in sys.path:
 from dbt_thread_utils import get_dbt_threads
 from queue_defs import DBT_WEATHER_POOL, WEATHER_10M_QUEUE
 from runtime_utils import get_airflow_setting as _get_setting
-from src.orchestration.dbt_tasks import DEFAULT_WEATHER_REFRESH_SELECT, parse_select_models, run_model_build
+from src.orchestration.dbt_tasks import (
+    DEFAULT_WEATHER_REFRESH_SELECTOR,
+    DEFAULT_WEATHER_REFRESH_SELECT,
+    parse_select_models,
+    parse_selector,
+    run_model_build,
+)
 from external_task_utils import execution_date_fn_for_schedule
 from schedule_defs import DBT_WEATHER_REFRESH_10MIN_SCHEDULE, WEATHER_10MIN_SCHEDULE
 
@@ -32,19 +38,25 @@ def _get_weather_threads() -> int:
 
 
 def run_dbt_weather_refresh_task():
-    model_select = parse_select_models(
+    raw_build_select = _get_setting(
+        "DBT_WEATHER_REFRESH_SELECT",
+        "DBT_WEATHER_REFRESH_SELECT",
+        "",
+    )
+    model_select = parse_select_models(raw_build_select, default_models=[]) if raw_build_select.strip() else None
+    build_selector = parse_selector(
         _get_setting(
-            "DBT_WEATHER_REFRESH_SELECT",
-            "DBT_WEATHER_REFRESH_SELECT",
-            " ".join(DEFAULT_WEATHER_REFRESH_SELECT),
+            "DBT_WEATHER_REFRESH_SELECTOR",
+            "DBT_WEATHER_REFRESH_SELECTOR",
+            DEFAULT_WEATHER_REFRESH_SELECTOR,
         ),
-        default_models=DEFAULT_WEATHER_REFRESH_SELECT,
+        default_selector=DEFAULT_WEATHER_REFRESH_SELECTOR,
     )
     summary = run_model_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
-        selector=None,
+        selector=None if model_select else build_selector,
         threads=_get_weather_threads(),
     )
     print(f"AIRFLOW_TASK_METRIC run_dbt_weather_refresh {summary}")

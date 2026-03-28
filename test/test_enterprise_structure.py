@@ -542,3 +542,72 @@ def test_compose_uses_canonical_dbt_test_selectors():
     assert 'DBT_DEEP_QUALITY_TEST_SELECTOR: "daily_deep_quality_tests"' in base_compose
     assert 'DBT_FEATURE_BUILD_TEST_SELECTOR: "hf_smoke_tests"' not in base_compose
     assert 'DBT_QUALITY_TEST_SELECTOR: "quality_gate_tests"' not in base_compose
+
+
+def test_hotpath_build_selector_excludes_static_calendar_models():
+    selectors = Path("dbt/bikeshare_dbt/selectors.yml").read_text(encoding="utf-8")
+
+    hotpath_block = selectors.split("- name: hf_station_status_hotpath_models", 1)[1].split(
+        "- name: weather_refresh_models", 1
+    )[0]
+
+    assert "value: fct_station_status" in hotpath_block
+    assert "value: int_station_status_enriched" in hotpath_block
+    assert "value: dim_date" not in hotpath_block
+    assert "value: dim_time" not in hotpath_block
+
+
+def test_shared_calendar_and_latest_models_use_low_churn_materializations():
+    dim_date = Path("dbt/bikeshare_dbt/models/marts/dim_date.sql").read_text(encoding="utf-8")
+    dim_time = Path("dbt/bikeshare_dbt/models/marts/dim_time.sql").read_text(encoding="utf-8")
+    feat_latest = Path("dbt/bikeshare_dbt/models/features/feat_station_snapshot_latest.sql").read_text(encoding="utf-8")
+
+    assert "materialized='view'" in dim_date
+    assert "materialized='view'" in dim_time
+    assert "materialized='incremental'" in feat_latest
+    assert "unique_key=['city', 'station_id']" in feat_latest
+
+
+def test_weather_and_feature_models_encode_runtime_performance_guards():
+    dim_weather = Path("dbt/bikeshare_dbt/models/marts/dim_weather.sql").read_text(encoding="utf-8")
+    feature_5min = Path("dbt/bikeshare_dbt/models/features/feat_station_snapshot_5min.sql").read_text(encoding="utf-8")
+
+    assert "idx_dim_weather_city_observed_at" in dim_weather
+    assert "station_features_windowed as materialized" in feature_5min
+
+
+def test_runtime_dags_default_to_explicit_build_selectors_instead_of_parent_expansion():
+    hotpath_dag = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
+    feature_dag = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
+    weather_dag = Path("airflow/dags/dbt_weather_refresh_dag.py").read_text(encoding="utf-8")
+    topology_dag = Path("airflow/dags/dbt_station_topology_daily_dag.py").read_text(encoding="utf-8")
+
+    for content, selector_name in (
+        (hotpath_dag, "DBT_STATION_STATUS_HOTPATH_SELECTOR"),
+        (feature_dag, "DBT_FEATURE_BUILD_SELECTOR"),
+        (weather_dag, "DBT_WEATHER_REFRESH_SELECTOR"),
+        (topology_dag, "DBT_STATION_TOPOLOGY_SELECTOR"),
+    ):
+        assert selector_name in content
+        assert "selector=None if model_select else build_selector" in content
+
+
+def test_compose_uses_canonical_dbt_build_selectors():
+    base_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert 'DBT_STATION_STATUS_HOTPATH_SELECTOR: "hf_station_status_hotpath_models"' in base_compose
+    assert 'DBT_FEATURE_BUILD_SELECTOR: "hf_feature_build_models"' in base_compose
+    assert 'DBT_WEATHER_REFRESH_SELECTOR: "weather_refresh_models"' in base_compose
+    assert 'DBT_STATION_TOPOLOGY_SELECTOR: "station_topology_daily_models"' in base_compose
+    assert 'DBT_DIAGNOSTIC_FEATURE_BUILD_SELECTOR: "hf_feature_build_models"' in base_compose
+
+
+def test_five_min_runtime_dags_use_fast_retry_delay():
+    gbfs_dag = Path("airflow/dags/gbfs_ingestion_dag.py").read_text(encoding="utf-8")
+    hotpath_dag = Path("airflow/dags/dbt_station_status_hotpath_dag.py").read_text(encoding="utf-8")
+    feature_dag = Path("airflow/dags/dbt_feature_build_dag.py").read_text(encoding="utf-8")
+
+    assert '"retry_delay": timedelta(seconds=30)' in gbfs_dag
+    assert "default_args=five_min_default_args" in gbfs_dag
+    assert '"retry_delay": timedelta(seconds=30)' in hotpath_dag
+    assert '"retry_delay": timedelta(seconds=30)' in feature_dag

@@ -133,7 +133,7 @@ station_features as (
         hourly_weather_code
     from base_source
 ),
-station_features_windowed as (
+station_features_windowed as materialized (
     select
         sf.*,
         sum(delta_bikes_5m) over (

@@ -11,10 +11,6 @@ selectors:
     definition:
       union:
         - method: fqn
-          value: dim_date
-        - method: fqn
-          value: dim_time
-        - method: fqn
           value: fct_station_status
         - method: fqn
           value: int_station_status_enriched

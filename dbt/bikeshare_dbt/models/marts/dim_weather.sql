@@ -2,7 +2,10 @@
     materialized='incremental',
     unique_key='weather_key',
     incremental_strategy='delete+insert',
-    on_schema_change='fail'
+    on_schema_change='fail',
+    post_hook=[
+        "create index if not exists idx_dim_weather_city_observed_at on {{ this }} (city, observed_at desc)"
+    ]
 ) }}
 
 {% set weather_incremental_reprocess_buffer_minutes = var('weather_incremental_reprocess_buffer_minutes', 180) | int %}

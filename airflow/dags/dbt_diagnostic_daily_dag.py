@@ -14,6 +14,7 @@ from dbt_thread_utils import get_dbt_threads
 from queue_defs import DAILY_SIDECAR_QUEUE, DBT_SIDECAR_POOL
 from runtime_utils import get_airflow_setting as _get_setting
 from src.orchestration.dbt_tasks import (
+    DEFAULT_FEATURE_BUILD_SELECTOR,
     DEFAULT_DEEP_QUALITY_TEST_SELECTOR,
     DEFAULT_FEATURE_BUILD_SELECT,
     parse_selector,
@@ -51,19 +52,25 @@ def _build_feature_reconcile_vars(context: dict) -> dict[str, object]:
 
 
 def run_dbt_feature_reconcile_5d_task(**context):
-    model_select = parse_select_models(
+    raw_build_select = _get_setting(
+        "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECT",
+        "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECT",
+        "",
+    )
+    model_select = parse_select_models(raw_build_select, default_models=[]) if raw_build_select.strip() else None
+    build_selector = parse_selector(
         _get_setting(
-            "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECT",
-            "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECT",
-            " ".join(DEFAULT_FEATURE_BUILD_SELECT),
+            "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECTOR",
+            "DBT_DIAGNOSTIC_FEATURE_BUILD_SELECTOR",
+            DEFAULT_FEATURE_BUILD_SELECTOR,
         ),
-        default_models=DEFAULT_FEATURE_BUILD_SELECT,
+        default_selector=DEFAULT_FEATURE_BUILD_SELECTOR,
     )
     summary = run_feature_model_build(
         project_dir=_get_setting("DBT_PROJECT_DIR", "DBT_PROJECT_DIR", "dbt/bikeshare_dbt"),
         profiles_dir=_get_setting("DBT_PROFILES_DIR", "DBT_PROFILES_DIR", "dbt"),
         select_models=model_select,
-        selector=None,
+        selector=None if model_select else build_selector,
         threads=_get_sidecar_threads(),
         dbt_vars=_build_feature_reconcile_vars(context),
     )
