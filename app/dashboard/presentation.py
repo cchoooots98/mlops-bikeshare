@@ -78,11 +78,17 @@ SOURCE_FRESHNESS_POLICY = RawAgePolicy(
     warning_age_minutes=10,
     critical_age_minutes=20,
 )
+# Source freshness reflects the latest GBFS bucket already landed in Postgres.
+# Feature freshness should allow one full downstream build handoff:
+# GBFS source bucket -> hotpath -> feature build. In practice the latest
+# serving feature dt is therefore naturally about 10-15 minutes behind wall
+# clock even when the 5-minute lane is healthy and the current feature run is
+# still in flight.
 FEATURE_FRESHNESS_POLICY = LatencyPolicy(
     label="Feature freshness",
     cadence_minutes=5,
     dt_offset_minutes=0,
-    availability_lag_minutes=4,
+    availability_lag_minutes=10,
     warning_excess_minutes=5,
     critical_excess_minutes=10,
 )
