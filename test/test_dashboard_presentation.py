@@ -632,7 +632,9 @@ def test_build_data_status_frame_allows_inflight_quality_backfill_window_without
     assert rows["Quality artifact"]["Status"] == "Healthy"
     assert rows["Quality artifact"]["Expected lag (min)"] == 49.0
     assert rows["Quality artifact"]["Excess lag (min)"] == 15.0
-    assert "warning after 2 missed cycles (20+ min behind schedule)" in rows["Quality artifact"]["Expected cadence / SLA"]
+    assert (
+        "warning after 2 missed cycles (20+ min behind schedule)" in rows["Quality artifact"]["Expected cadence / SLA"]
+    )
 
 
 def test_classify_metric_status_respects_sla_bands():
