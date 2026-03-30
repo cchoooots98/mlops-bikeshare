@@ -210,6 +210,6 @@ See the full [README.md](README.md) for local setup, training examples, and runt
 
 ## Demo Video
 
-> [Watch the 3-minute walkthrough](Dashboard of Biskeshare Stockout Prediction.mp4) 
+> [Watch the 3-minute walkthrough](Dashboard of Bikeshare Stockout Prediction.mp4) 
 
 See [docs/demo_video_script.md](docs/demo_video_script.md) for the recording script.

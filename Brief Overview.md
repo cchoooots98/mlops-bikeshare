@@ -43,7 +43,7 @@ More detail: [docs/architecture.md](docs/architecture.md)
 
 ## 3-Minute Demo
 
-- Portfolio walkthrough: [Dashboard of Biskeshare Stockout Prediction.mp4](Dashboard%20of%20Biskeshare%20Stockout%20Prediction.mp4)
+- Portfolio walkthrough: [Dashboard of Bikeshare Stockout Prediction.mp4](Dashboard%20of%20Bikeshare%20Stockout%20Prediction.mp4)
 - Expanded demo page: [DEMO.md](DEMO.md)
 
 ## Dashboard Highlights
