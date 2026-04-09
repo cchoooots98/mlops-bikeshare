@@ -47,8 +47,8 @@ Station markers colored by stockout probability. Red = critical risk, orange = a
 ### Top-Risk Stations
 
 Operator ranking table for the selected target (`bikes` or `docks`). Stations are ordered by 30-minute stockout probability, then by lower current target inventory, then by higher capacity; stations with `capacity <= 0` are excluded from the final table.
-![Bike Top-Risk Stations](reports\fig\2026-03-24-paris\bikes_top_station.png)
-![Dock Top-Risk Stations](reports\fig\2026-03-24-paris\docks_top_station.png)
+![Bike Top-Risk Stations](reports/fig/2026-03-24-paris/bikes_top_station.png)
+![Dock Top-Risk Stations](reports/fig/2026-03-24-paris/docks_top_station.png)
 ### Prediction Quality
 
 Rolling PR-AUC, F1, precision, and recall from the 30-minute quality backfill loop.
