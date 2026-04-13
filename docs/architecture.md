@@ -89,8 +89,12 @@ flowchart TD
     end
 
     subgraph ORCH["Orchestration  (Apache Airflow 2.10.3 · CeleryExecutor)"]
-        T1["Tier-1 Worker (concurrency=2)\nHotpath jobs\n• gbfs_ingestion_dag (5 min)\n• dbt_station_status_hotpath_dag\n• serving DAGs (15 min)"]
-        T2["Tier-2 Worker (concurrency=1)\nBatch jobs\n• weather / holiday ingestion\n• dbt_feature_build_dag (1 hr)\n• quality, PSI, retraining"]
+        W_CORE["worker-core (queue: core_5m)\ngbfs_station_status · dbt_hotpath · dbt_feature"]
+        W_WEATHER["worker-weather (queue: weather_10m)\nweather_ingest · dbt_weather_refresh"]
+        W_SERVING["worker-serving (queue: serving_rt)\nserving_prediction"]
+        W_OBS["worker-obs (queue: obs_main)\nserving_quality · serving_metrics"]
+        W_PSI["worker-psi (queue: obs_psi)\nserving_psi"]
+        W_SIDECAR["worker-sidecar (queue: daily_sidecar)\ngbfs_info · topology · diagnostic · quality_hourly · holiday · retraining"]
         RDS["Redis\nCelery message broker"]
     end
 
@@ -115,9 +119,11 @@ flowchart TD
     FEAT_ON --> PSI --> CW
     CW --> APP
 
-    T1 & T2 <--> RDS
-    T1 --> GI & DBT & LMB
-    T2 --> HI & DBT
+    W_CORE & W_WEATHER & W_SERVING & W_OBS & W_PSI & W_SIDECAR <--> RDS
+    W_CORE --> GI & DBT
+    W_WEATHER --> WI & DBT
+    W_SERVING --> LMB
+    W_OBS & W_PSI --> CW
 ```
 
 ### Diagram 2 — Data Pipeline Flow
@@ -252,11 +258,15 @@ flowchart TD
     subgraph EC2["AWS EC2 (always-on)"]
         direction TB
         DC_E["Docker Compose\n(no local overrides)"]
-        subgraph AIRFLOW_E["Airflow 2.10.3 · CeleryExecutor"]
+        subgraph AIRFLOW_E["Airflow 2.10.3 · CeleryExecutor · 6 queues"]
             WEB["Webserver :8080"]
             SCH["Scheduler"]
-            W1["Worker Tier-1\nconcurrency=2\nhotpath + serving"]
-            W2["Worker Tier-2\nconcurrency=1\nbatch + quality"]
+            WC["worker-core\ncore_5m queue"]
+            WW["worker-weather\nweather_10m queue"]
+            WS["worker-serving\nserving_rt queue"]
+            WO["worker-obs\nobs_main queue"]
+            WP["worker-psi\nobs_psi queue"]
+            WSC["worker-sidecar\ndaily_sidecar queue"]
         end
         REDIS_E["Redis\nCelery broker"]
         PG_E["PostgreSQL 15\ndata warehouse +\nAirflow metadata"]
