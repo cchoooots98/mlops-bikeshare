@@ -39,11 +39,7 @@ Use it to answer one question quickly: which document should I open next?
 - [security.md](security.md): secrets, IAM, Terraform backend, and compliance posture
 - [cicd.md](cicd.md): CI/CD pipeline and packaging flow
 
-## Internal Notes
 
-Use `docs/plan_detail/` for owner-operator working material only.
-
-Historical plans in that folder are background context, not current execution entrypoints.
 
 ## File Structure
 
